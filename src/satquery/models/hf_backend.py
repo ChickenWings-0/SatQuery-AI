@@ -124,9 +124,12 @@ class HuggingFaceBackend(LazyBackend):
 
         self._torch = torch
         self._model = model
-        self._processor = transformers.AutoProcessor.from_pretrained(
-            self.source, local_files_only=True
-        )
+        # Bound through an explicitly Any local: transformers is an optional
+        # extra, so its symbols are typed on a serving box and Any on one that
+        # never installed it. Calling through Any is silent under both, where an
+        # inline ignore would be needed on the first and unused on the second.
+        auto_processor: Any = transformers.AutoProcessor
+        self._processor = auto_processor.from_pretrained(self.source, local_files_only=True)
 
         # The estimate above sized the load; this checks what it actually cost,
         # because a guard that is never reconciled against reality is decoration.

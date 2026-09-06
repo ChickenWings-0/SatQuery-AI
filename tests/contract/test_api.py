@@ -16,6 +16,8 @@ from fastapi.testclient import TestClient
 
 from satquery.api.app import TRACE_ID_HEADER, app
 from satquery.api.dependencies import get_artifact_store, get_trace_store
+from satquery.core.config import get_settings
+from satquery.registry.registry import default_registry
 from satquery.render.artifact_store import ArtifactStore
 from satquery.schemas.api import (
     AnalyzeResponse,
@@ -233,7 +235,34 @@ def test_mixed_georeferencing_is_a_422(client: TestClient, upload_files) -> None
 
 
 @pytest.fixture
-def analyze_client(tmp_path: Path) -> Iterator[TestClient]:
+def deterministic_only(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Pin the analyze contract tests to the deterministic-only baseline.
+
+    These tests assert what *our* handlers do — a skipped VLM step, a templated
+    answer, a fully cited trace. Whether the VLM step runs is decided by
+    ``catalog.vlm_servable()``, which probes the machine: on a box where the
+    Qwen weights have since been downloaded, the same assertions start
+    describing a live 8B generation instead, and the contract suite becomes both
+    slow and nondeterministic. ``SATQUERY_VLM_DISABLED`` is the switch the
+    settings already document for exactly this ("the deterministic-only
+    baseline"), so the tests state their premise rather than inheriting it from
+    whatever happens to be in the HF cache.
+
+    Both caches are cleared on the way in and on the way out: the registry and
+    the settings are process-wide singletons, so a test that changes the
+    environment without clearing them changes nothing, and one that clears only
+    on entry leaks the pin into every test that follows.
+    """
+    monkeypatch.setenv("SATQUERY_VLM_DISABLED", "true")
+    get_settings.cache_clear()
+    default_registry.cache_clear()
+    yield
+    get_settings.cache_clear()
+    default_registry.cache_clear()
+
+
+@pytest.fixture
+def analyze_client(tmp_path: Path, deterministic_only: None) -> Iterator[TestClient]:
     """A client whose artifact and trace stores are scoped to one test."""
     artifacts = ArtifactStore(tmp_path / "artifacts")
     traces = TraceStore(tmp_path / "traces.sqlite3")
@@ -325,8 +354,10 @@ def test_analyze_records_a_tool_failure_as_200_not_500(
     result = AnalyzeResponse.model_validate(response.json())
     assert result.trace is not None
     statuses = {execution.status for execution in result.trace.executions}
-    # The VLM has no weights in Phase 3, so its step is skipped and the answer
-    # is templated — visibly, in the trace, at a reduced confidence.
+    # The VLM is pinned off for this test (see `deterministic_only`), so its step
+    # is skipped and the answer is templated — visibly, in the trace, at a
+    # reduced confidence. That degraded mode is part of the contract, and it is
+    # what a machine with no weights does on its own.
     assert ToolStatus.SKIPPED in statuses
     assert result.confidence.overall < 1.0
 

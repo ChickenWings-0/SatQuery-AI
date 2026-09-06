@@ -1,12 +1,29 @@
-"""Shared fixtures: the synthetic raster corpus every ingestion test reads."""
+"""Shared fixtures: the synthetic raster corpus every ingestion test reads.
+
+The suite also pins itself to the deterministic-only baseline here, before any
+``satquery`` module is imported. Tool availability is probed from the machine —
+``catalog.vlm_servable()`` asks whether a backend could answer a prompt — so once
+the Qwen weights land in the HF cache, tests written against the templated,
+tool-driven path silently start exercising a live 8B generation instead. That
+turns assertions about *our* code into assertions about the model's prose: a
+scene description acquires an uncited number, a skipped step becomes an OK one,
+and two identical requests stop producing identical params. It also takes the
+suite from seconds to minutes.
+
+``setdefault`` rather than an unconditional set: a run that deliberately exports
+``SATQUERY_VLM_DISABLED=false`` to exercise the served path keeps its choice.
+"""
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 
-import pytest
+os.environ.setdefault("SATQUERY_VLM_DISABLED", "true")
+
+import pytest  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 

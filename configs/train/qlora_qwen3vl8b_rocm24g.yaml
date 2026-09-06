@@ -1,0 +1,67 @@
+# Profile A (default) — DATA_ADAPTATION_PLAN §6.1.
+# QLoRA on Qwen3-VL-8B-Instruct, 24 GB gfx1100 (RX 7900 XTX), ROCm.
+# Expected: ~5.5 GB quantised weights, ~50 M trainable params, ~200 MB adapter,
+# peak 18-21 GB of 24 GB. If bitsandbytes NF4 misbehaves on gfx1100, switch to
+# configs/train/lora_qwen3vl4b_bf16.yaml — a config change, not a rewrite.
+
+run_name: sq-lora-v1
+base_model: Qwen/Qwen3-VL-8B-Instruct
+attn_implementation: sdpa          # flash-attn CK is unreliable on gfx1100
+torch_dtype: bfloat16
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules_llm: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  target_modules_vision: [qkv, proj, fc1, fc2]
+  vision_blocks: last_8            # ViT adaptation is what teaches SAR/index semantics
+
+data:
+  corpus: data/processed/corpus/train.jsonl
+  val: data/processed/corpus/val.jsonl
+  max_views_per_sample: 6
+  view_size_px: 448                # views are still rendered and stored at 448
+  # 384*384 per view. The dominant VRAM knob, and §6.3's second: the vision
+  # tower's attention is quadratic in patches, so this term fell from 7.0 GiB to
+  # 4.4 GiB and the predicted peak from 21.5 to 17.2 — a real margin under the
+  # 22 GiB guard, where the measured sanity run had 0.5 GiB. All six views are
+  # kept; only their resolution moves. Qwen3-VL merges patches 2x2, so the side
+  # must be a multiple of 32: 384, 416 and 448 are the neighbouring choices, and
+  # 416 lands at 19.05 GiB, which is the line rather than a margin.
+  max_pixels: 147456
+  max_seq_len: 4096
+
+train:
+  # Already at the floor: a per-device batch of 1 cannot be halved, so the
+  # headroom for the full corpus comes from max_pixels above instead. The
+  # accumulation stays at 16 because doubling it without halving the batch would
+  # change the effective batch from 16 to 32 — a different optimisation recipe
+  # (§6.1), not a memory saving.
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16  # effective batch 16
+  gradient_checkpointing: true
+  num_train_epochs: 1
+  learning_rate: 1.0e-4
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  optim: paged_adamw_8bit
+  max_grad_norm: 1.0
+  bf16: true
+  seed: 42
+  dataloader_num_workers: 8        # 16 logical cores, leave headroom
+  save_steps: 250
+  eval_steps: 250
+  logging_steps: 10
+  resume_from_checkpoint: auto
+
+env:
+  HIP_VISIBLE_DEVICES: "0"         # hide the 7800X3D iGPU — critical
+  ROCR_VISIBLE_DEVICES: "0"
+  PYTORCH_HIP_ALLOC_CONF: "expandable_segments:True"

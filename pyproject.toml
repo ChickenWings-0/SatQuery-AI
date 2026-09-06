@@ -32,6 +32,22 @@ vlm = [
     "transformers>=4.57.0",
 ]
 
+# The Phase 7 VLM adaptation stack. Nothing in the serving path or the test
+# suite imports it: satquery.training.vlm defers every one of these to the
+# function body that needs it, so a checkout without them still type-checks and
+# still runs 400+ tests. Install on the training box with
+# `uv sync --extra vlm-train`.
+vlm-train = [
+    "accelerate>=1.11.0",
+    "bitsandbytes>=0.48.0",
+    "datasets>=4.0.0",
+    "peft>=0.17.0",
+    "tensorboard>=2.19.0",
+    "torch>=2.6.0",
+    "transformers>=4.57.0",
+    "trl>=0.24.0",
+]
+
 # The change-detection training stack. Serving a trained checkpoint needs only
 # torch (through `vlm`, or on its own): tools/change_detect.py never imports
 # Lightning or torchgeo, so a deployment box does not carry a trainer.
@@ -119,3 +135,12 @@ disallow_untyped_calls = false
 module = ["torchgeo.*", "lightning.*", "pytorch_lightning.*", "torchvision.*"]
 ignore_missing_imports = true
 disallow_untyped_calls = false
+
+# Phase 7's training stack (`uv sync --extra vlm-train`). peft, trl, datasets and
+# bitsandbytes are imported inside function bodies in satquery.training.vlm, so a
+# checkout that only serves — or only runs the tests — must still type-check.
+[[tool.mypy.overrides]]
+module = ["peft.*", "trl.*", "datasets.*", "bitsandbytes.*"]
+ignore_missing_imports = true
+implicit_reexport = true
+

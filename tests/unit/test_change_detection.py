@@ -35,6 +35,7 @@ from satquery.render.overlays import CHANGE_ALPHA, CHANGE_COLOUR
 from satquery.render.tiling import PadExtent, ViewGeometry
 from satquery.schemas.enums import ArtifactType, PairType, ToolStatus
 from satquery.tools.base import Bands, ClassMap, MaskPayload, ToolContext, ToolResult
+from satquery.tools.catalog import VLM_TOOLS
 from satquery.tools.change_common import basemap_for, change_drafts
 from satquery.tools.change_statistics import ChangeStatistics, per_class_change
 from satquery.tools.tiled_inference import (
@@ -543,8 +544,14 @@ def test_a_trained_detector_feeds_real_areas_into_the_fact_sheet(
                 ingest=result,
             ),
             store=ArtifactStore(tmp_path / "artifacts"),
+            # The detector is forced on because this test supplies a stub for it;
+            # the VLM tools are forced off for the same reason the contract tests
+            # pin them off — with the Qwen weights on the machine, the answer
+            # below becomes a live generation, and the "every number is bound to
+            # a measurement" assertion at the end starts describing the model's
+            # prose rather than our templating.
             registry=default_registry().with_availability(
-                {"siamese_change_detector": True}
+                {"siamese_change_detector": True, **dict.fromkeys(VLM_TOOLS, False)}
             ),
             tools={"siamese_change_detector": StubDetector()},
             cache=ExecutionCache(),
@@ -579,14 +586,33 @@ def test_the_detector_is_symmetric_in_its_two_epochs() -> None:
 
     Concatenation would let the model learn acquisition order as a shortcut, which
     on 637 training tiles it reliably does.
+
+    Run in float64, on the CPU, from a forked RNG seeded here.
+
+    The symmetry is exact — in float64 the two orderings agree to the last bit —
+    so this asserts the architectural property rather than a tolerance. In
+    float32 the same comparison is only approximate, and *how* approximate
+    depends on which weights were drawn: most initialisations agree exactly,
+    while some (seed 0, for one) differ by ~1.2e-3. An unseeded test therefore
+    passed or failed on the luck of the draw, which says nothing about whether
+    the epochs are handled symmetrically.
+
+    The RNG is forked and the default device forced, because both are global: by
+    the time this runs, another test may have loaded a model and left the
+    default device or the generator somewhere else, and the initialisation this
+    test believes it pinned would quietly be a different one.
     """
     from satquery.training.cd.model import build_detector
 
-    model = build_detector(pretrained=False).eval()
-    pre = torch.rand(2, 3, 128, 128)
-    post = torch.rand(2, 3, 128, 128)
-    with torch.no_grad():
-        assert torch.allclose(model(pre, post), model(post, pre), atol=1e-5)
+    with torch.random.fork_rng(devices=[]), torch.device("cpu"):
+        torch.manual_seed(42)
+        model = build_detector(pretrained=False).double().eval()
+        pre = torch.rand(2, 3, 128, 128, dtype=torch.float64)
+        post = torch.rand(2, 3, 128, 128, dtype=torch.float64)
+        with torch.no_grad():
+            forward, reversed_ = model(pre, post), model(post, pre)
+
+    assert torch.allclose(forward, reversed_, atol=1e-9)
 
 
 def test_the_logits_come_back_on_the_grid_they_went_in_on() -> None:

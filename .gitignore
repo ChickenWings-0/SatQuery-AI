@@ -27,7 +27,16 @@ data/*
 *.log
 
 # =========================
-# 4. ML Models & Datasets
+# 4. Training Runs & Logs
+# =========================
+# Adapter checkpoints, the merged export, and each run's manifest. A ~200 MB
+# adapter per save x ~20 saves is not what a git history is for; the adapter
+# that ships gets versioned in the registry (Master.md §8 Phase 7), not here.
+runs/
+logs/
+
+# =========================
+# 5. ML Models & Datasets
 # =========================
 checkpoints/
 *.ckpt
@@ -39,7 +48,7 @@ checkpoints/
 datasets/
 
 # =========================
-# 5. Secrets & IDEs
+# 6. Secrets & IDEs
 # =========================
 .env
 .env.local

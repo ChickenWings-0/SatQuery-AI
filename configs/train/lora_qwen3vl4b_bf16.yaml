@@ -1,0 +1,57 @@
+# Profile B (fallback) — DATA_ADAPTATION_PLAN §6.2.
+# Use when bitsandbytes NF4 misbehaves on gfx1100 (Master.md §9, risk row 3).
+# ~8 GB bf16 weights, comfortable in 24 GB. Deltas from Profile A only.
+
+run_name: sq-lora-v1-4b
+base_model: Qwen/Qwen3-VL-4B-Instruct
+attn_implementation: sdpa
+torch_dtype: bfloat16
+
+quantization:
+  load_in_4bit: false
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules_llm: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  target_modules_vision: [qkv, proj, fc1, fc2]
+  vision_blocks: last_8
+
+data:
+  corpus: data/processed/corpus/train.jsonl
+  val: data/processed/corpus/val.jsonl
+  max_views_per_sample: 6
+  view_size_px: 448
+  max_pixels: 147456              # matches Profile A (§6.3 knob 2)
+  # §6.3 knob 3. Profile B holds its 4B backbone in bf16 rather than NF4, so it
+  # spends 7.5 GiB on weights where Profile A spends 4.8; at 4096 it estimates
+  # 19.9 GiB, which is inside the 22 GiB guard but outside the 19 GiB margin. A
+  # fallback that only just fits is not a fallback.
+  max_seq_len: 3072
+
+train:
+  # Halved from 2, with accumulation doubled from 8 to keep the effective batch
+  # at 16. Activations scale with the per-device batch, so this is the direct
+  # saving Profile A could not make.
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+  gradient_checkpointing: true
+  num_train_epochs: 1
+  learning_rate: 1.0e-4
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  optim: adamw_torch_fused
+  max_grad_norm: 1.0
+  bf16: true
+  seed: 42
+  dataloader_num_workers: 8
+  save_steps: 250
+  eval_steps: 250
+  logging_steps: 10
+  resume_from_checkpoint: auto
+
+env:
+  HIP_VISIBLE_DEVICES: "0"
+  ROCR_VISIBLE_DEVICES: "0"
+  PYTORCH_HIP_ALLOC_CONF: "expandable_segments:True"

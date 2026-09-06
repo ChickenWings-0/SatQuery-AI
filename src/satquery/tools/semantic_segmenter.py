@@ -163,7 +163,8 @@ class SegformerSegmenter:
                     f"could not load a segmentation checkpoint from "
                     f"{self.checkpoint!r}: {error}"
                 ) from error
-            model.eval().to(self.device)
+            loaded: Any = model  # torch is an optional extra; see hf_backend.
+            loaded.eval().to(self.device)
             self._model, self._torch = model, torch
             return model, torch
 

@@ -142,7 +142,8 @@ def _scene(seed: int, size: int = TILE_PX) -> np.ndarray:
 
     stack = np.stack([red, green, blue])
     stack += rng.normal(0.0, 0.012, stack.shape).astype(np.float32)
-    return np.clip(stack, 0.0, 1.0)
+    clipped: np.ndarray = np.clip(stack, 0.0, 1.0)
+    return clipped
 
 
 MOCK_QUESTIONS: Final[tuple[tuple[str, str], ...]] = (

@@ -24,6 +24,7 @@ architecture, and bf16's exponent range is the whole reason it does not.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any, Final
 
 import torch
@@ -91,23 +92,25 @@ class ConfusionCounts:
 
 
 def _lightning() -> Any:
-    """Import Lightning, saying plainly what to install when it is absent.
+    """Import Lightning under either of the names it has shipped as.
+
+    Resolved by name rather than by two ``import ... as pl`` statements: binding
+    one alias twice is a redefinition, which mypy reports as soon as Lightning is
+    actually installed, and suppressing that would leave an ignore comment that
+    is itself unused on a checkout without the ``cd`` extra.
 
     Raises:
-        ImportError: Lightning is not installed.
+        ImportError: Neither package name is installed.
     """
-    try:
-        import lightning.pytorch as pl
-    except ImportError:
+    for name in ("lightning.pytorch", "pytorch_lightning"):
         try:
-            import pytorch_lightning as pl
-        except ImportError as error:
-            raise ImportError(
-                "PyTorch Lightning is required to train. Install it with "
-                "`uv sync --extra cd`. Serving a trained checkpoint does not "
-                "need it."
-            ) from error
-    return pl
+            return import_module(name)
+        except ImportError:
+            continue
+    raise ImportError(
+        "PyTorch Lightning is required to train. Install it with "
+        "`uv sync --extra cd`. Serving a trained checkpoint does not need it."
+    )
 
 
 def build_task(
