@@ -1,0 +1,24 @@
+# Cross-tool agreement pairs — AGENT_POLICY_DAG.md §7.2 (frozen set).
+#
+# Two independent tools measuring the same physical quantity is the only
+# evidence the system has that a number is real rather than an artefact of one
+# estimator. `scale` is the disagreement at which agreement reaches zero, in the
+# units of the scalars themselves.
+version: "1.0"
+
+pairs:
+  - a: siamese_change_detector.changed_area_pct
+    b: image_diff_change.changed_area_pct
+    scale: 15.0
+  - a: spectral_index_analyzer.built_up_fraction_pct
+    b: change_statistics.changed_area_pct
+    scale: 20.0
+  - a: crossmodal_consistency.agreement_mean
+    b: physics_agreement.agreement_score
+    scale: 0.50
+  - a: semantic_segmenter.water_fraction_pct
+    b: spectral_index_analyzer.water_fraction_pct
+    scale: 10.0
+  - a: object_counter.count
+    b: text_grounding.n_boxes
+    scale: 3.0

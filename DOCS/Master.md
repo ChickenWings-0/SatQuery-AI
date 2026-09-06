@@ -131,22 +131,27 @@ Pydantic v2. These are frozen at the end of Phase 0 and are the frontend contrac
 ### 4.1 `InputManifest`
 ```python
 class InputManifest(BaseModel):
-    id: str                      # "img_0"
-    role: Literal["single","pre","post","optical","sar"] | None
-    filename: str; sha256: str; size_bytes: int
-    driver: str                  # "GTiff" | "PNG" | ...
-    modality: Literal["optical","sar","panchromatic","unknown"]
+    id: str  # "img_0"
+    role: Literal["single", "pre", "post", "optical", "sar"] | None
+    filename: str
+    sha256: str
+    size_bytes: int
+    driver: str  # "GTiff" | "PNG" | ...
+    modality: Literal["optical", "sar", "panchromatic", "unknown"]
     modality_confidence: float
-    sensor_guess: str | None     # "Sentinel-2 L2A" | "Cartosat-2S" | "RISAT-1"
-    crs: str | None              # "EPSG:32643"
-    transform: list[float] | None                 # 6-tuple affine
+    sensor_guess: str | None  # "Sentinel-2 L2A" | "Cartosat-2S" | "RISAT-1"
+    crs: str | None  # "EPSG:32643"
+    transform: list[float] | None  # 6-tuple affine
     bounds_native: list[float] | None
     bounds_wgs84: list[float] | None
-    gsd_m: float | None; width: int; height: int
-    band_count: int; dtype: str
-    band_names: list[str] | None                  # ["B02","B03",...] | ["VV","VH"]
+    gsd_m: float | None
+    width: int
+    height: int
+    band_count: int
+    dtype: str
+    band_names: list[str] | None  # ["B02","B03",...] | ["VV","VH"]
     nodata_pct: float
-    acquisition_time: datetime | None             # from TIFF tags if present
+    acquisition_time: datetime | None  # from TIFF tags if present
     is_georeferenced: bool
     warnings: list[str]
 ```
@@ -154,45 +159,54 @@ class InputManifest(BaseModel):
 ### 4.2 `CompatibilityReport` (mandatory requirement 5)
 ```python
 class CheckResult(BaseModel):
-    name: str                    # "crs_match" | "bounds_overlap_iou" | "gsd_ratio"
-                                 # | "coregistration_offset_px" | "band_sufficiency"
-                                 # | "modality_distinct" | "temporal_ordering"
-    status: Literal["PASS","WARN","FAIL","SKIP"]
+    name: str  # "crs_match" | "bounds_overlap_iou" | "gsd_ratio"
+    # | "coregistration_offset_px" | "band_sufficiency"
+    # | "modality_distinct" | "temporal_ordering"
+    status: Literal["PASS", "WARN", "FAIL", "SKIP"]
     value: float | str | None
-    threshold: str | None        # "iou >= 0.80"
+    threshold: str | None  # "iou >= 0.80"
     detail: str
 
+
 class CompatibilityReport(BaseModel):
-    pair_type: Literal["SINGLE","CROSS_MODAL","BI_TEMPORAL","INCOMPATIBLE"]
-    pair_type_source: Literal["metadata","heuristic","user_declared"]
+    pair_type: Literal["SINGLE", "CROSS_MODAL", "BI_TEMPORAL", "INCOMPATIBLE"]
+    pair_type_source: Literal["metadata", "heuristic", "user_declared"]
     checks: list[CheckResult]
-    overall: Literal["PASS","PASS_WITH_WARNINGS","FAIL"]
-    actions_taken: list[str]     # "reprojected img_1 EPSG:4326→EPSG:32643 (bilinear)"
-                                 # "resampled img_1 20.0m→10.0m"
-                                 # "cropped both to intersection 1024x1024"
-    common_grid: dict | None     # {crs, transform, width, height, gsd_m}
+    overall: Literal["PASS", "PASS_WITH_WARNINGS", "FAIL"]
+    actions_taken: list[str]  # "reprojected img_1 EPSG:4326→EPSG:32643 (bilinear)"
+    # "resampled img_1 20.0m→10.0m"
+    # "cropped both to intersection 1024x1024"
+    common_grid: dict | None  # {crs, transform, width, height, gsd_m}
 ```
 
 ### 4.3 `ToolSpec` (registry entry) & `ToolResult`
 ```python
 class ToolSpec(BaseModel):
-    name: str; version: str; category: Literal["analysis","vlm","cv","geo","fusion"]
+    name: str
+    version: str
+    category: Literal["analysis", "vlm", "cv", "geo", "fusion"]
     description: str
-    accepts: InputContract       # pair_types[], modalities[], min/max images,
-                                 # required_bands[], gsd_range_m, min_size_px
-    produces: list[ArtifactType] # CHANGE_MASK | BBOX_SET | SEGMENTATION | HEATMAP
-                                 # | TEXT | SCALARS | OVERLAY_PNG | GEOJSON
-    scalars_schema: dict         # JSON-schema of the scalars it contributes to FactSheet
-    device: Literal["rocm","cpu","auto"]; est_ms: int
-    fallback: str | None         # name of a cheaper deterministic tool
+    accepts: InputContract  # pair_types[], modalities[], min/max images,
+    # required_bands[], gsd_range_m, min_size_px
+    produces: list[ArtifactType]  # CHANGE_MASK | BBOX_SET | SEGMENTATION | HEATMAP
+    # | TEXT | SCALARS | OVERLAY_PNG | GEOJSON
+    scalars_schema: dict  # JSON-schema of the scalars it contributes to FactSheet
+    device: Literal["rocm", "cpu", "auto"]
+    est_ms: int
+    fallback: str | None  # name of a cheaper deterministic tool
+
 
 class ToolResult(BaseModel):
-    tool: str; version: str; status: Literal["OK","DEGRADED","FAILED","SKIPPED"]
-    params: dict                 # exact execution parameters (auditable)
-    scalars: dict                # merged into FactSheet
+    tool: str
+    version: str
+    status: Literal["OK", "DEGRADED", "FAILED", "SKIPPED"]
+    params: dict  # exact execution parameters (auditable)
+    scalars: dict  # merged into FactSheet
     artifacts: list[ArtifactRef]
-    confidence: float; duration_ms: int
-    device_used: str; error: str | None
+    confidence: float
+    duration_ms: int
+    device_used: str
+    error: str | None
 ```
 
 ### 4.4 `AuditTrace` — the mandatory deliverable

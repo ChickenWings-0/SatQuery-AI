@@ -1,0 +1,131 @@
+# Labelled seed queries for the Stage C embedding kNN classifier (AGENT_POLICY_DAG.md §2, Stage C).
+{"query": "what changed between these two images", "task": "CHANGE_VQA"}
+{"query": "what is different between the two dates", "task": "CHANGE_VQA"}
+{"query": "what has appeared since the earlier acquisition", "task": "CHANGE_VQA"}
+{"query": "did anything disappear", "task": "CHANGE_VQA"}
+{"query": "how much has the city grown", "task": "CHANGE_VQA"}
+{"query": "what changed here", "task": "CHANGE_VQA"}
+{"query": "compare the before and after", "task": "CHANGE_VQA"}
+{"query": "what is new in the second image", "task": "CHANGE_VQA"}
+{"query": "has the lake shrunk", "task": "CHANGE_VQA"}
+{"query": "did the forest expand", "task": "CHANGE_VQA"}
+{"query": "what was removed between the two acquisitions", "task": "CHANGE_VQA"}
+{"query": "how much area changed", "task": "CHANGE_VQA"}
+{"query": "was anything built between these dates", "task": "CHANGE_VQA"}
+{"query": "what differs between the two scenes", "task": "CHANGE_VQA"}
+{"query": "did the built up area increase", "task": "CHANGE_VQA"}
+{"query": "how much vegetation was lost", "task": "CHANGE_VQA"}
+{"query": "what changed near the river", "task": "CHANGE_VQA"}
+{"query": "did the water body grow or shrink", "task": "CHANGE_VQA"}
+{"query": "what happened to the farmland between the two images", "task": "CHANGE_VQA"}
+{"query": "is there any new construction", "task": "CHANGE_VQA"}
+{"query": "describe what happened between the two dates", "task": "CHANGE_CAPTION"}
+{"query": "summarise the changes", "task": "CHANGE_CAPTION"}
+{"query": "narrate the difference between the two images", "task": "CHANGE_CAPTION"}
+{"query": "caption the change", "task": "CHANGE_CAPTION"}
+{"query": "give an overview of what changed", "task": "CHANGE_CAPTION"}
+{"query": "write a description of the change", "task": "CHANGE_CAPTION"}
+{"query": "summarize what is different across the pair", "task": "CHANGE_CAPTION"}
+{"query": "describe the transformation of this area", "task": "CHANGE_CAPTION"}
+{"query": "tell me the story of these two acquisitions", "task": "CHANGE_CAPTION"}
+{"query": "explain what happened here over time", "task": "CHANGE_CAPTION"}
+{"query": "show me a map of the changed areas", "task": "CHANGE_MAP"}
+{"query": "highlight the regions that changed", "task": "CHANGE_MAP"}
+{"query": "mask the changed pixels", "task": "CHANGE_MAP"}
+{"query": "where exactly did the change occur", "task": "CHANGE_MAP"}
+{"query": "show the area that changed", "task": "CHANGE_MAP"}
+{"query": "map the new construction", "task": "CHANGE_MAP"}
+{"query": "produce a change mask", "task": "CHANGE_MAP"}
+{"query": "highlight where the water expanded", "task": "CHANGE_MAP"}
+{"query": "show the changed footprint", "task": "CHANGE_MAP"}
+{"query": "map out the differences", "task": "CHANGE_MAP"}
+{"query": "how many buildings are there", "task": "COUNT"}
+{"query": "count the aircraft on the apron", "task": "COUNT"}
+{"query": "how many ships are in the harbour", "task": "COUNT"}
+{"query": "what is the number of vehicles", "task": "COUNT"}
+{"query": "count the water bodies", "task": "COUNT"}
+{"query": "how many houses can you see", "task": "COUNT"}
+{"query": "total of storage tanks in the scene", "task": "COUNT"}
+{"query": "how many planes are parked", "task": "COUNT"}
+{"query": "count the number of roads", "task": "COUNT"}
+{"query": "how many fields are visible", "task": "COUNT"}
+{"query": "where is the airport", "task": "GROUNDING"}
+{"query": "locate the reservoir", "task": "GROUNDING"}
+{"query": "find the largest building", "task": "GROUNDING"}
+{"query": "point to the runway", "task": "GROUNDING"}
+{"query": "give me a bounding box around the stadium", "task": "GROUNDING"}
+{"query": "where can I see the bridge", "task": "GROUNDING"}
+{"query": "locate the industrial zone", "task": "GROUNDING"}
+{"query": "find the river in this image", "task": "GROUNDING"}
+{"query": "where is the harbour", "task": "GROUNDING"}
+{"query": "point out the solar farm", "task": "GROUNDING"}
+{"query": "outline the water bodies", "task": "SEGMENTATION"}
+{"query": "segment the built up area", "task": "SEGMENTATION"}
+{"query": "delineate the forest", "task": "SEGMENTATION"}
+{"query": "what is the extent of the flooding", "task": "SEGMENTATION"}
+{"query": "give me the boundary of the lake", "task": "SEGMENTATION"}
+{"query": "segment vegetation from bare soil", "task": "SEGMENTATION"}
+{"query": "outline the agricultural fields", "task": "SEGMENTATION"}
+{"query": "delineate the urban footprint", "task": "SEGMENTATION"}
+{"query": "extent of the burnt area", "task": "SEGMENTATION"}
+{"query": "boundary of the reservoir", "task": "SEGMENTATION"}
+{"query": "what land cover types are present", "task": "SCENE_CLASSIFY"}
+{"query": "classify this scene", "task": "SCENE_CLASSIFY"}
+{"query": "what kind of area is this", "task": "SCENE_CLASSIFY"}
+{"query": "what type of terrain is shown", "task": "SCENE_CLASSIFY"}
+{"query": "is this urban or rural", "task": "SCENE_CLASSIFY"}
+{"query": "land use classification for this tile", "task": "SCENE_CLASSIFY"}
+{"query": "what land cover dominates", "task": "SCENE_CLASSIFY"}
+{"query": "what kind of region does this image cover", "task": "SCENE_CLASSIFY"}
+{"query": "classify the land use here", "task": "SCENE_CLASSIFY"}
+{"query": "what categories describe this scene", "task": "SCENE_CLASSIFY"}
+{"query": "describe this scene", "task": "CAPTION"}
+{"query": "caption this image", "task": "CAPTION"}
+{"query": "summarise what you see", "task": "CAPTION"}
+{"query": "give me an overview of this image", "task": "CAPTION"}
+{"query": "what does this image show", "task": "CAPTION"}
+{"query": "write a short description of this scene", "task": "CAPTION"}
+{"query": "describe the landscape", "task": "CAPTION"}
+{"query": "tell me about this area", "task": "CAPTION"}
+{"query": "summarize the contents of this tile", "task": "CAPTION"}
+{"query": "what is depicted here", "task": "CAPTION"}
+{"query": "what does the SAR show that the optical misses", "task": "CROSS_MODAL_COMPARE"}
+{"query": "compare the radar and the optical view", "task": "CROSS_MODAL_COMPARE"}
+{"query": "how do the two sensors differ here", "task": "CROSS_MODAL_COMPARE"}
+{"query": "what is visible in microwave but not in visible light", "task": "CROSS_MODAL_COMPARE"}
+{"query": "does the backscatter agree with the spectral signature", "task": "CROSS_MODAL_COMPARE"}
+{"query": "contrast the radar image with the multispectral one", "task": "CROSS_MODAL_COMPARE"}
+{"query": "where do optical and SAR disagree", "task": "CROSS_MODAL_COMPARE"}
+{"query": "what extra detail does radar give", "task": "CROSS_MODAL_COMPARE"}
+{"query": "compare visible and microwave observations", "task": "CROSS_MODAL_COMPARE"}
+{"query": "is the optical consistent with the radar", "task": "CROSS_MODAL_COMPARE"}
+{"query": "how do the two sensors complement each other", "task": "CROSS_MODAL_VQA"}
+{"query": "combine both sensors to describe this area", "task": "CROSS_MODAL_VQA"}
+{"query": "fuse the radar and optical evidence", "task": "CROSS_MODAL_VQA"}
+{"query": "what do both sensors together tell us", "task": "CROSS_MODAL_VQA"}
+{"query": "using both images what is this area", "task": "CROSS_MODAL_VQA"}
+{"query": "together what do these acquisitions show", "task": "CROSS_MODAL_VQA"}
+{"query": "combine the modalities and answer", "task": "CROSS_MODAL_VQA"}
+{"query": "what can we learn from both sensors", "task": "CROSS_MODAL_VQA"}
+{"query": "use radar and optical together", "task": "CROSS_MODAL_VQA"}
+{"query": "what do the two sensors jointly indicate", "task": "CROSS_MODAL_VQA"}
+{"query": "is there water in this image", "task": "VQA"}
+{"query": "what is the dominant surface type", "task": "VQA"}
+{"query": "does this area look developed", "task": "VQA"}
+{"query": "how much of the scene is vegetated", "task": "VQA"}
+{"query": "is the terrain flat", "task": "VQA"}
+{"query": "are there clouds in this image", "task": "VQA"}
+{"query": "what is the brightest feature", "task": "VQA"}
+{"query": "does this look like farmland", "task": "VQA"}
+{"query": "is there any infrastructure visible", "task": "VQA"}
+{"query": "what season does this look like", "task": "VQA"}
+{"query": "is the river full", "task": "VQA"}
+{"query": "does the soil look dry", "task": "VQA"}
+{"query": "is this a coastal area", "task": "VQA"}
+{"query": "how built up is this tile", "task": "VQA"}
+{"query": "are the fields irrigated", "task": "VQA"}
+{"query": "is there snow on the ground", "task": "VQA"}
+{"query": "does the vegetation look healthy", "task": "VQA"}
+{"query": "is the water clear or turbid", "task": "VQA"}
+{"query": "are there any large open spaces", "task": "VQA"}
+{"query": "what proportion of the image is water", "task": "VQA"}

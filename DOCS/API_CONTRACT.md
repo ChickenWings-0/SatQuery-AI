@@ -191,7 +191,7 @@ One per uploaded image. Produced by Phase 1.
 |---|---|---|---|
 | `id` | string | no | `art_0`, … |
 | `type` | `ArtifactType` | no | |
-| `mime` | string | no | `image/png`, `image/tiff`, `application/geo+json`, `application/json` |
+| `mime` | string | no | `image/png`, `image/jpeg`, `image/tiff`, `application/geo+json`, `application/json` |
 | `label` | string | no | display name, e.g. `"Change mask (binary)"`, `"Image 3 (optical NDVI)"` |
 | `url` | string | yes | primary render; `null` for `SCALARS`/`TEXT` |
 | `geotiff_url` | string | yes | georeferenced companion, when applicable |
@@ -406,7 +406,7 @@ Ingestion + compatibility only. No tools run, no GPU touched. Cheap pre-flight f
 
 ### 4.6 `GET /v1/artifacts/{trace_id}/{artifact_id}.{ext}`
 
-`ext` in `png` · `tif` · `geojson` · `json`. Returns raw bytes with the correct `Content-Type`.
+`ext` in `png` · `jpg` · `tif` · `geojson` · `json`. Returns raw bytes with the correct `Content-Type`. (`jpg` was added in Phase 2 — see §9 row 11.)
 Headers: `Cache-Control: public, max-age=31536000, immutable` (artifacts are content-addressed and never mutate), `ETag`.
 `404` if unknown; `410` if the trace has been evicted.
 
@@ -553,3 +553,4 @@ Recorded so the delta is reviewable rather than silent. Nothing here contradicts
 | 8 | `ArtifactRef.inline` | Not specified | **Added** | Boxes and scalars are small; a second HTTP round trip per box set is wasteful. |
 | 9 | `available` on `ToolSpec` | Not specified | **Added** | The registry is served live; a tool whose weights are absent must be visibly disabled, not silently missing. |
 | 10 | Percent convention | Mixed in examples | Fixed: `_pct` is always 0-100 | `changed_area_pct: 7.4` in §4.4 confirms this reading. |
+| 11 | Artifact extension `jpg` | §4.6 listed `png` · `tif` · `geojson` · `json`; §3.4's `mime` list omitted `image/jpeg` | **Added** `jpg` / `image/jpeg` to both lists (additive within `1.0`) | `DATA_ADAPTATION_PLAN.md` §2.1 mandates JPEG q92 for the reflectance composites (`TC`, `FCIR`, `SWIR`, `SARFC`, `PAN`) and PNG only for measurement views. Serving those composites requires the extension. Index, SAR and change views remain PNG — that half of the rule is load-bearing and unchanged. |

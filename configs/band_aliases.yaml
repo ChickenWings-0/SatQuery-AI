@@ -1,0 +1,38 @@
+# Band alias map — the canonical table of DOCS/DATA_ADAPTATION_PLAN.md §2.2.
+#
+# One source of truth, shared verbatim by capability matching
+# (AGENT_POLICY_DAG.md §5) and the renderer. Band numbers are 1-INDEXED.
+# A band a sensor does not carry is simply absent: unavailability is explicit
+# and is never silently substituted.
+version: "1.0"
+
+sensors:
+  "Sentinel-2 (BigEarthNet-v2, 12-band)":
+    bands: {blue: 2, green: 3, red: 4, nir: 8, swir1: 11, swir2: 12}
+
+  "Sentinel-2 L2A":
+    bands: {blue: 2, green: 3, red: 4, nir: 8, swir1: 12, swir2: 13}
+
+  "Sentinel-1 GRD":
+    bands: {vv: 1, vh: 2}
+
+  "Cartosat-2S MX":
+    # No SWIR: NDBI and the SWIR composite are unavailable, by design.
+    bands: {blue: 1, green: 2, red: 3, nir: 4}
+
+  "Cartosat-2S PAN":
+    bands: {pan: 1}
+
+  "RISAT-1":
+    bands: {vv: 1}
+
+  "Generic RGB":
+    # Benchmark PNG/JPEG path: channel order is R,G,B as stored.
+    bands: {red: 1, green: 2, blue: 3}
+
+# Used when no sensor fingerprint matched, keyed by band count.
+fallback_by_band_count:
+  1: {pan: 1}
+  2: {vv: 1, vh: 2}
+  3: {red: 1, green: 2, blue: 3}
+  4: {blue: 1, green: 2, red: 3, nir: 4}

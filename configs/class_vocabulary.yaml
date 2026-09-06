@@ -1,0 +1,98 @@
+# Controlled land-cover / object vocabulary — AGENT_POLICY_DAG.md §3.
+#
+# Slot values are normalised onto these canonical terms before reaching the
+# planner, so a threshold decision never depends on which synonym the user
+# happened to type. An unmappable term is kept verbatim, passed to the VLM only,
+# and never used for a threshold decision.
+version: "1.0"
+
+classes:
+  built_up:
+    - built up
+    - built-up
+    - building
+    - buildings
+    - urban
+    - urban area
+    - urban areas
+    - settlement
+    - settlements
+    - houses
+    - construction
+    - impervious
+    - developed land
+  water:
+    - water
+    - water body
+    - water bodies
+    - waterbody
+    - lake
+    - lakes
+    - river
+    - rivers
+    - reservoir
+    - pond
+    - flooding
+    - flooded area
+  vegetation:
+    - vegetation
+    - vegetated
+    - green cover
+    - forest
+    - forests
+    - trees
+    - tree cover
+    - crop
+    - crops
+    - cropland
+    - farmland
+    - agriculture
+    - agricultural land
+  bare_soil:
+    - bare soil
+    - bare ground
+    - barren
+    - barren land
+    - soil
+    - sand
+    - desert
+  road:
+    - road
+    - roads
+    - highway
+    - highways
+    - street
+    - streets
+    - runway
+    - runways
+  aircraft:
+    - aircraft
+    - airplane
+    - airplanes
+    - plane
+    - planes
+    - jet
+    - jets
+  ship:
+    - ship
+    - ships
+    - boat
+    - boats
+    - vessel
+    - vessels
+  vehicle:
+    - vehicle
+    - vehicles
+    - car
+    - cars
+    - truck
+    - trucks
+  airport:
+    - airport
+    - airports
+    - airfield
+    - aerodrome
+  cloud:
+    - cloud
+    - clouds
+    - cloud cover

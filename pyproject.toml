@@ -1,0 +1,121 @@
+[project]
+name = "satquery-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.141.1",
+    "geopandas>=1.1.4",
+    "opencv-python-headless>=5.0.0.93",
+    "pillow>=12.3.0",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "pyproj>=3.7.2",
+    "pyyaml>=6.0.3",
+    "rasterio>=1.4.4",
+    "rioxarray>=0.19.0",
+    "scikit-image>=0.26.0",
+    "shapely>=2.1.2",
+    "sse-starlette>=3.4.11",
+    "structlog>=26.1.0",
+]
+
+[project.optional-dependencies]
+# The transformers serving path. Not a base dependency: the deterministic layer,
+# the API and the whole test suite run without it, and pulling ~3 GB of ROCm
+# wheels into every environment to support one optional tool is the wrong
+# default. Install with `uv sync --extra vlm` on the machine that serves.
+vlm = [
+    "accelerate>=1.11.0",
+    "torch>=2.6.0",
+    "transformers>=4.57.0",
+]
+
+# The change-detection training stack. Serving a trained checkpoint needs only
+# torch (through `vlm`, or on its own): tools/change_detect.py never imports
+# Lightning or torchgeo, so a deployment box does not carry a trainer.
+cd = [
+    "lightning>=2.5.0",
+    "torch>=2.6.0",
+    "torchgeo>=0.7.0",
+    "torchvision>=0.21.0",
+]
+
+[project.scripts]
+satquery-ai = "satquery_ai:main"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.6",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    # Fixtures deliberately include a non-georeferenced PNG and an identity transform.
+    "ignore::rasterio.errors.NotGeoreferencedWarning",
+    "ignore:Use `@` matmul:PendingDeprecationWarning",
+]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N", "D"]
+ignore = ["D203", "D213", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D100", "D103"]
+# `import torch.nn.functional as F` is the PyTorch convention. Renaming it to
+# satisfy N812 would make the model read unlike every other PyTorch model.
+"src/satquery/training/*" = ["N812"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["satquery"]
+mypy_path = "src"
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+
+# Neither rasterio nor scikit-image ships type information, so their public API
+# is Any to mypy. Everything we build on top of them stays strictly typed.
+[[tool.mypy.overrides]]
+module = ["rasterio.*", "skimage.*", "affine.*", "yaml"]
+ignore_missing_imports = true
+disallow_untyped_calls = false
+
+# The serving stack is an optional extra (`uv sync --extra vlm`), so a checkout
+# that never serves a model must still type-check. Both are imported inside
+# function bodies and everything they return is handled as Any behind the
+# GenerationResult boundary.
+[[tool.mypy.overrides]]
+module = ["torch.*", "transformers.*"]
+ignore_missing_imports = true
+disallow_untyped_calls = false
+
+# The training and fusion stack is the `cd` extra. A deployment checkout carries
+# neither Lightning nor torchgeo — tools/crossmodal_dofa.py imports the latter
+# inside a function body precisely so that it does not have to — and must still
+# type-check, so the modules are declared missing rather than required.
+[[tool.mypy.overrides]]
+module = ["torchgeo.*", "lightning.*", "pytorch_lightning.*", "torchvision.*"]
+ignore_missing_imports = true
+disallow_untyped_calls = false

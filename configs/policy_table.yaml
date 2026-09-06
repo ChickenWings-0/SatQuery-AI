@@ -1,0 +1,350 @@
+# Deterministic policy table — AGENT_POLICY_DAG.md §4.
+#
+# policy_key = "{TaskType}|{PairType}|{ModalityKey}", resolved in this order:
+#   1. exact key   2. "{TaskType}|{PairType}|*"   3. "*|*|*" (generic, flagged)
+#
+# Steps are listed in topological order and numbered by position (1-indexed);
+# `depends_on` may only reference earlier steps. Input tokens: pre, post,
+# optical, sar, single, all, @N, @N:ARTIFACT_TYPE.
+#
+# `optional: false` marks a step whose outright failure is a 500 rather than a
+# degraded answer — currently only the renderer, without which there is no
+# evidence at all (§6.3).
+version: policy_table_v1
+
+entries:
+  # ------------------------------------------------------- 1-3  VQA / SINGLE
+
+  - key: "VQA|SINGLE|optical"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: raster_statistics, inputs: [single], depends_on: [1], params: {}}
+      - {tool: spectral_index_analyzer, inputs: [single], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi]}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2, 3],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+
+  - key: "VQA|SINGLE|sar"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: raster_statistics, inputs: [single], depends_on: [1], params: {}}
+      - {tool: sar_backscatter_analyzer, inputs: [single], depends_on: [1],
+         params: {water_threshold_db: -18.0}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2, 3],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+
+  - key: "VQA|SINGLE|panchromatic"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: raster_statistics, inputs: [single], depends_on: [1], params: {}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+
+  - key: "VQA|SINGLE|*"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: raster_statistics, inputs: [single], depends_on: [1], params: {}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+
+  # --------------------------------------------------- 4-6  CAPTION / SINGLE
+
+  - key: "CAPTION|SINGLE|optical"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: spectral_index_analyzer, inputs: [single], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi]}}
+      - {tool: vlm_caption, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: caption, max_new_tokens: 256, temperature: 0.0}}
+
+  - key: "CAPTION|SINGLE|sar"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: sar_backscatter_analyzer, inputs: [single], depends_on: [1],
+         params: {water_threshold_db: -18.0}}
+      - {tool: vlm_caption, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: caption, max_new_tokens: 256, temperature: 0.0}}
+
+  - key: "CAPTION|SINGLE|panchromatic"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: raster_statistics, inputs: [single], depends_on: [1], params: {}}
+      - {tool: vlm_caption, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: caption, max_new_tokens: 256, temperature: 0.0}}
+
+  - key: "CAPTION|SINGLE|*"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: raster_statistics, inputs: [single], depends_on: [1], params: {}}
+      - {tool: vlm_caption, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: caption, max_new_tokens: 256, temperature: 0.0}}
+
+  # ------------------------------------------------------ 7  GROUNDING/SINGLE
+
+  - key: "GROUNDING|SINGLE|*"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: text_grounding, inputs: [single], depends_on: [1],
+         params: {max_boxes: 20, score_threshold: 0.30}}
+      - {tool: vlm_vqa, inputs: ["@1", "@2:BBOX_SET"], depends_on: [1, 2],
+         params: {mode: grounding, max_new_tokens: 384, temperature: 0.0}}
+
+  # --------------------------------------------------- 8  SEGMENTATION/SINGLE
+
+  - key: "SEGMENTATION|SINGLE|optical"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: spectral_index_analyzer, inputs: [single], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi]}}
+      - {tool: semantic_segmenter, inputs: [single], depends_on: [1],
+         params: {taxonomy: loveda, min_region_px: 32}}
+      - {tool: vlm_vqa, inputs: ["@1", "@3:SEGMENTATION"], depends_on: [1, 2, 3],
+         params: {mode: segmentation, max_new_tokens: 320, temperature: 0.0}}
+
+  - key: "SEGMENTATION|SINGLE|*"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: raster_statistics, inputs: [single], depends_on: [1], params: {}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: segmentation, max_new_tokens: 320, temperature: 0.0}}
+
+  # ---------------------------------------------------------- 9  COUNT/SINGLE
+
+  - key: "COUNT|SINGLE|*"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: text_grounding, inputs: [single], depends_on: [1],
+         params: {max_boxes: 200, score_threshold: 0.25}}
+      - {tool: object_counter, inputs: ["@2:BBOX_SET"], depends_on: [2],
+         params: {min_component_px: 16}}
+      - {tool: vlm_vqa, inputs: ["@1", "@2:BBOX_SET"], depends_on: [1, 2, 3],
+         params: {mode: count, max_new_tokens: 256, temperature: 0.0}}
+
+  # ------------------------------------------------ 10-11  SCENE_CLASSIFY
+
+  - key: "SCENE_CLASSIFY|SINGLE|optical"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: spectral_index_analyzer, inputs: [single], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi]}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: scene_classify, max_new_tokens: 256, temperature: 0.0}}
+
+  - key: "SCENE_CLASSIFY|SINGLE|sar"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: sar_backscatter_analyzer, inputs: [single], depends_on: [1],
+         params: {water_threshold_db: -18.0}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: scene_classify, max_new_tokens: 256, temperature: 0.0}}
+
+  - key: "SCENE_CLASSIFY|SINGLE|*"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: raster_statistics, inputs: [single], depends_on: [1], params: {}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: scene_classify, max_new_tokens: 256, temperature: 0.0}}
+
+  # ------------------------------------------------------- 12-13  CHANGE_VQA
+
+  - key: "CHANGE_VQA|BI_TEMPORAL|optical"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
+         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25}}
+      - {tool: spectral_index_analyzer, inputs: [pre, post], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi], suffixes: ["_pre", "_post"]}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3, 4],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+
+  - key: "CHANGE_VQA|BI_TEMPORAL|sar"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: sar_backscatter_analyzer, inputs: [pre, post], depends_on: [1],
+         params: {water_threshold_db: -18.0, suffixes: ["_pre", "_post"]}}
+      - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
+         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+      - {tool: change_statistics, inputs: ["@3:CHANGE_MASK"], depends_on: [3],
+         params: {min_component_px: 25}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@3:CHANGE_MASK"], depends_on: [1, 2, 4],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+
+  - key: "CHANGE_VQA|BI_TEMPORAL|*"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
+         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+
+  # --------------------------------------------------- 14  CHANGE_CAPTION
+
+  - key: "CHANGE_CAPTION|BI_TEMPORAL|optical"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
+         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25}}
+      - {tool: spectral_index_analyzer, inputs: [pre, post], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi], suffixes: ["_pre", "_post"]}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3, 4],
+         params: {mode: caption, max_new_tokens: 320, temperature: 0.0}}
+
+  - key: "CHANGE_CAPTION|BI_TEMPORAL|sar"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: sar_backscatter_analyzer, inputs: [pre, post], depends_on: [1],
+         params: {water_threshold_db: -18.0, suffixes: ["_pre", "_post"]}}
+      - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
+         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+      - {tool: change_statistics, inputs: ["@3:CHANGE_MASK"], depends_on: [3],
+         params: {min_component_px: 25}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@3:CHANGE_MASK"], depends_on: [1, 2, 4],
+         params: {mode: caption, max_new_tokens: 320, temperature: 0.0}}
+
+  - key: "CHANGE_CAPTION|BI_TEMPORAL|*"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
+         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3],
+         params: {mode: caption, max_new_tokens: 320, temperature: 0.0}}
+
+  # ------------------------------------------------------- 15  CHANGE_MAP
+  # Deliberately VLM-free: a change map is fully answerable from deterministic
+  # outputs, so it pays neither VLM latency nor VLM hallucination risk. Its
+  # templated answer is by design, hence the waiver.
+
+  - key: "CHANGE_MAP|BI_TEMPORAL|*"
+    caps_waived: [template_fallback]
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
+         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25, emit_geojson: true}}
+
+  # -------------------------------------------------------- 16-21  CROSS_MODAL
+
+  - key: "CROSS_MODAL_VQA|CROSS_MODAL|mixed"
+    steps:
+      - {tool: spectral_renderer, inputs: [optical, sar], optional: false,
+         params: {size_px: 448}}
+      - {tool: spectral_index_analyzer, inputs: [optical], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi]}}
+      - {tool: sar_backscatter_analyzer, inputs: [sar], depends_on: [1],
+         params: {water_threshold_db: -18.0}}
+      - {tool: crossmodal_consistency, inputs: [optical, sar], depends_on: [2, 3],
+         params: {embedding: dofa_base_patch16_224, patch_px: 16}}
+      - {tool: physics_agreement, inputs: [optical, sar], depends_on: [2, 3],
+         params: {ndvi_vegetated: 0.30, sigma0_water_db: -18.0, sigma0_built_up_db: -5.0}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 4, 5],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+
+  - key: "CROSS_MODAL_COMPARE|CROSS_MODAL|mixed"
+    steps:
+      - {tool: spectral_renderer, inputs: [optical, sar], optional: false,
+         params: {size_px: 448}}
+      - {tool: spectral_index_analyzer, inputs: [optical], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi]}}
+      - {tool: sar_backscatter_analyzer, inputs: [sar], depends_on: [1],
+         params: {water_threshold_db: -18.0}}
+      - {tool: crossmodal_consistency, inputs: [optical, sar], depends_on: [2, 3],
+         params: {embedding: dofa_base_patch16_224, patch_px: 16}}
+      - {tool: physics_agreement, inputs: [optical, sar], depends_on: [2, 3],
+         params: {ndvi_vegetated: 0.30, sigma0_water_db: -18.0, sigma0_built_up_db: -5.0}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 4, 5],
+         params: {mode: compare, max_new_tokens: 384, temperature: 0.0}}
+
+  - key: "VQA|CROSS_MODAL|mixed"
+    steps:
+      - {tool: spectral_renderer, inputs: [optical, sar], optional: false,
+         params: {size_px: 448}}
+      - {tool: spectral_index_analyzer, inputs: [optical], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi]}}
+      - {tool: sar_backscatter_analyzer, inputs: [sar], depends_on: [1],
+         params: {water_threshold_db: -18.0}}
+      - {tool: crossmodal_consistency, inputs: [optical, sar], depends_on: [2, 3],
+         params: {embedding: dofa_base_patch16_224, patch_px: 16}}
+      - {tool: physics_agreement, inputs: [optical, sar], depends_on: [2, 3],
+         params: {ndvi_vegetated: 0.30, sigma0_water_db: -18.0, sigma0_built_up_db: -5.0}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 4, 5],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+
+  - key: "CAPTION|CROSS_MODAL|mixed"
+    steps:
+      - {tool: spectral_renderer, inputs: [optical, sar], optional: false,
+         params: {size_px: 448}}
+      - {tool: spectral_index_analyzer, inputs: [optical], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi]}}
+      - {tool: sar_backscatter_analyzer, inputs: [sar], depends_on: [1],
+         params: {water_threshold_db: -18.0}}
+      - {tool: physics_agreement, inputs: [optical, sar], depends_on: [2, 3],
+         params: {ndvi_vegetated: 0.30, sigma0_water_db: -18.0, sigma0_built_up_db: -5.0}}
+      - {tool: vlm_caption, inputs: ["@1"], depends_on: [1, 4],
+         params: {mode: caption, max_new_tokens: 320, temperature: 0.0}}
+
+  - key: "GROUNDING|CROSS_MODAL|mixed"
+    steps:
+      - {tool: spectral_renderer, inputs: [optical, sar], optional: false,
+         params: {size_px: 448}}
+      - {tool: text_grounding, inputs: [optical], depends_on: [1],
+         params: {max_boxes: 20, score_threshold: 0.30}}
+      - {tool: crossmodal_consistency, inputs: [optical, sar], depends_on: [2],
+         params: {embedding: dofa_base_patch16_224, patch_px: 16}}
+      - {tool: vlm_vqa, inputs: ["@1", "@2:BBOX_SET"], depends_on: [1, 2, 3],
+         params: {mode: grounding, max_new_tokens: 384, temperature: 0.0}}
+
+  - key: "SCENE_CLASSIFY|CROSS_MODAL|mixed"
+    steps:
+      - {tool: spectral_renderer, inputs: [optical, sar], optional: false,
+         params: {size_px: 448}}
+      - {tool: spectral_index_analyzer, inputs: [optical], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi]}}
+      - {tool: sar_backscatter_analyzer, inputs: [sar], depends_on: [1],
+         params: {water_threshold_db: -18.0}}
+      - {tool: physics_agreement, inputs: [optical, sar], depends_on: [2, 3],
+         params: {ndvi_vegetated: 0.30, sigma0_water_db: -18.0, sigma0_built_up_db: -5.0}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 4],
+         params: {mode: scene_classify, max_new_tokens: 256, temperature: 0.0}}
+
+  # ---------------------------------------------------------- 22  generic
+  # Reaching this entry means the router was guessing. It is flagged in the
+  # trace (planner=fallback_generic_v1, warning GENERIC_PLAN_USED) and capped.
+
+  - key: "*|*|*"
+    steps:
+      - {tool: spectral_renderer, inputs: [all], optional: false,
+         params: {size_px: 448}}
+      - {tool: raster_statistics, inputs: [all], depends_on: [1], params: {}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}

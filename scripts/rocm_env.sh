@@ -1,0 +1,4 @@
+export HIP_VISIBLE_DEVICES=0
+export ROCR_VISIBLE_DEVICES=0
+export PYTORCH_HIP_ALLOC_CONF="expandable_segments:True"
+export HSA_OVERRIDE_GFX_VERSION=11.0.0

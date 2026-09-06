@@ -1,0 +1,2042 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SatQuery AI",
+    "description": "Agentic vision-language analysis for satellite imagery.\n\n**Schema version 1.0 \u2014 frozen.** Fields may be added within `1.0`; renaming,\nremoving or retyping any field requires a `2.0` bump. See `DOCS/API_CONTRACT.md`.\n\nPhase 0: every endpoint returns schema-valid fixtures.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/v1/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Service, device and model health",
+        "description": "Report service health.\n\n``device.igpu_masked`` asserts that ``HIP_VISIBLE_DEVICES=0`` took effect. A\n``false`` there is a red flag before any demo.",
+        "operationId": "health_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/registry": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "summary": "List every registered tool",
+        "description": "Return every tool, available or not.\n\nEntries with ``available: false`` must be rendered as disabled rather than\nhidden \u2014 the registry being real, and honest about what is not loaded yet,\nis part of the story.",
+        "operationId": "registry_v1_registry_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/validate": {
+      "post": {
+        "tags": [
+          "validate"
+        ],
+        "summary": "Check whether the uploaded images can be analysed together",
+        "description": "Run ingestion and compatibility checks only \u2014 no tools, no GPU.\n\nCall this on file select, before the user types: ``supported_tasks`` tells the\nUI which questions to offer.",
+        "operationId": "validate_v1_validate_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_validate_v1_validate_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analyze": {
+      "post": {
+        "tags": [
+          "analyze"
+        ],
+        "summary": "Answer a question about one or two images",
+        "description": "Run the full pipeline and return the answer, its evidence and the trace.\n\nA tool failure never produces a 5xx: it produces ``200`` with a ``DEGRADED``\nor ``SKIPPED`` execution, a populated ``errors[]`` and a reduced confidence.\nThe single exception is a step the policy entry declares non-optional \u2014 only\nthe renderer today \u2014 because without rendered views there is no evidence to\nreason over at all.",
+        "operationId": "analyze_v1_analyze_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_v1_analyze_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/artifacts/{trace_id}/{artifact_id}.{ext}": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Fetch one artifact's raw bytes",
+        "description": "Serve one artifact with immutable caching and conditional-request support.",
+        "operationId": "get_artifact_v1_artifacts__trace_id___artifact_id___ext__get",
+        "parameters": [
+          {
+            "name": "trace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trace Id"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          },
+          {
+            "name": "ext",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ext"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/geo+json": {},
+              "application/json": {},
+              "image/jpeg": {},
+              "image/png": {},
+              "image/tiff": {}
+            }
+          },
+          "304": {
+            "description": "Not modified"
+          },
+          "404": {
+            "description": "Unknown trace or artifact"
+          },
+          "410": {
+            "description": "The trace has been evicted"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalyzeResponse": {
+        "properties": {
+          "trace_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Trace Id"
+          },
+          "answer": {
+            "$ref": "#/components/schemas/Answer"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactRef"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/CompatibilityReport"
+          },
+          "resolved_task": {
+            "$ref": "#/components/schemas/ResolvedTask"
+          },
+          "trace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditTrace"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None when options.include_trace is false."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "trace_id",
+          "answer",
+          "confidence",
+          "compatibility",
+          "resolved_task"
+        ],
+        "title": "AnalyzeResponse",
+        "description": "``POST /v1/analyze`` 200 body.\n\n``compatibility`` and ``resolved_task`` are duplicated at the top level so the\nUI can render them without walking into the trace."
+      },
+      "Answer": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "title": "Citations"
+          },
+          "uncited_numeric_spans": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Uncited Numeric Spans",
+            "description": "Numbers the CitationValidator could not resolve. Non-empty is a visible honesty signal \u2014 the frontend must render it."
+          },
+          "generator": {
+            "type": "string",
+            "title": "Generator",
+            "description": "e.g. 'vlm_change_vqa@1.0.0+adapter:sq-lora-v3'."
+          },
+          "template_fallback": {
+            "type": "boolean",
+            "title": "Template Fallback",
+            "description": "True when a deterministic template wrote the text.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "generator"
+        ],
+        "title": "Answer",
+        "description": "The synthesised natural-language answer plus its honesty signals."
+      },
+      "ArtifactGeo": {
+        "properties": {
+          "crs": {
+            "type": "string",
+            "title": "Crs"
+          },
+          "transform": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "minItems": 6,
+            "title": "Transform"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "crs",
+          "transform"
+        ],
+        "title": "ArtifactGeo",
+        "description": "Georeferencing of a raster artifact."
+      },
+      "ArtifactRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "art_0, art_1, ... stable within a trace."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ArtifactType"
+          },
+          "mime": {
+            "type": "string",
+            "title": "Mime",
+            "description": "image/png, image/tiff, application/geo+json, application/json."
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Display name, e.g. 'Change mask (binary)'."
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "None for SCALARS/TEXT."
+          },
+          "geotiff_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geotiff Url"
+          },
+          "geojson_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geojson Url"
+          },
+          "geo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactGeo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None when the artifact is not georeferenced."
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "stats": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stats",
+            "description": "Artifact-type specific."
+          },
+          "inline": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inline",
+            "description": "Payload for SCALARS/BBOX_SET/TEXT \u2014 avoids a second round trip."
+          },
+          "produced_by_step": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Produced By Step",
+            "description": "Index into plan.steps."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "mime",
+          "label",
+          "produced_by_step"
+        ],
+        "title": "ArtifactRef",
+        "description": "A piece of evidence the pipeline produced. Immutable and cacheable forever."
+      },
+      "ArtifactType": {
+        "type": "string",
+        "enum": [
+          "RENDERED_VIEW",
+          "CHANGE_MASK",
+          "SEGMENTATION",
+          "BBOX_SET",
+          "HEATMAP",
+          "OVERLAY_PNG",
+          "GEOJSON",
+          "SCALARS",
+          "TEXT"
+        ],
+        "title": "ArtifactType",
+        "description": "Kind of evidence produced by a tool (API_CONTRACT \u00a72.5)."
+      },
+      "AuditTrace": {
+        "properties": {
+          "trace_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Trace Id",
+            "description": "32-char lowercase hex."
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "default": "1.0"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Duration Ms"
+          },
+          "query": {
+            "$ref": "#/components/schemas/QuerySpec"
+          },
+          "resolved_task": {
+            "$ref": "#/components/schemas/ResolvedTask"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/InputManifest"
+            },
+            "type": "array",
+            "title": "Inputs"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/CompatibilityReport"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/Plan"
+          },
+          "executions": {
+            "items": {
+              "$ref": "#/components/schemas/Execution"
+            },
+            "type": "array",
+            "title": "Executions"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactRef"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          },
+          "fact_sheet": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Fact Sheet",
+            "description": "Keys are namespaced '<tool>.<scalar>'."
+          },
+          "answer": {
+            "$ref": "#/components/schemas/Answer"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/WarningItem"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorItem"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "trace_id",
+          "created_at",
+          "duration_ms",
+          "query",
+          "resolved_task",
+          "inputs",
+          "compatibility",
+          "plan",
+          "executions",
+          "artifacts",
+          "answer",
+          "confidence"
+        ],
+        "title": "AuditTrace",
+        "description": "The full, replayable record of one analysis \u2014 the requirement-5 deliverable.\n\nTop-level key order is frozen by API_CONTRACT \u00a73.11 and is preserved here."
+      },
+      "Body_analyze_v1_analyze_post": {
+        "properties": {
+          "images": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Images",
+            "description": "1-2 files. GeoTIFF preferred; PNG/JPEG accepted."
+          },
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "description": "1-1000 chars, UTF-8."
+          },
+          "options": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options",
+            "description": "JSON, see AnalyzeOptions."
+          }
+        },
+        "type": "object",
+        "required": [
+          "images",
+          "query"
+        ],
+        "title": "Body_analyze_v1_analyze_post"
+      },
+      "Body_validate_v1_validate_post": {
+        "properties": {
+          "images": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Images",
+            "description": "1-2 files. GeoTIFF preferred; PNG/JPEG accepted."
+          },
+          "options": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options",
+            "description": "JSON; only pair_type_hint and roles are honoured here."
+          }
+        },
+        "type": "object",
+        "required": [
+          "images"
+        ],
+        "title": "Body_validate_v1_validate_post"
+      },
+      "CheckName": {
+        "type": "string",
+        "enum": [
+          "crs_match",
+          "bounds_overlap_iou",
+          "gsd_ratio",
+          "coregistration_offset_px",
+          "band_sufficiency",
+          "modality_distinct",
+          "temporal_ordering",
+          "georeference_present",
+          "size_ratio",
+          "nodata_extent"
+        ],
+        "title": "CheckName",
+        "description": "Identity of a compatibility check (API_CONTRACT \u00a72.6)."
+      },
+      "CheckResult": {
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/CheckName"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CheckStatus"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "Measured value."
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold",
+            "description": "Human-readable rule, e.g. 'iou >= 0.80'."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "One sentence, safe to display verbatim."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "status",
+          "detail"
+        ],
+        "title": "CheckResult",
+        "description": "One compatibility check, including the ones that were skipped."
+      },
+      "CheckStatus": {
+        "type": "string",
+        "enum": [
+          "PASS",
+          "WARN",
+          "FAIL",
+          "SKIP"
+        ],
+        "title": "CheckStatus",
+        "description": "Outcome of one compatibility check (API_CONTRACT \u00a72.7)."
+      },
+      "Citation": {
+        "properties": {
+          "claim": {
+            "type": "string",
+            "title": "Claim",
+            "description": "The exact span of answer text this supports."
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Grammar: 'step:{n}/scalars.{dotted.path}'; join two with '|'.",
+            "examples": [
+              "step:2/scalars.changed_area_pct"
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Value",
+            "description": "The cited value, as measured."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "claim",
+          "source",
+          "value"
+        ],
+        "title": "Citation",
+        "description": "Binds one claim in the answer text to one measured scalar."
+      },
+      "CommonGrid": {
+        "properties": {
+          "crs": {
+            "type": "string",
+            "title": "Crs"
+          },
+          "transform": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "minItems": 6,
+            "title": "Transform"
+          },
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Width"
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Height"
+          },
+          "gsd_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Gsd M"
+          },
+          "resampling": {
+            "$ref": "#/components/schemas/Resampling"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "crs",
+          "transform",
+          "width",
+          "height",
+          "gsd_m",
+          "resampling"
+        ],
+        "title": "CommonGrid",
+        "description": "The grid both images were resampled onto for pairwise analysis."
+      },
+      "CompatibilityReport": {
+        "properties": {
+          "pair_type": {
+            "$ref": "#/components/schemas/PairType"
+          },
+          "pair_type_source": {
+            "$ref": "#/components/schemas/PairTypeSource"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/CheckResult"
+            },
+            "type": "array",
+            "title": "Checks",
+            "description": "Every applicable check, including SKIP."
+          },
+          "overall": {
+            "$ref": "#/components/schemas/Overall",
+            "description": "any FAIL -> FAIL; else any WARN -> PASS_WITH_WARNINGS; else PASS."
+          },
+          "actions_taken": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions Taken",
+            "description": "e.g. 'reprojected img_1 EPSG:4326->EPSG:32643 (bilinear)'."
+          },
+          "common_grid": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommonGrid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None for SINGLE and for FAIL."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "pair_type",
+          "pair_type_source",
+          "checks",
+          "overall"
+        ],
+        "title": "CompatibilityReport",
+        "description": "Whether the inputs can be analysed together, and what it cost to get there."
+      },
+      "Confidence": {
+        "properties": {
+          "overall": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Overall"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "description": "e.g. 'weighted_tool_agreement_v1'."
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Components"
+          },
+          "caps_applied": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caps Applied",
+            "description": "Names of any rule that clamped `overall`."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "overall",
+          "method"
+        ],
+        "title": "Confidence",
+        "description": "Overall confidence and the components it was derived from."
+      },
+      "Device": {
+        "type": "string",
+        "enum": [
+          "rocm:0",
+          "cpu",
+          "auto"
+        ],
+        "title": "Device",
+        "description": "Compute placement (API_CONTRACT \u00a72.10)."
+      },
+      "DeviceInfo": {
+        "properties": {
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "description": "'rocm' | 'cpu'."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "hip_visible_devices": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hip Visible Devices"
+          },
+          "vram_total_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vram Total Mb"
+          },
+          "vram_used_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vram Used Mb"
+          },
+          "igpu_masked": {
+            "type": "boolean",
+            "title": "Igpu Masked",
+            "description": "Asserts HIP_VISIBLE_DEVICES=0 took effect. False is a red flag before a demo."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "backend",
+          "name",
+          "igpu_masked"
+        ],
+        "title": "DeviceInfo",
+        "description": "Accelerator state, as reported by the ROCm runtime."
+      },
+      "ErrorItem": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorItem",
+        "description": "A failure that did not prevent a partial result."
+      },
+      "Execution": {
+        "properties": {
+          "step": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Step",
+            "description": "Matches PlanStep.step."
+          },
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ToolStatus"
+          },
+          "device_used": {
+            "$ref": "#/components/schemas/Device"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Duration Ms"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params",
+            "description": "Exact effective parameters \u2014 the auditability payload."
+          },
+          "input_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Input Refs"
+          },
+          "output_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Output Refs"
+          },
+          "scalars": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Scalars",
+            "description": "Merged into fact_sheet under this tool's namespace."
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          },
+          "cache_hit": {
+            "type": "boolean",
+            "title": "Cache Hit",
+            "default": false
+          },
+          "fallback_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Of",
+            "description": "Set when this execution replaced a failed tool."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "step",
+          "tool",
+          "version",
+          "status",
+          "device_used",
+          "duration_ms",
+          "confidence"
+        ],
+        "title": "Execution",
+        "description": "The record of actually running one :class:`PlanStep` \u2014 the audit payload."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/HealthStatus"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "default": "1.0"
+          },
+          "device": {
+            "$ref": "#/components/schemas/DeviceInfo"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelInfo"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "tools_available": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tools Available"
+          },
+          "tools_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tools Total"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "device",
+          "tools_available",
+          "tools_total"
+        ],
+        "title": "HealthResponse",
+        "description": "``GET /v1/health`` 200 body (API_CONTRACT \u00a74.9)."
+      },
+      "HealthStatus": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "degraded"
+        ],
+        "title": "HealthStatus",
+        "description": "Service-level health verdict (API_CONTRACT \u00a74.9)."
+      },
+      "ImageRole": {
+        "type": "string",
+        "enum": [
+          "single",
+          "pre",
+          "post",
+          "optical",
+          "sar"
+        ],
+        "title": "ImageRole",
+        "description": "Role an image plays within its pair (API_CONTRACT \u00a72.4)."
+      },
+      "InputContract": {
+        "properties": {
+          "pair_types": {
+            "items": {
+              "$ref": "#/components/schemas/PairType"
+            },
+            "type": "array",
+            "title": "Pair Types"
+          },
+          "modalities": {
+            "items": {
+              "$ref": "#/components/schemas/Modality"
+            },
+            "type": "array",
+            "title": "Modalities"
+          },
+          "min_images": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Min Images"
+          },
+          "max_images": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Images"
+          },
+          "required_bands": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Bands",
+            "description": "Logical band names, resolved per-sensor."
+          },
+          "optional_bands": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Optional Bands"
+          },
+          "gsd_range_m": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 2,
+                "minItems": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gsd Range M",
+            "description": "[min_gsd_m, max_gsd_m]."
+          },
+          "min_size_px": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Size Px"
+          },
+          "max_size_px": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Size Px"
+          },
+          "requires_georeference": {
+            "type": "boolean",
+            "title": "Requires Georeference",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "pair_types",
+          "modalities",
+          "min_images",
+          "max_images"
+        ],
+        "title": "InputContract",
+        "description": "What a tool is willing to accept \u2014 the basis of capability matching."
+      },
+      "InputManifest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Stable within a trace: img_0, img_1, ... in upload order."
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageRole"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Server-assigned unless overridden via options.roles."
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Original client filename, sanitised."
+          },
+          "sha256": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "description": "Of the raw bytes."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Size Bytes"
+          },
+          "driver": {
+            "type": "string",
+            "title": "Driver",
+            "description": "rasterio driver: GTiff, PNG, JPEG."
+          },
+          "modality": {
+            "$ref": "#/components/schemas/Modality"
+          },
+          "modality_confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Modality Confidence"
+          },
+          "sensor_guess": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sensor Guess",
+            "description": "e.g. 'Sentinel-2 L2A', 'Sentinel-1 GRD', 'Cartosat-2S'."
+          },
+          "crs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crs",
+            "description": "e.g. 'EPSG:32643'; None for non-georeferenced input."
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 6,
+                "minItems": 6
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transform",
+            "description": "rasterio/GDAL affine 6-tuple [a, b, c, d, e, f]."
+          },
+          "bounds_native": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bounds Native",
+            "description": "[minx, miny, maxx, maxy] in the raster's own CRS."
+          },
+          "bounds_wgs84": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bounds Wgs84",
+            "description": "[min_lon, min_lat, max_lon, max_lat], lon first, EPSG:4326."
+          },
+          "gsd_m": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gsd M",
+            "description": "Ground sample distance, metres."
+          },
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "description": "Pixels."
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "description": "Pixels."
+          },
+          "band_count": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Band Count"
+          },
+          "dtype": {
+            "type": "string",
+            "title": "Dtype",
+            "description": "uint8, uint16, int16, float32."
+          },
+          "band_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Names",
+            "description": "[\"B02\",\"B03\",...] or [\"VV\",\"VH\"]."
+          },
+          "nodata_pct": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Nodata Pct"
+          },
+          "acquisition_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Time",
+            "description": "From TIFF/GDAL metadata when present."
+          },
+          "is_georeferenced": {
+            "type": "boolean",
+            "title": "Is Georeferenced",
+            "description": "crs is not None and transform is not None."
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "May be empty, never None."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "sha256",
+          "size_bytes",
+          "driver",
+          "modality",
+          "modality_confidence",
+          "width",
+          "height",
+          "band_count",
+          "dtype",
+          "nodata_pct",
+          "is_georeferenced"
+        ],
+        "title": "InputManifest",
+        "description": "Everything the ingestion layer learned about one uploaded image.\n\nA field that is *inapplicable* is ``None``. A field that is *unknown* is\n``None`` **and** carries an entry in :attr:`warnings`."
+      },
+      "Modality": {
+        "type": "string",
+        "enum": [
+          "optical",
+          "sar",
+          "panchromatic",
+          "unknown"
+        ],
+        "title": "Modality",
+        "description": "Sensing modality of a single input (API_CONTRACT \u00a72.3)."
+      },
+      "ModelInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "description": "'hf' | 'llamacpp'."
+          },
+          "loaded": {
+            "type": "boolean",
+            "title": "Loaded"
+          },
+          "adapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adapter"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "backend",
+          "loaded"
+        ],
+        "title": "ModelInfo",
+        "description": "One loadable model and its adapter."
+      },
+      "Overall": {
+        "type": "string",
+        "enum": [
+          "PASS",
+          "PASS_WITH_WARNINGS",
+          "FAIL"
+        ],
+        "title": "Overall",
+        "description": "Aggregate compatibility verdict (API_CONTRACT \u00a72.7).\n\nDerivation: any FAIL -> FAIL; else any WARN -> PASS_WITH_WARNINGS; else PASS."
+      },
+      "PairType": {
+        "type": "string",
+        "enum": [
+          "SINGLE",
+          "CROSS_MODAL",
+          "BI_TEMPORAL",
+          "INCOMPATIBLE"
+        ],
+        "title": "PairType",
+        "description": "Relationship between the uploaded images (API_CONTRACT \u00a72.2)."
+      },
+      "PairTypeSource": {
+        "type": "string",
+        "enum": [
+          "metadata",
+          "heuristic",
+          "user_declared"
+        ],
+        "title": "PairTypeSource",
+        "description": "How ``CompatibilityReport.pair_type`` was decided (API_CONTRACT \u00a73.3)."
+      },
+      "Plan": {
+        "properties": {
+          "planner": {
+            "type": "string",
+            "title": "Planner",
+            "description": "e.g. 'policy_table_v1'."
+          },
+          "policy_key": {
+            "type": "string",
+            "title": "Policy Key",
+            "description": "e.g. 'CHANGE_VQA|BI_TEMPORAL|optical'."
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "type": "array",
+            "title": "Steps"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "planner",
+          "policy_key"
+        ],
+        "title": "Plan",
+        "description": "The tool DAG chosen for this query."
+      },
+      "PlanStep": {
+        "properties": {
+          "step": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Step",
+            "description": "1-indexed position in topological order."
+          },
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "depends_on": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Depends On"
+          },
+          "input_refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Input Refs",
+            "description": "img_* and/or art_* references."
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "e.g. 'policy_table:CHANGE_VQA|BI_TEMPORAL|optical'."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "step",
+          "tool",
+          "input_refs",
+          "reason"
+        ],
+        "title": "PlanStep",
+        "description": "One node of the execution DAG, in topological order."
+      },
+      "QuerySpec": {
+        "properties": {
+          "raw": {
+            "type": "string",
+            "title": "Raw"
+          },
+          "normalized": {
+            "type": "string",
+            "title": "Normalized"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "description": "ISO 639-1.",
+            "default": "en"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "raw",
+          "normalized"
+        ],
+        "title": "QuerySpec",
+        "description": "The user's question, as received and as normalised."
+      },
+      "RegistryResponse": {
+        "properties": {
+          "registry_version": {
+            "type": "string",
+            "title": "Registry Version"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ToolSpec"
+            },
+            "type": "array",
+            "title": "Tools"
+          },
+          "task_types": {
+            "items": {
+              "$ref": "#/components/schemas/TaskType"
+            },
+            "type": "array",
+            "title": "Task Types"
+          },
+          "adapter_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adapter Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "registry_version",
+          "tools",
+          "task_types"
+        ],
+        "title": "RegistryResponse",
+        "description": "``GET /v1/registry`` 200 body (API_CONTRACT \u00a74.8)."
+      },
+      "Resampling": {
+        "type": "string",
+        "enum": [
+          "nearest",
+          "bilinear",
+          "cubic"
+        ],
+        "title": "Resampling",
+        "description": "Resampling kernel used to build the common grid (API_CONTRACT \u00a73.3)."
+      },
+      "ResolvedTask": {
+        "properties": {
+          "primary": {
+            "$ref": "#/components/schemas/TaskType"
+          },
+          "secondary": {
+            "items": {
+              "$ref": "#/components/schemas/TaskType"
+            },
+            "type": "array",
+            "title": "Secondary"
+          },
+          "slots": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Slots"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          },
+          "classifier": {
+            "type": "string",
+            "title": "Classifier",
+            "description": "e.g. 'rules_v1+llm_slotfill_v1'."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "primary",
+          "confidence",
+          "classifier"
+        ],
+        "title": "ResolvedTask",
+        "description": "What the query classifier decided the user is asking for."
+      },
+      "TaskType": {
+        "type": "string",
+        "enum": [
+          "VQA",
+          "CAPTION",
+          "GROUNDING",
+          "SEGMENTATION",
+          "COUNT",
+          "SCENE_CLASSIFY",
+          "CHANGE_VQA",
+          "CHANGE_CAPTION",
+          "CHANGE_MAP",
+          "CROSS_MODAL_VQA",
+          "CROSS_MODAL_COMPARE",
+          "UNSUPPORTED"
+        ],
+        "title": "TaskType",
+        "description": "Resolved analysis task (API_CONTRACT \u00a72.1)."
+      },
+      "ToolCategory": {
+        "type": "string",
+        "enum": [
+          "analysis",
+          "vlm",
+          "cv",
+          "geo",
+          "fusion"
+        ],
+        "title": "ToolCategory",
+        "description": "Registry grouping for a tool (API_CONTRACT \u00a72.9)."
+      },
+      "ToolSpec": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Registry key, snake_case, stable."
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "'1.0.0' or '1.0.0+ckpt:9a3f'."
+          },
+          "category": {
+            "$ref": "#/components/schemas/ToolCategory"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "One line, shown in the capabilities panel."
+          },
+          "accepts": {
+            "$ref": "#/components/schemas/InputContract"
+          },
+          "produces": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactType"
+            },
+            "type": "array",
+            "title": "Produces"
+          },
+          "scalars_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Scalars Schema",
+            "description": "JSON Schema of this tool's FactSheet contribution."
+          },
+          "device": {
+            "$ref": "#/components/schemas/Device"
+          },
+          "est_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Est Ms",
+            "description": "Typical wall time, for the progress bar."
+          },
+          "fallback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback",
+            "description": "Name of the tool used when this one fails."
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "Runtime: false when weights/backend are missing."
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "category",
+          "description",
+          "accepts",
+          "produces",
+          "device",
+          "est_ms",
+          "available"
+        ],
+        "title": "ToolSpec",
+        "description": "One registry entry, as served by ``GET /v1/registry``."
+      },
+      "ToolStatus": {
+        "type": "string",
+        "enum": [
+          "OK",
+          "DEGRADED",
+          "FAILED",
+          "SKIPPED"
+        ],
+        "title": "ToolStatus",
+        "description": "Outcome of a single tool execution (API_CONTRACT \u00a72.8)."
+      },
+      "ValidateResponse": {
+        "properties": {
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/InputManifest"
+            },
+            "type": "array",
+            "title": "Inputs"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/CompatibilityReport"
+          },
+          "supported_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskType"
+            },
+            "type": "array",
+            "title": "Supported Tasks",
+            "description": "Capability matching over the registry \u2014 lets the UI grey out impossible questions."
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/WarningItem"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inputs",
+          "compatibility",
+          "supported_tasks"
+        ],
+        "title": "ValidateResponse",
+        "description": "``POST /v1/validate`` 200 body (API_CONTRACT \u00a74.5). No tools run, no GPU touched."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WarningItem": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref",
+            "description": "img_*, art_* or None."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "WarningItem",
+        "description": "A non-fatal condition worth surfacing to the user."
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+# =========================
+# 1. Python & Environments
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# =========================
+# 2. Tooling Caches
+# =========================
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# =========================
+# 3. SatQuery AI Data & Artifacts
+# =========================
+data/*
+!data/.keep
+*.sqlite
+*.db
+*.log
+
+# =========================
+# 4. ML Models & Datasets
+# =========================
+checkpoints/
+*.ckpt
+*.safetensors
+*.pth
+*.pt
+*.bin
+*.h5
+datasets/
+
+# =========================
+# 5. Secrets & IDEs
+# =========================
+.env
+.env.local
+.vscode/
+.idea/
+.DS_Store
