@@ -34,6 +34,7 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -60,6 +61,22 @@ F1_GATE = 0.88
 reports whether the run cleared it; it does not pretend a run that did not is
 usable, and it does not fail the process either — a first run below the gate is
 information, not an error."""
+
+
+LAST_CHECKPOINT: Final[str] = "last.ckpt"
+"""The rolling checkpoint an interrupted run resumes from.
+
+Distinct from the ``val/f1`` best-so-far checkpoint, and needed alongside it: the
+best one is only rewritten when the metric improves, so a crash ten epochs after
+the last improvement would restart from ten epochs ago. This one is the *most
+recent* state, which is what "carry on where you left off" means."""
+
+DEFAULT_SAVE_EVERY_N_STEPS: Final[int] = 200
+"""How often ``last.ckpt`` is refreshed inside an epoch.
+
+Epoch-end saving alone is only as fine-grained as an epoch is short. LEVIR-CD's
+is 55 steps, so this never fires there and epoch boundaries do the work; a larger
+corpus, where one epoch is hours, gets a bound on how much a crash can cost."""
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -110,11 +127,47 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Fraction of each epoch to run. For a smoke test of the wiring.",
     )
     parser.add_argument(
+        "--resume",
+        default="auto",
+        help="auto | none | a path to a .ckpt. 'auto' continues from last.ckpt "
+        "when one is present in the run directory and starts fresh when it is "
+        "not, so an interrupted run restarts with the same command line.",
+    )
+    parser.add_argument(
+        "--save-every-n-steps",
+        type=int,
+        default=DEFAULT_SAVE_EVERY_N_STEPS,
+        help="Refresh last.ckpt this often *within* an epoch. 0 saves only at "
+        "epoch end, which on a long epoch is a long way to fall back.",
+    )
+    parser.add_argument(
         "--compare",
         action="store_true",
         help="Do not train. Print the cross-resolution table from existing bundles.",
     )
     return parser.parse_args(argv)
+
+
+def resume_checkpoint(run_dir: Path, setting: str) -> Path | None:
+    """Resolve ``--resume`` to a checkpoint path, or None to start fresh.
+
+    Raises:
+        SystemExit: An explicit path was given and does not exist. A typo must
+            not silently restart a three-day run from step zero.
+    """
+    value = setting.strip().lower()
+    if value in {"", "none", "no", "false"}:
+        return None
+    if value in {"auto", "true", "yes"}:
+        candidate = run_dir / LAST_CHECKPOINT
+        return candidate if candidate.is_file() else None
+    path = Path(setting)
+    if not path.is_file():
+        raise SystemExit(
+            f"--resume {setting} does not exist. Available in {run_dir}: "
+            f"{sorted(c.name for c in run_dir.glob('*.ckpt')) or 'none'}"
+        )
+    return path
 
 
 def cross_resolution_table(directory: Path) -> str:
@@ -156,6 +209,44 @@ def cross_resolution_table(directory: Path) -> str:
     return "\n".join(rows)
 
 
+def build_self_test(
+    model: object, loader: object, threshold: float, size: int = 256
+) -> dict[str, object] | None:
+    """Record what this checkpoint answers on one real pair, for the load check.
+
+    Serving replays this after every load. It is measured here, on the model that
+    has just finished training, because that is the only moment the weights are
+    known-good — and it must be a pair that genuinely differs, since the
+    architecture subtracts the two epochs and identical inputs would exercise
+    nothing but the decoder's biases. See ``CheckpointBundle.self_test``.
+    """
+    import numpy as np
+    import torch
+
+    try:
+        batch = next(iter(loader))
+    except (StopIteration, TypeError):  # pragma: no cover - loader-dependent
+        return None
+
+    pre = batch["image1"][0][:, :size, :size]
+    post = batch["image2"][0][:, :size, :size]
+    if pre.shape[-1] < size or pre.shape[-2] < size:  # pragma: no cover - tiny patches
+        return None
+
+    device = next(model.parameters()).device
+    with torch.no_grad():
+        probabilities = torch.sigmoid(
+            model(pre.unsqueeze(0).to(device), post.unsqueeze(0).to(device))
+        )[0, 0]
+    return {
+        "pre": pre.cpu().numpy().astype(np.uint8),
+        "post": post.cpu().numpy().astype(np.uint8),
+        "changed_fraction": round(float((probabilities >= threshold).float().mean()), 6),
+        "tolerance": 0.02,
+        "source": "first validation pair, cropped",
+    }
+
+
 def train(args: argparse.Namespace) -> int:
     """Run one training job and write its checkpoint bundle."""
     import lightning.pytorch as pl
@@ -192,6 +283,14 @@ def train(args: argparse.Namespace) -> int:
     output.mkdir(parents=True, exist_ok=True)
     run_name = f"{args.dataset}_{args.backbone}"
 
+    # Pinned, not left to the logger. Lightning's default puts checkpoints under
+    # <logger>/<name>/version_N/checkpoints, and N increments on every launch —
+    # so the run that resumes would write to version_1 while last.ckpt sat in
+    # version_0, and "auto" would find nothing. A fixed directory per run name is
+    # what makes the resume path stable across restarts.
+    ckpt_dir = output / "runs" / run_name / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         accelerator=args.accelerator,
@@ -204,22 +303,73 @@ def train(args: argparse.Namespace) -> int:
         callbacks=[
             # Selected on F1 over the changed class, never on loss: the loss is
             # minimised acceptably by predicting no change anywhere.
-            ModelCheckpoint(monitor="val/f1", mode="max", save_top_k=1, filename=run_name),
+            #
+            # save_last writes last.ckpt beside it on every save. Lightning puts
+            # the optimiser and LR-scheduler states, the epoch and the global step
+            # into every .ckpt, so this is a resumable position and not just
+            # weights — which is the whole difference between restarting and
+            # carrying on.
+            ModelCheckpoint(
+                dirpath=str(ckpt_dir),
+                monitor="val/f1",
+                mode="max",
+                save_top_k=1,
+                filename=run_name,
+            ),
+            # The rolling position, and the *only* writer of last.ckpt. Two
+            # callbacks with save_last=True in one directory do not both write
+            # it — Lightning renames the second to last-v1.ckpt, leaving which
+            # file holds the newer state a matter of callback ordering. One
+            # writer, one name, no ambiguity for --resume to get wrong.
+            #
+            # save_on_train_epoch_end covers the epoch boundary whatever the step
+            # cadence does, so a corpus whose epoch is shorter than
+            # --save-every-n-steps is still checkpointed once per epoch.
+            ModelCheckpoint(
+                dirpath=str(ckpt_dir),
+                save_top_k=0,
+                save_last=True,
+                every_n_train_steps=args.save_every_n_steps or None,
+                save_on_train_epoch_end=True,
+            ),
             EarlyStopping(monitor="val/f1", mode="max", patience=10),
             LearningRateMonitor(logging_interval="epoch"),
         ],
         deterministic=False,
     )
-    trainer.fit(task, train_dataloaders=data.train_dataloader(),
-                val_dataloaders=data.val_dataloader())
 
-    # Statistics come from the training loader, after fitting, so they describe
-    # exactly the distribution the weights were fitted to.
+    resume_from = resume_checkpoint(ckpt_dir, args.resume)
+    if resume_from is not None:
+        print(f"resuming from {resume_from}", file=sys.stderr)
+    else:
+        print(f"starting from scratch (--resume {args.resume})", file=sys.stderr)
+    trainer.fit(
+        task,
+        train_dataloaders=data.train_dataloader(),
+        val_dataloaders=data.val_dataloader(),
+        # Lightning restores the epoch, the global step, the optimiser and the
+        # schedulers from here; None means a fresh run.
+        ckpt_path=str(resume_from) if resume_from else None,
+    )
+
+    # The bundle's normalisation is a record of what the *forward pass* did, not
+    # of what the data looked like. ChangeDetectionTask feeds batch["image1"]
+    # into the model untouched, so the answer is "nothing", and identity is the
+    # only honest entry — serving replays this record verbatim, and a set of
+    # statistics that training never applied is a training/serving skew that
+    # shows up as a detector confidently predicting no change anywhere.
+    #
+    # The measured distribution is still worth keeping, so it travels as
+    # provenance in the notes, where nothing will multiply by it.
+    normalisation = Normalisation.identity(config.in_channels)
     try:
         mean, std = channel_statistics(data.train_dataloader())
-        normalisation = Normalisation(mean=mean, std=std)
+        measured = (
+            f"; channel mean {tuple(round(v, 3) for v in mean)}"
+            f", std {tuple(round(v, 3) for v in std)}"
+        )
     except DataError:
-        normalisation = Normalisation.identity(config.in_channels)
+        measured = ""
 
     metrics = {
         "f1": float(task.best_f1),
@@ -237,9 +387,15 @@ def train(args: argparse.Namespace) -> int:
         dataset=args.dataset,
         gsd_m=data.profile.gsd_m,
         metrics=metrics,
+        self_test=build_self_test(
+            task.model, data.val_dataloader(), float(task.best_threshold)
+        ),
         encoder_source=task.model.encoder_report.source,
         trained_at=datetime.now(UTC).isoformat(),
-        notes=f"{args.epochs} epochs at {args.patch_size}px, precision {args.precision}",
+        notes=(
+            f"{args.epochs} epochs at {args.patch_size}px, precision {args.precision}"
+            f"; trained on unnormalised loader output{measured}"
+        ),
     )
     from satquery.training.cd.checkpoint import save_bundle
 

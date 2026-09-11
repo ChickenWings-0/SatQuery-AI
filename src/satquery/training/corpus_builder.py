@@ -1183,6 +1183,26 @@ RSVQA_TYPES: Final[tuple[str, ...]] = ("presence", "comparison", "count", "area"
 instead would teach the model to guess the majority type."""
 
 
+def _rsvqa_area_m2(sample_id: str, answer: Any) -> float:
+    """The square metres an RSVQA-HR ``area`` answer states.
+
+    The release writes them as ``"521m2"`` — value and unit, no space. The unit
+    is stripped rather than kept, because :func:`cite` writes it back from the
+    scalar's own name: leaving it in produces ``"521m2 m²"``, which is both
+    wrong and, since the validator reads the unit off the key, uncitable.
+
+    Raises:
+        CorpusError: The answer is not a number followed by ``m2``.
+    """
+    text = str(answer).strip().lower().removesuffix("m2").strip()
+    try:
+        return float(text)
+    except ValueError as error:
+        raise CorpusError(
+            f"{sample_id}: area answer {answer!r} is not a number of square metres"
+        ) from error
+
+
 def from_rsvqa(row: Mapping[str, Any]) -> CorpusSample:
     """Build one RSVQA-HR sample (§4.3).
 
@@ -1191,6 +1211,18 @@ def from_rsvqa(row: Mapping[str, Any]) -> CorpusSample:
     answer is a bare integer; supervising it in citation form is what keeps the
     counting task inside the same evidence discipline as every other task, and
     the count really is a measurement rather than a guess.
+
+    An ``area`` question gets the same treatment against
+    ``semantic_segmenter.area_m2``. It has to: RSVQA answers these with a bare
+    ``"521m2"``, and :func:`audit_answer` rejects an assistant turn stating a
+    number the sheet does not support — which made ``area`` a build error the
+    moment RSVQA-HR was wired up, on the 3 040 train rows answering ``0m2``
+    alone. Passing it through uncited was never the alternative: an area *is* a
+    measurement, and ``semantic_segmenter`` is the tool that measures one at
+    inference, under that exact scalar name.
+
+    ``presence`` and ``comp`` answer yes or no and carry no number, so they stay
+    plain ``VQA``.
     """
     image_id, question, answer = _require(row, "image_id", "question", "answer")
     question_type = str(row.get("type") or "presence").lower()
@@ -1218,6 +1250,22 @@ def from_rsvqa(row: Mapping[str, Any]) -> CorpusSample:
             fact_sheet={key: float(count)},
             meta=meta,
         )
+
+    if question_type == "area":
+        key = "semantic_segmenter.area_m2"
+        area = _rsvqa_area_m2(sample_id, answer)
+        return assemble(
+            sample_id=sample_id,
+            source=CorpusSource.RSVQA_HR,
+            task=TaskType.VQA,
+            pair_type=PairType.SINGLE,
+            views=views,
+            question=str(question).strip(),
+            answer=f"The measured area is {cite(key, area)}.",
+            fact_sheet={key: area},
+            meta=meta,
+        )
+
     return assemble(
         sample_id=sample_id,
         source=CorpusSource.RSVQA_HR,
@@ -1668,9 +1716,35 @@ class Deduplicator:
                     best = (key, distance)
         return best
 
-    def check(self, key: str, sha256: str | None = None, image_hash: int | None = None
-              ) -> DedupResult:
-        """Decide whether one image may enter the corpus, and index it if so."""
+    def check(
+        self,
+        key: str,
+        sha256: str | None = None,
+        image_hash: int | None = None,
+        *,
+        image_key: str | None = None,
+    ) -> DedupResult:
+        """Decide whether one image may enter the corpus, and index it if so.
+
+        Args:
+            key: Identifies the *sample* being checked; what a report names.
+            sha256: The source image's exact hash.
+            image_hash: The source image's pHash.
+            image_key: Identifies the *image*, when several samples share one.
+                Defaults to *key*, which is right when they are the same thing.
+
+        **``image_key`` is what stops the corpus collapsing.** §4.7 dedups on
+        source image, but four of the six sources publish many samples per
+        image — VRSBench averages ten annotations per tile, CDVQA around forty
+        questions per bi-temporal pair. Checked as if each sample were its own
+        image, the second annotation of a tile collides with the first on an
+        exact hash and is dropped, which takes CDVQA from 9 000 candidates to
+        the ~215 distinct pairs behind them and puts every §5 target out of
+        reach. Passing the same *image_key* for every sample of one image makes
+        the repeat an accepted re-use rather than a duplicate; a collision
+        between two *different* images is still exactly as fatal as before.
+        """
+        image_key = image_key if image_key is not None else key
         if sha256 and sha256 in self._quarantine_sha:
             result = DedupResult(DedupVerdict.QUARANTINED, key, self._quarantine_sha[sha256], 0)
             self.leaks.append(result)
@@ -1681,22 +1755,34 @@ class Deduplicator:
                 result = DedupResult(DedupVerdict.QUARANTINED, key, hit[0], hit[1])
                 self.leaks.append(result)
                 return result
-        if sha256 and sha256 in self._sha:
-            result = DedupResult(DedupVerdict.EXACT_DUPLICATE, key, self._sha[sha256], 0)
+        seen = self._sha.get(sha256) if sha256 else None
+        if seen is not None and seen != image_key:
+            result = DedupResult(DedupVerdict.EXACT_DUPLICATE, key, seen, 0)
             self.dropped.append(result)
             return result
-        if image_hash is not None:
+        if seen is None and image_hash is not None:
             hit = self._nearest(self._bands, image_hash)
             if hit is not None:
-                result = DedupResult(DedupVerdict.NEAR_DUPLICATE, key, hit[0], hit[1])
-                self.dropped.append(result)
-                return result
+                if hit[0] != image_key:
+                    result = DedupResult(DedupVerdict.NEAR_DUPLICATE, key, hit[0], hit[1])
+                    self.dropped.append(result)
+                    return result
+                # Same image, reached through the pHash index instead of the
+                # exact one — an unhashed source, where pHash is all there is.
+                seen = hit[0]
 
+        if seen is not None:
+            # A further sample of an image already admitted. Accepted, and
+            # deliberately *not* re-indexed: appending its pHash again would
+            # grow the near-dup index by a factor of the annotations per image
+            # — 205 000 entries for VRSBench's 20 264 tiles — and slow every
+            # subsequent lookup for no added coverage.
+            return DedupResult(DedupVerdict.NEW, key, seen, 0)
         if sha256:
-            self._sha[sha256] = key
+            self._sha[sha256] = image_key
         if image_hash is not None:
             for band, bucket in zip(self._band_keys(image_hash), self._bands, strict=True):
-                bucket.setdefault(band, []).append((image_hash, key))
+                bucket.setdefault(band, []).append((image_hash, image_key))
         return DedupResult(DedupVerdict.NEW, key)
 
     def assert_clean(self) -> None:
@@ -1728,10 +1814,27 @@ def deduplicate(
     kept: list[CorpusSample] = []
     for sample in samples:
         image_hash = int(sample.meta.phash, 16) if sample.meta.phash else None
-        result = index.check(sample.id, sample.meta.image_sha256, image_hash)
+        result = index.check(
+            sample.id,
+            sample.meta.image_sha256,
+            image_hash,
+            image_key=image_key_of(sample),
+        )
         if result.accepted:
             kept.append(sample)
     return kept, index
+
+
+def image_key_of(sample: CorpusSample) -> str:
+    """What identifies the *image* several samples of one scene share (§4.7).
+
+    The first view's path, not the sample id. Both work for the ids the adapters
+    happen to mint today, but the path is what the corpus line actually points
+    at: two samples of one tile name the same file, two tiles never do, and the
+    same bytes appearing under two paths is precisely the case the exact-hash
+    check exists to catch rather than something this key should paper over.
+    """
+    return sample.views[0].path if sample.views else sample.id
 
 
 # --------------------------------------------------------------- corpus build
@@ -1797,6 +1900,142 @@ def take(samples: Sequence[CorpusSample], target: int, rng: random.Random) -> li
         return list(samples)
     chosen = set(rng.sample(range(len(samples)), target))
     return [sample for index, sample in enumerate(samples) if index in chosen]
+
+
+class Reservoir:
+    """A bounded uniform random sample of a stream (Vitter's Algorithm R).
+
+    The corpus subsamples ~9.6 M candidate rows down to an 18 k budget, so
+    :func:`take` — which needs the whole population as a ``Sequence`` before it
+    can choose — is the wrong shape: materialising that population is what made
+    ``scripts/build_corpus.py`` exhaust RAM and get OOM-killed. A reservoir makes
+    the same uniform draw in one pass while holding at most *capacity* samples,
+    so peak memory is set by the §5 composition target rather than by the size of
+    the source dataset.
+
+    Arrival order is restored on :meth:`collect` for the reason :func:`take`
+    preserves corpus order: the trainer shuffles anyway, and a stable order makes
+    two builds of the same seed diffable.
+    """
+
+    def __init__(self, capacity: int | None, rng: random.Random) -> None:
+        """Start an empty reservoir. ``capacity=None`` keeps everything offered."""
+        self.capacity = capacity
+        self._rng = rng
+        self._items: list[tuple[int, CorpusSample]] = []
+        self.seen = 0
+
+    def offer(self, sample: CorpusSample) -> None:
+        """Show one sample to the reservoir, keeping or discarding it."""
+        self.seen += 1
+        if self.capacity is None or len(self._items) < self.capacity:
+            self._items.append((self.seen, sample))
+            return
+        if self.capacity == 0:
+            return
+        index = self._rng.randrange(self.seen)
+        if index < self.capacity:
+            self._items[index] = (self.seen, sample)
+
+    def collect(self) -> list[CorpusSample]:
+        """The retained samples, back in the order they arrived."""
+        return [sample for _, sample in sorted(self._items, key=lambda pair: pair[0])]
+
+
+def build_corpus_streaming(
+    samples: Iterable[tuple[CorpusSource, CorpusSample]],
+    out_dir: Path,
+    *,
+    composition: Mapping[CorpusSource, int] | None = None,
+    dedup: Deduplicator | None = None,
+    seed: int = 42,
+) -> CorpusReport:
+    """Deduplicate, subsample, split and write a corpus from a *stream*.
+
+    Same contract as :func:`build_corpus` — same report, same two files — but it
+    never holds the built population. Samples arrive tagged with their source,
+    are deduplicated as they pass (:class:`Deduplicator` is already incremental),
+    and land in a per-source :class:`Reservoir` capped at that source's §5 target.
+    Peak memory is therefore ``sum(composition.values())`` samples, whatever the
+    input size.
+
+    Prefer this over :func:`build_corpus` for anything reading a Hub dataset;
+    :func:`build_corpus` remains the right call when the samples are already a
+    list in memory, as in the tests.
+
+    Args:
+        samples: ``(source, sample)`` pairs, in any order and any interleaving.
+        out_dir: Directory receiving ``train.jsonl`` and ``val.jsonl``.
+        composition: Per-source targets; defaults to :data:`COMPOSITION`. A
+            source with no entry is kept in full, which is unbounded memory.
+        dedup: A pre-loaded deduplicator, typically already carrying the
+            quarantined test hashes.
+        seed: Subsampling seed, recorded in the report.
+
+    Raises:
+        LeakageError: A corpus image matched a quarantined test image.
+    """
+    targets = dict(composition or COMPOSITION)
+    index = dedup or Deduplicator()
+    rng = random.Random(seed)
+
+    built: dict[CorpusSource, int] = dict.fromkeys(CorpusSource, 0)
+    kept: dict[CorpusSource, int] = dict.fromkeys(CorpusSource, 0)
+    reservoirs: dict[CorpusSource, Reservoir] = {
+        source: Reservoir(targets.get(source), rng) for source in CorpusSource
+    }
+
+    for source, sample in samples:
+        built[source] += 1
+        image_hash = int(sample.meta.phash, 16) if sample.meta.phash else None
+        verdict = index.check(
+            sample.id,
+            sample.meta.image_sha256,
+            image_hash,
+            image_key=image_key_of(sample),
+        )
+        if not verdict.accepted:
+            continue
+        kept[source] += 1
+        reservoirs[source].offer(sample)
+
+    # Only now is anything held: at most one §5 budget's worth of samples.
+    reports: list[SourceReport] = []
+    train: list[CorpusSample] = []
+    val: list[CorpusSample] = []
+    for source in CorpusSource:
+        selected = reservoirs[source].collect()
+        source_train = [s for s in selected if s.meta.split == "train"]
+        source_val = [s for s in selected if s.meta.split == "val"]
+        train.extend(source_train)
+        val.extend(source_val)
+        reports.append(
+            SourceReport(
+                source=source,
+                track=TRACK[source],
+                target=targets.get(source, 0),
+                built=built[source],
+                kept=kept[source],
+                train=len(source_train),
+                val=len(source_val),
+            )
+        )
+
+    index.assert_clean()
+    write_jsonl(out_dir / "train.jsonl", train)
+    write_jsonl(out_dir / "val.jsonl", val)
+    return CorpusReport(
+        sources=reports,
+        train=len(train),
+        val=len(val),
+        dropped_exact=sum(
+            1 for d in index.dropped if d.verdict is DedupVerdict.EXACT_DUPLICATE
+        ),
+        dropped_near=sum(
+            1 for d in index.dropped if d.verdict is DedupVerdict.NEAR_DUPLICATE
+        ),
+        seed=seed,
+    )
 
 
 def build_corpus(
@@ -1886,6 +2125,7 @@ __all__ = [
     "Deduplicator",
     "LeakageError",
     "Message",
+    "Reservoir",
     "SampleMeta",
     "SourceReport",
     "SourceView",
@@ -1895,9 +2135,11 @@ __all__ = [
     "audit_answer",
     "ben6_labels",
     "build_corpus",
+    "build_corpus_streaming",
     "build_evidence_qa",
     "cite",
     "deduplicate",
+    "image_key_of",
     "describe_backscatter",
     "describe_change",
     "describe_ndbi",

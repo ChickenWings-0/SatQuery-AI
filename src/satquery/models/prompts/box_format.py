@@ -52,6 +52,18 @@ _TAGGED = re.compile(
 _BODY = re.compile(_BOX_BODY)
 _JSON_BLOCK = re.compile(r"\[\s*\{.*?\}\s*\]", re.DOTALL)
 
+_SENTENCE_BREAK: Final[re.Pattern[str]] = re.compile(r"[\n\r.;!?]")
+"""A label does not span a sentence. Only the text after the last break is
+considered, so prose before a box cannot be swallowed whole."""
+
+_LABEL_STRIP: Final[str] = " \t\r\n,:;-\u2013\u2014\"'`([{"
+"""Separators that sit between a label and its box, or bracket the label."""
+
+MAX_LABEL_CHARS: Final[int] = 64
+"""A referring expression longer than this is prose that happens to precede a
+box, not a label. The tail is kept rather than the head: the words nearest the
+box are the ones describing it."""
+
 
 class BoxFormatError(ValueError):
     """A box could not be represented in the canonical format."""
@@ -170,6 +182,23 @@ def serialise(boxes: Iterable[NormalisedBox]) -> str:
     )
 
 
+def strip_boxes(text: str) -> str:
+    """Remove every box form this module understands, leaving the prose around it.
+
+    For the citation validator. A box coordinate is not a claim about the scene:
+    it is a position in the frame, and there is no FactSheet key it could ever
+    resolve against. Validating one as a measurement marks it uncited, which
+    degrades the step and caps the confidence — so a grounding answer was
+    penalised for containing exactly what :data:`templates.GROUNDED_V1` orders it
+    to contain, and every grounding run degraded no matter how good the boxes
+    were. Prose numbers in the same answer still have to be cited, which is why
+    this removes the boxes rather than skipping validation for the task.
+    """
+    without = _TAGGED.sub(" ", text)
+    without = _JSON_BLOCK.sub(" ", without)
+    return _BODY.sub(" ", without)
+
+
 def parse(text: str, width: int | None = None, height: int | None = None) -> list[NormalisedBox]:
     """Extract every box from a model answer, in the order it emitted them.
 
@@ -187,6 +216,8 @@ def parse(text: str, width: int | None = None, height: int | None = None) -> lis
     found = list(_parse_tagged(text))
     if not found:
         found = list(_parse_json(text, width, height))
+    if not found:
+        found = list(_parse_bare(text))
     seen: set[tuple[int, int, int, int, str | None]] = set()
     unique: list[NormalisedBox] = []
     for box in found:
@@ -207,6 +238,54 @@ def _parse_tagged(text: str) -> Iterator[NormalisedBox]:
         box = _build(tuple(int(v) for v in body.groups()), label, None)
         if box is not None:
             yield box
+
+
+def _parse_bare(text: str) -> Iterator[NormalisedBox]:
+    """Boxes written as bare ``(x1,y1),(x2,y2)``, label in front, no sentinels.
+
+    Tried last, and only when nothing better matched, because it is the most
+    permissive reading available: any pair of coordinate pairs in the text
+    becomes a box. That is the right trade for a grounding answer, where the
+    alternative is an empty box list, and the wrong one for anything else — which
+    is why the canonical and JSON forms get first refusal.
+
+    It exists because a fine-tuned checkpoint does not necessarily keep the
+    sentinels. Ours emits ``buildings(170,527),(238,577)``: the coordinates are
+    correct and in the right frame, and only the ``<|box_start|>`` wrapper is
+    missing. Parsing returned nothing, so no box reached the frontend and the run
+    was marked ungrounded for stating numbers it could not cite — a total,
+    silent failure caused entirely by a missing pair of tags.
+
+    Labels carry forward, because the observed form puts one label in front of a
+    run of boxes: ``buildings(100,738),(330,998)(370,768),(610,1000)`` is two
+    buildings, not one building and one anonymous box.
+    """
+    cursor = 0
+    label: str | None = None
+    for match in _BODY.finditer(text):
+        found = _label_before(text[cursor:match.start()])
+        if found is not None:
+            label = found
+        cursor = match.end()
+        box = _build(tuple(int(value) for value in match.groups()), label, None)
+        if box is not None:
+            yield box
+
+
+def _label_before(gap: str) -> str | None:
+    """Read the label out of the text between the previous box and this one.
+
+    Returns None when the gap holds no label — an empty gap, or nothing but
+    separators — which is what makes a label carry forward across a run of
+    boxes rather than resetting to unlabelled.
+    """
+    tail = _SENTENCE_BREAK.split(gap)[-1].strip(_LABEL_STRIP)
+    if len(tail) > MAX_LABEL_CHARS:
+        # Keep the words nearest the box, and drop the leading fragment the cut
+        # is likely to have sliced through.
+        _, _, tail = tail[-MAX_LABEL_CHARS:].partition(" ")
+        tail = tail.strip(_LABEL_STRIP)
+    return tail or None
 
 
 def _parse_json(
@@ -300,6 +379,7 @@ def _build(
 
 
 parse_boxes = parse
+strip_box_syntax = strip_boxes
 serialise_boxes = serialise
 """Aliases for re-export from the package namespace, where a bare ``parse`` next
 to ``build_prompt`` would not say what it parses."""

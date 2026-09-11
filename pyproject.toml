@@ -114,7 +114,7 @@ warn_unused_ignores = true
 # Neither rasterio nor scikit-image ships type information, so their public API
 # is Any to mypy. Everything we build on top of them stays strictly typed.
 [[tool.mypy.overrides]]
-module = ["rasterio.*", "skimage.*", "affine.*", "yaml"]
+module = ["rasterio.*", "skimage.*", "affine.*", "yaml", "pandas", "huggingface_hub"]
 ignore_missing_imports = true
 disallow_untyped_calls = false
 

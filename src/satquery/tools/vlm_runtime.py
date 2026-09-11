@@ -29,6 +29,7 @@ from satquery.models.loader import (
     VlmBackend,
     get_backend,
 )
+from satquery.models.prompts.box_format import strip_boxes
 from satquery.models.prompts.builder import (
     MAX_VIEWS,
     BuiltPrompt,
@@ -238,6 +239,7 @@ def synthesise(
         slots=ctx.slots,
         prompt_version=settings.prompt_version,
         max_views=settings.max_views,
+        mode=settings.mode,
     )
     generated = generate(prompt, settings, ctx, backend)
     marked = strip_citation_markers(generated.text, ctx.facts)
@@ -246,7 +248,10 @@ def synthesise(
     # run over the final answer. Doing it here is what lets a badly grounded
     # generation lower this step's confidence, instead of only being noticed once
     # the answer is already written.
-    checked = validate(marked.text, ctx.facts)
+    # A grounding answer is boxes by contract, so its coordinates are validated
+    # as what they are — positions, not measurements. See box_format.strip_boxes.
+    claims = strip_boxes(marked.text) if task is TaskType.GROUNDING else marked.text
+    checked = validate(claims, ctx.facts)
 
     notes: list[str] = []
     if not views:

@@ -55,6 +55,43 @@ CHANGE_WORD: Final[str] = (
     r"grew|expand\w*|shrink|shrank|shrunk|before and after|between the two)\b"
 )
 
+COVERAGE_WORD: Final[str] = (
+    r"\b(percent\w*|proportion|fraction|share|coverage|how much)\b"
+)
+"""The shape of a question that asks for *area by class*.
+
+"What percentage of this area is covered by forest versus barren land?" named no
+tool and matched no rule, so it fell through to the nearest seed neighbour and
+came back VQA. The plan for VQA has no segmenter in it, the FactSheet therefore
+carried no class fractions, and the model was asked to answer a proportion
+question from an image and a handful of band statistics — which it did, with
+"Forest: 100%". A per-class proportion is the one question segmentation exists to
+answer, and it has to be routed there before the VLM is ever consulted."""
+
+
+def _class_term_pattern() -> str:
+    """An alternation over the controlled land-cover vocabulary.
+
+    Read from ``configs/class_vocabulary.yaml`` rather than restated here, so a
+    class added to the vocabulary starts routing without a second edit — the same
+    file the slot filler already resolves ``target_class`` against.
+    """
+    try:
+        from satquery.agent.query_parser import load_vocabulary
+
+        phrases = sorted(load_vocabulary().index, key=len, reverse=True)
+    except (OSError, ValueError, KeyError):  # pragma: no cover - config-dependent
+        # A missing vocabulary must not take the whole classifier down; the rule
+        # simply stops firing and the cascade behaves as it did before.
+        phrases = ["forest", "water", "vegetation", "built up", "bare soil", "land"]
+    return r"\b(" + "|".join(re.escape(phrase) for phrase in phrases) + r")\b"
+
+
+CLASS_TERM: Final[str] = _class_term_pattern()
+"""Every synonym the vocabulary knows, longest first so "water body" is tried
+before "water"."""
+
+
 SECONDARY_TASKS: Final[dict[TaskType, list[TaskType]]] = {
     TaskType.CHANGE_VQA: [TaskType.CHANGE_MAP],
     TaskType.CHANGE_CAPTION: [TaskType.CHANGE_MAP],
@@ -123,9 +160,14 @@ RULES: Final[tuple[Rule, ...]] = (
     # COUNT precedes GROUNDING: "how many buildings are there" contains a
     # grounding-shaped noun phrase and would otherwise be routed to it.
     _rule(20, TaskType.COUNT, 0.93, r"\b(how many|count|number of|total of)\b"),
-    _rule(21, TaskType.SEGMENTATION, 0.88,
+    # A coverage question precedes the explicit segmentation verbs because it
+    # never uses one: nobody asks to "segment the forest" when what they want is
+    # the percentage of it. Both change rules already ran, so "what percentage
+    # changed" is long gone by here and this cannot steal it.
+    _rule(21, TaskType.SEGMENTATION, 0.88, COVERAGE_WORD, also=CLASS_TERM),
+    _rule(22, TaskType.SEGMENTATION, 0.88,
           r"\b(segment\w*|delineate|outline|extent of|boundary of)\b"),
-    _rule(22, TaskType.GROUNDING, 0.88,
+    _rule(23, TaskType.GROUNDING, 0.88,
           r"\b(where|locate|find|point to|point out|bounding box|highlight)\b"),
     _rule(30, TaskType.CROSS_MODAL_COMPARE, 0.91,
           r"\b(sar|radar|backscatter|microwave)\b",

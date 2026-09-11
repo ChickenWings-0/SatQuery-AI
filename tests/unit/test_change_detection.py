@@ -786,3 +786,138 @@ def test_constructing_a_datamodule_downloads_nothing(tmp_path: Path) -> None:
     assert coarse.profile.bands == module.profile.bands, (
         "the two ablation rows must differ in resolution and nothing else"
     )
+
+
+# --------------------------------------------------- known-answer load check
+
+
+def _bundle_with_probe(fraction: float = 0.05) -> Any:
+    """A minimal bundle carrying a self-test, for the checker alone."""
+    from satquery.training.cd.checkpoint import CheckpointBundle, Normalisation
+
+    rng = np.random.default_rng(0)
+    pre = rng.integers(60, 90, (3, 64, 64)).astype(np.uint8)
+    post = pre.copy()
+    post[:, 16:48, 16:48] = 235
+    return CheckpointBundle(
+        config={},
+        state_dict={},
+        normalisation=Normalisation.identity(3),
+        threshold=0.9,
+        self_test={
+            "pre": pre,
+            "post": post,
+            "changed_fraction": fraction,
+            "tolerance": 0.02,
+        },
+    )
+
+
+class _FakeLoaded:
+    """A LoadedModel stand-in whose predictions the test dictates."""
+
+    def __init__(self, bundle: Any, output: Any) -> None:
+        self.bundle = bundle
+        self.device = "cpu"
+        self._output = output
+
+    def predict(self, pre: Any, post: Any) -> Any:
+        if callable(self._output):
+            return self._output(pre, post)
+        return np.full(pre.shape[1:], self._output, dtype=np.float32)
+
+
+def test_a_healthy_load_reproduces_its_own_known_answer() -> None:
+    """The check must pass the model it was measured from."""
+    from satquery.tools.change_detect import _self_check
+
+    bundle = _bundle_with_probe(fraction=1.0)
+    _self_check(_FakeLoaded(bundle, 0.99))  # every pixel changed, as recorded
+
+
+def test_a_corrupt_load_is_refused_rather_than_served() -> None:
+    """The failure that motivated this: weights that survive the load broken.
+
+    A corrupt detector marked a third of every scene changed for the life of the
+    process, and produced a mask, a percentage and a fluent sentence quoting it.
+    Nothing downstream could tell the number was invented.
+    """
+    from satquery.tools.change_detect import DetectorUnavailableError, _self_check
+
+    bundle = _bundle_with_probe(fraction=0.05)
+    with pytest.raises(DetectorUnavailableError, match="did not survive the load"):
+        _self_check(_FakeLoaded(bundle, 0.99))
+
+
+def test_a_dead_load_is_refused_too() -> None:
+    """The other observed failure: confident, uniform, wrong no-change."""
+    from satquery.tools.change_detect import DetectorUnavailableError, _self_check
+
+    bundle = _bundle_with_probe(fraction=0.50)
+    with pytest.raises(DetectorUnavailableError):
+        _self_check(_FakeLoaded(bundle, 0.0))
+
+
+def test_non_finite_probabilities_are_refused() -> None:
+    """NaN output appeared in roughly one load in ten on this card."""
+    from satquery.tools.change_detect import DetectorUnavailableError, _self_check
+
+    bundle = _bundle_with_probe()
+    with pytest.raises(DetectorUnavailableError, match="non-finite"):
+        _self_check(_FakeLoaded(bundle, np.nan))
+
+
+def test_a_checkpoint_without_a_probe_is_served_unverified() -> None:
+    """A bundle predating the probe must still load; refusing it would be worse."""
+    from satquery.tools.change_detect import _self_check
+    from satquery.training.cd.checkpoint import CheckpointBundle, Normalisation
+
+    legacy = CheckpointBundle(
+        config={}, state_dict={}, normalisation=Normalisation.identity(3), threshold=0.9
+    )
+    _self_check(_FakeLoaded(legacy, 0.99))
+
+
+def test_the_cache_retries_a_corrupt_load_and_serves_the_good_one() -> None:
+    """Corruption is per-load, so rebuilding is a fix rather than a hope.
+
+    Detection alone would degrade one demo run in eight; the retry is what makes
+    the fault invisible instead of merely honest.
+    """
+    from satquery.tools.change_detect import ModelCache
+
+    bundle = _bundle_with_probe(fraction=1.0)
+    attempts: list[int] = []
+
+    cache = ModelCache()
+    def flaky(path: Any, device: str) -> Any:
+        attempts.append(1)
+        # First two loads come up corrupt, the third is clean.
+        return _FakeLoaded(bundle, 0.0 if len(attempts) < 3 else 0.99)
+
+    cache._load = flaky  # type: ignore[method-assign]
+    served = cache.get(Path("unused.ckpt.pt"), "cpu")
+
+    assert len(attempts) == 3
+    assert served.predict(np.zeros((3, 8, 8), np.float32), None).max() > 0.9
+
+
+def test_a_permanently_corrupt_detector_is_reported_not_served() -> None:
+    """When every attempt fails, the step degrades visibly instead of lying."""
+    from satquery.tools.change_detect import (
+        SELF_CHECK_ATTEMPTS,
+        DetectorUnavailableError,
+        ModelCache,
+    )
+
+    bundle = _bundle_with_probe(fraction=1.0)
+    attempts: list[int] = []
+    cache = ModelCache()
+    def always_bad(path: Any, device: str) -> Any:
+        attempts.append(1)
+        return _FakeLoaded(bundle, 0.0)
+
+    cache._load = always_bad  # type: ignore[method-assign]
+    with pytest.raises(DetectorUnavailableError, match="all 4 load attempts"):
+        cache.get(Path("unused.ckpt.pt"), "cpu")
+    assert len(attempts) == SELF_CHECK_ATTEMPTS

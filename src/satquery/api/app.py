@@ -15,8 +15,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from satquery.api.routers import analyze, artifacts, health, registry, validate
-from satquery.core.config import Settings, get_settings
+from satquery.api.routers import analyze, artifacts, health, jobs, registry, traces, validate
+from satquery.core.config import Settings, get_settings, load_env_file
 from satquery.core.logging import configure_logging, get_logger
 from satquery.ingest.errors import IngestError
 from satquery.schemas.api import ApiErrorResponse
@@ -40,6 +40,11 @@ def _new_trace_id() -> str:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the application. Accepts injected settings so tests can vary them."""
+    # Before settings are read, and before the tool catalog probes for weights:
+    # the checkpoint paths are read straight from os.environ by the tools that
+    # need them, so a .env that has not been copied across leaves the segmenter
+    # and the detector looking unavailable.
+    from_file = load_env_file()
     settings = settings or get_settings()
     configure_logging(settings)
     log = get_logger(__name__)
@@ -52,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             environment=settings.environment,
             version=settings.version,
             schema_version=settings.schema_version,
+            env_file_applied=from_file,
         )
         yield
         log.info("app.shutdown")
@@ -93,7 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = ApiErrorResponse(error=exc.to_api_error(trace_id=trace_id))
         return JSONResponse(status_code=exc.http_status, content=body.model_dump(mode="json"))
 
-    for module in (health, registry, validate, analyze, artifacts):
+    for module in (health, registry, validate, analyze, jobs, artifacts, traces):
         app.include_router(module.router, prefix=settings.api_prefix)
 
     return app

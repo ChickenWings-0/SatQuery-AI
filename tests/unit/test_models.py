@@ -628,3 +628,61 @@ def test_the_registry_never_advertises_a_model_this_machine_cannot_serve() -> No
         assert spec.available is vlm_servable()
         if not spec.available:
             assert spec.unavailable_reason
+
+
+# ------------------------------------------------------- runaway decode guards
+
+
+def test_a_generation_request_carries_stop_strings_by_default() -> None:
+    """The field is read by both backends and filled by exactly one caller.
+
+    It defaulted to an empty tuple, and ``BuiltPrompt.to_request`` never set it,
+    so ``if request.stop:`` in the llama.cpp client was dead code and no stop
+    sequence ever reached the server.
+    """
+    request = builder.BuiltPrompt(
+        system="s", user="u", images=(), prompt_version="v", fact_keys=(), view_labels=()
+    ).to_request()
+
+    assert "<|im_end|>" in request.stop
+    assert "</tool_call>" in request.stop
+
+
+def test_the_client_forwards_stop_strings_to_the_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """llama-server can only honour a stop sequence it was told about."""
+    sent: dict[str, Any] = {}
+
+    def capture(self: Any, path: str, payload: Any, timeout: float) -> dict[str, Any]:
+        if payload is not None:
+            sent.update(payload)
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(LlamaCppBackend, "_request", capture)
+    backend = LlamaCppBackend(BackendConfig(kind=BackendKind.LLAMACPP))
+    backend.generate(GenerationRequest(system="s", user="u"))
+
+    assert "<|im_end|>" in sent["stop"]
+    assert "</tool_call>" in sent["stop"]
+
+
+def test_a_runaway_tool_call_decode_is_cut_at_the_first_marker() -> None:
+    """The observed grounding failure, verbatim.
+
+    The model answered, then emitted ``</tool_call>`` until it hit the token
+    budget. Whatever the server does with its own stop handling, the text handed
+    to the aggregator must end where the answer did.
+    """
+    runaway = "buildings(0,0),(1000,1000)\n" + "</tool_call>\n" * 120
+
+    assert loader.apply_stop(runaway, loader.CHAT_STOP_STRINGS) == (
+        "buildings(0,0),(1000,1000)"
+    )
+
+
+def test_stopping_leaves_an_ordinary_answer_untouched() -> None:
+    """A clean generation must survive the trim byte for byte."""
+    clean = "Forest covers 42.10% [semantic_segmenter.forest_pct] of the scene."
+
+    assert loader.apply_stop(clean, loader.CHAT_STOP_STRINGS) == clean

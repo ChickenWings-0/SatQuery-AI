@@ -21,6 +21,8 @@ from datetime import UTC, datetime
 from typing import Final
 
 from satquery.agent import aggregator, planner, task_classifier
+from satquery.agent import events as events_module
+from satquery.agent.events import Emit
 from satquery.agent.executor import DagExecutor, ExecutionCache, ToolFailedNoFallbackError
 from satquery.agent.query_parser import parse
 from satquery.evidence import confidence as confidence_module
@@ -70,13 +72,20 @@ def bundles_for(request: AnalysisRequest) -> list[ImageBundle]:
 
     Band resolution happens once, here, so no tool ever has to know how a given
     sensor names its channels.
+
+    The join is positional, and it has to be. ``InputManifest.id`` is assigned
+    ``img_0, img_1, ...`` in upload order over the same list, so the index is
+    exact. A filename is not: nothing stops two uploads from sharing one, and the
+    layout that does it is the common one — LEVIR-CD ships each pair as
+    ``A/test_100.png`` and ``B/test_100.png``, and every change dataset organised
+    by epoch directory behaves the same way. Keying on the filename silently
+    collapsed both manifests onto whichever source was written last, so the
+    detector compared the post-change image against itself and every pair, of
+    every scene, measured as 0% changed.
     """
-    by_filename = {source.filename: source for source in request.sources}
     bundles: list[ImageBundle] = []
     for index, manifest in enumerate(request.ingest.inputs):
-        source = by_filename.get(manifest.filename)
-        if source is None:
-            source = request.sources[index]
+        source = request.sources[index]
         bundles.append(
             ImageBundle(
                 manifest=manifest,
@@ -137,6 +146,7 @@ async def analyze(
     tools: Mapping[str, Tool] | None = None,
     cache: ExecutionCache | None = None,
     traces: TraceStore | None = None,
+    emit: Emit | None = None,
 ) -> AnalysisResult:
     """Run the whole pipeline and return the trace it produced.
 
@@ -147,6 +157,9 @@ async def analyze(
         tools: Implementation overrides layered over the built-ins.
         cache: Execution cache; defaults to the process-wide one.
         traces: When given, the finished trace is persisted to it.
+        emit: When given, receives the API_CONTRACT §5 progress events as the
+            run proceeds. ``None`` — what ``/v1/analyze`` passes — makes the run
+            byte-identical to one with no streaming at all.
 
     Returns:
         An :class:`AnalysisResult` carrying the full :class:`AuditTrace`.
@@ -183,6 +196,7 @@ async def analyze(
 
     # UNSUPPORTED never reaches the policy table as a key: it routes to the
     # generic entry by construction, which is what flags it in the trace.
+    events_module.stage(emit, "planning")
     task = classification.primary
     plan = planner.plan_for(
         task=task if task is not TaskType.UNSUPPORTED else TaskType.UNSUPPORTED,
@@ -191,12 +205,20 @@ async def analyze(
     )
     warnings += [WarningItem(code=code, message=message) for code, message in plan.warnings]
 
+    # Emitted once, before anything runs: this is what lets the client draw the
+    # whole DAG with every node PENDING and then fill it in (API_CONTRACT §8.4).
+    events_module.emit_to(
+        emit, "plan", {"steps": [step.model_dump(mode="json") for step in plan.plan.steps]}
+    )
+
     executor = DagExecutor(
         registry=active_registry,
         tools=implementations(tools),
         store=store,
         cache=cache,
+        emit=emit,
     )
+    events_module.stage(emit, "executing")
     report = await executor.run(
         plan=plan,
         images=bundles_for(request),
@@ -208,6 +230,7 @@ async def analyze(
     )
     warnings += report.warnings
 
+    events_module.stage(emit, "aggregating")
     sheet = fact_sheet_module.build(report.executions, active_registry)
     warnings += [
         WarningItem(code="SCALAR_SCHEMA_VIOLATION", message=violation)

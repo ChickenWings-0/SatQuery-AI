@@ -167,7 +167,7 @@ entries:
       - {tool: spectral_renderer, inputs: [pre, post], optional: false,
          params: {size_px: 448}}
       - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
-         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+         params: {tile: 512, overlap: 64, tta: false}}
       - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
          params: {min_component_px: 25}}
       - {tool: spectral_index_analyzer, inputs: [pre, post], depends_on: [1],
@@ -182,7 +182,7 @@ entries:
       - {tool: sar_backscatter_analyzer, inputs: [pre, post], depends_on: [1],
          params: {water_threshold_db: -18.0, suffixes: ["_pre", "_post"]}}
       - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
-         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+         params: {tile: 512, overlap: 64, tta: false}}
       - {tool: change_statistics, inputs: ["@3:CHANGE_MASK"], depends_on: [3],
          params: {min_component_px: 25}}
       - {tool: vlm_change_vqa, inputs: ["@1", "@3:CHANGE_MASK"], depends_on: [1, 2, 4],
@@ -193,7 +193,7 @@ entries:
       - {tool: spectral_renderer, inputs: [pre, post], optional: false,
          params: {size_px: 448}}
       - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
-         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+         params: {tile: 512, overlap: 64, tta: false}}
       - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
          params: {min_component_px: 25}}
       - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3],
@@ -206,7 +206,7 @@ entries:
       - {tool: spectral_renderer, inputs: [pre, post], optional: false,
          params: {size_px: 448}}
       - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
-         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+         params: {tile: 512, overlap: 64, tta: false}}
       - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
          params: {min_component_px: 25}}
       - {tool: spectral_index_analyzer, inputs: [pre, post], depends_on: [1],
@@ -221,7 +221,7 @@ entries:
       - {tool: sar_backscatter_analyzer, inputs: [pre, post], depends_on: [1],
          params: {water_threshold_db: -18.0, suffixes: ["_pre", "_post"]}}
       - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
-         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+         params: {tile: 512, overlap: 64, tta: false}}
       - {tool: change_statistics, inputs: ["@3:CHANGE_MASK"], depends_on: [3],
          params: {min_component_px: 25}}
       - {tool: vlm_change_vqa, inputs: ["@1", "@3:CHANGE_MASK"], depends_on: [1, 2, 4],
@@ -232,7 +232,7 @@ entries:
       - {tool: spectral_renderer, inputs: [pre, post], optional: false,
          params: {size_px: 448}}
       - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
-         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+         params: {tile: 512, overlap: 64, tta: false}}
       - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
          params: {min_component_px: 25}}
       - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3],
@@ -249,7 +249,7 @@ entries:
       - {tool: spectral_renderer, inputs: [pre, post], optional: false,
          params: {size_px: 448}}
       - {tool: siamese_change_detector, inputs: [pre, post], depends_on: [1],
-         params: {threshold: 0.5, tile: 512, overlap: 64, tta: false}}
+         params: {tile: 512, overlap: 64, tta: false}}
       - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
          params: {min_component_px: 25, emit_geojson: true}}
 

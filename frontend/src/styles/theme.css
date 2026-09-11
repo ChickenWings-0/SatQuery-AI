@@ -1,0 +1,730 @@
+@import 'tailwindcss';
+
+/*
+ * The typefaces, self-hosted.
+ *
+ * `--font-sans` and `--font-mono` have named Inter and Geist Mono since F0, and
+ * nothing loaded either one: no `@font-face`, no link, no import. The whole
+ * product rendered in `system-ui` / `ui-monospace`, which meant the typographic
+ * identity was not merely absent, it was *different on every operating system*
+ * — Segoe on Windows, SF on macOS, Cantarell here. A design system whose face
+ * changes shape per visitor is not a design system.
+ *
+ * Self-hosted rather than linked to Google Fonts: this console is expected to
+ * run beside a GPU on a lab network that may have no route to the internet, and
+ * a typeface that disappears when the machine is offline is the same bug again.
+ * The files are the fontsource variable builds, copied into `public/fonts` so
+ * they keep stable URLs that `index.html` can preload.
+ *
+ * One variable file per family covers 100–900, so the three weights actually
+ * used (400/500/600) cost one download rather than three. Latin and Latin-Ext
+ * are shipped; `unicode-range` means a page of plain English never fetches
+ * Latin-Ext at all, and a filename with a Polish or Turkish character gets the
+ * right glyphs instead of a fallback.
+ */
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap; /* never hide text waiting for a face */
+  src: url('/fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Geist Mono Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/geist-mono-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Geist Mono Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/geist-mono-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+/*
+ * Metric-matched fallbacks.
+ *
+ * `font-display: swap` guarantees text is never invisible, and buys a reflow
+ * instead: the fallback renders first, then every line re-lays-out when the real
+ * face lands. On a three-column dashboard where the centre column is sized off
+ * its content, that reflow is visible as a jolt.
+ *
+ * These faces are the *local* system fonts, re-declared with Inter's and Geist
+ * Mono's own metrics so the first paint already occupies the right space. The
+ * overrides are computed, not guessed: read from the `head`/`hhea` tables of the
+ * shipped woff2 files, divided by the size-adjust, against Arial's published
+ * metrics (which Liberation Sans clones, so the number holds on Linux too).
+ *
+ *   Inter      upm 2048, asc 1984, desc -494, gap 0, avg lowercase 0.5363em
+ *   Geist Mono upm 1000, asc 1005, desc -295, gap 0, avg lowercase 0.6000em
+ *
+ * Geist Mono lands at size-adjust 100% because both it and every common
+ * monospace fallback are 0.6em to the character — monospace is the one case
+ * where the substitution is nearly free.
+ */
+
+@font-face {
+  font-family: 'Inter Fallback';
+  src: local('Arial'), local('Liberation Sans'), local('Helvetica Neue'), local('Segoe UI');
+  size-adjust: 101.75%;
+  ascent-override: 95.21%;
+  descent-override: 23.71%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Geist Mono Fallback';
+  src: local('Liberation Mono'), local('DejaVu Sans Mono'), local('Menlo'),
+    local('Consolas');
+  size-adjust: 100%;
+  ascent-override: 100.5%;
+  descent-override: 29.5%;
+  line-gap-override: 0%;
+}
+
+/*
+ * SatQuery AI — the Mission-Control palette (v2).
+ *
+ * One dark theme, deliberately: the imagery is the hero, and a satellite
+ * raster reads best against a near-black warm ground where nothing around it
+ * is brighter than the scene itself. The earth-toned identity (terracotta,
+ * sand, warm brown) is unchanged — it moved from the paper to the ink.
+ *
+ * Four rules this file exists to make enforceable:
+ *
+ *   1. The four status colours map 1:1 onto BOTH ToolStatus
+ *      (OK/DEGRADED/FAILED/SKIPPED) and CheckStatus (PASS/WARN/FAIL/SKIP).
+ *      The same colour means the same thing in the compatibility table, on the
+ *      KPI cards and in the pipeline modal.
+ *   2. --color-accent-cool means "this is currently selected" and nothing else.
+ *      It is now the same terracotta as the primary accent, one step deeper so
+ *      white text clears AA on it. Using it decoratively destroys the only
+ *      selection signal in the UI.
+ *   3. --color-evidence is for citation affordances only, so grounding never
+ *      reads as a status; --color-warn is the only colour allowed on an
+ *      uncited numeric span.
+ *   4. Each hue carries up to three roles, and the name says which contrast it
+ *      clears:
+ *
+ *     --color-<hue>          a FILL, and a mark at >=3:1  (WCAG 1.4.11)
+ *     --color-<hue>-text     small text at >=4.5:1        (WCAG 1.4.3)
+ *     --color-on-<hue>       the foreground ON that fill
+ *
+ * On a dark ground the split collapses for the status hues: a saturated green
+ * or orange that clears 3:1 as a mark on #100C0A also clears 4.5:1 as text, so
+ * `--color-ok-text` equals `--color-ok`. The `-text` tokens are kept anyway —
+ * every component reaches for them by role, and the contrast suite pins each
+ * pair to the ground it lands on, so a later re-tune of a fill cannot silently
+ * take the text with it.
+ *
+ * Every ratio in the comments below was computed from these hexes (WCAG 2.x
+ * relative luminance) against the grounds the token actually lands on,
+ * including each colour's own 8/12/15/20% tint — the chip case, where a naive
+ * check against the card misses the failure.
+ *
+ * There is deliberately no --color-fail-text. #f25555 already clears 4.5:1 on the
+ * ground (5.75), on a card (5.15) and on its own 8% tint (4.68).
+ */
+
+/*
+ * Shell breakpoints are two-dimensional.
+ *
+ * Width alone is the wrong question for this layout. A landscape phone is
+ * 844px wide and 390px tall: wide enough to trip a `min-width: 768px` query,
+ * far too short to hold a vertical navigation column with a device footer
+ * under it. Keying the shell to width only gave that device a 240px sidebar,
+ * a clipped nav and about 175px of imagery.
+ *
+ * So the shell — and only the shell — uses these instead of `md:` and `xl:`.
+ * Every other component keeps the plain width variants, because padding and
+ * grid density genuinely are width questions.
+ */
+@custom-variant wide (@media (min-width: 768px) and (min-height: 500px));
+@custom-variant desk (@media (min-width: 1280px) and (min-height: 500px));
+
+@theme {
+  /* ── surfaces ─────────────────────────────────────────────────────────── */
+  --color-bg-main: #100c0a; /* near-black warm ground — the canvas            */
+  --color-surface-card: #211814; /* raised: viewer, KPI cards, answer panel   */
+  --color-surface-elevated: #2d2018; /* modals, dropdowns, menus             */
+  --color-surface-sand: #dfa878; /* sand — the secondary accent, chips        */
+  --color-line: #2a1f1a; /* the everyday hairline                             */
+  --color-line-soft: #1e1612; /* internal rules inside a card                 */
+  --color-sidebar: #211814; /* the navigation column is a surface now         */
+  --color-sidebar-hi: #2d2018; /* sidebar hover/raised                        */
+  --color-sidebar-text: #e8d5c4; /* on-sidebar foreground (12.23:1)          */
+
+  /* Secondary text on the nav column: the dimmest tone that still clears
+     4.5:1 against BOTH the column and its hover state (4.98:1 / 4.51:1), so a
+     row does not fail the moment the pointer touches it.                    */
+  --color-sidebar-text-lo: #9a8579;
+
+  /* Status on the nav column. The column shares the card surface now, so
+     these are the base status hues — kept as their own tokens because the
+     health badge reaches for them by role.                                  */
+  --color-sidebar-ok: #22c55e; /* 7.65:1 on sidebar                           */
+  --color-sidebar-warn: #f97316; /* 6.22:1 on sidebar                         */
+
+  /* ── text ─────────────────────────────────────────────────────────────── */
+  --color-text-hi: #f0e6df; /* warm off-white (15.84:1 on the ground)         */
+  --color-text-lo: #9a8579; /* warm muted grey-brown (5.57:1 ground, 4.98 card) */
+
+  /* ── accents ──────────────────────────────────────────────────────────── */
+  --color-accent-warm: #ba704f; /* terracotta — borders, icons, large text    */
+  --color-accent-cool: #ab6242; /* ACTIVE SELECTION only — terracotta, deeper */
+  --color-evidence: #dfa878; /* citation pill FILL only — never as text       */
+
+  /* Terracotta at 14px. #ba704f is 5.11:1 on the ground, which passes — but
+     sand is the small-text voice of the accent here (9.28:1 ground, 8.30:1
+     card), and keeps links and labels off the same hue as the button fill.  */
+  --color-accent-warm-text: #dfa878;
+
+  /*
+   * The primary button's fill.
+   *
+   * White on #ba704f is 3.81:1, not the 4.6:1 the mockup claimed. Darkened
+   * until white clears: the button is visibly the same terracotta, one step
+   * deeper (4.61:1). The selection colour is the same hex for the same reason.
+   */
+  --color-accent-warm-strong: #ab6242; /* white on it: 4.61:1               */
+
+  /* Foregrounds for the fills. */
+  --color-on-evidence: #100c0a; /* ground-dark on sand (9.28:1)              */
+  --color-on-accent-cool: #ffffff; /* white on deep terracotta (4.61:1)      */
+
+  /* Tints and overlays. Alpha colours, so they sit on any surface. */
+  --color-accent-glow: rgba(186, 112, 79, 0.15); /* hover tint on cards/nav */
+  --color-bbox: rgba(186, 112, 79, 0.7); /* bounding-box stroke              */
+  --color-bbox-fill: rgba(186, 112, 79, 0.12); /* bounding-box fill          */
+  --color-bbox-label: #dfa878; /* bounding-box label text                    */
+
+  /* ── status: ToolStatus ∪ CheckStatus ─────────────────────────────────── */
+  --color-ok: #22c55e; /* emerald — 8.54:1 ground, 7.65:1 card                */
+  --color-warn: #f97316; /* amber/orange — fills, dots, the uncited underline */
+  --color-fail: #f25555; /* 5.75:1 ground · 5.15:1 card · 4.68:1 on bg-fail/8 */
+  --color-skip: #75685e; /* warm grey — 3.61:1 ground, 3.23:1 card (a mark)  */
+
+  /* Status hues at text weight. Each clears 4.5:1 on the ground, on a card,
+     AND on its own chip tint — the ground that catches people out.          */
+  --color-ok-text: #22c55e; /* 6.32:1 on bg-ok/12                            */
+  --color-warn-text: #f97316; /* 4.54:1 on bg-warn/20 · 5.58:1 on bg-warn/8  */
+  --color-skip-text: #a28d81; /* 4.80:1 on bg-skip/15                        */
+
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  /* `Inter Fallback` / `Geist Mono Fallback` sit between the real face and the
+     generic stack: they are the local system fonts wearing the real face's
+     metrics, so the pre-swap paint is the right size. See the @font-face block
+     at the top of this file. The generic keywords stay last for the machine
+     that has neither the woff2 nor Arial. */
+  --font-sans: 'Inter Variable', 'Inter Fallback', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono Fallback', ui-monospace, 'SFMono-Regular',
+    'Menlo', monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark; /* one dark theme: tell the browser, so form controls agree */
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-bg-main);
+    color: var(--color-text-hi);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    /* Filenames, CRS strings, trace ids, checkpoint hashes and pasted URLs are
+       all unbroken tokens longer than any column here. Wrapping is the default
+       so that a single one of them cannot widen a grid track and drag the whole
+       three-column layout sideways. */
+    overflow-wrap: break-word;
+  }
+
+  /* iOS Safari zooms the viewport whenever a focused control's text is under
+     16px, and then does not zoom back out — which leaves the three columns
+     mis-scaled for the rest of the session. The type scale stays as designed on
+     pointer devices; touch gets the 16px floor. */
+  @media (max-width: 640px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+
+  /* Metrics must not reflow as digits stream in from step_completed events. */
+  .tabular,
+  [data-metric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One visible focus treatment everywhere, in the selection colour. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent-warm);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* The nav column keeps its own, brighter ring: terracotta is 4.58:1 there,
+     which passes, but the column is the one place the ring sits beside a 3px
+     terracotta active-indicator and would read as part of it. */
+  [data-region='sidebar'] :focus-visible {
+    outline-color: var(--color-sidebar-text);
+  }
+
+  /*
+   * Light type on a dark ground blooms: the glyphs optically thicken and the
+   * counters close up, so the same tracking that is right on cream reads tight
+   * here. A hair of positive tracking is the standard compensation, and it is
+   * only worth doing now that the face is actually Inter rather than whatever
+   * `system-ui` resolved to.
+   */
+  [data-region='sidebar'] {
+    letter-spacing: 0.006em;
+  }
+
+  ::selection {
+    background: var(--color-accent-warm);
+    color: #fff;
+  }
+
+  /* Scrollbars, so the three independently scrolling columns do not each
+     paint a heavy grey gutter across the dark ground. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-accent-warm) transparent;
+  }
+
+  /*
+   * Touch targets, by input method rather than by screen width.
+   *
+   * Screen size does not tell you how someone is pointing: a 1400px laptop can
+   * have a touchscreen and a 1024px tablet can have a trackpad. So the floor is
+   * keyed to `pointer: coarse` and the dense desk layout keeps the 30px rows it
+   * was designed with, while a finger gets the full 44px everywhere.
+   *
+   * WCAG 2.5.8 (AA) asks for 24px and 2.5.5 (AAA) for 44px. This clears AAA on
+   * touch because the product's own controls are small, monospace and close
+   * together — a pipeline pulse of five 30px rows is a mis-tap waiting to
+   * happen on a phone.
+   *
+   * `[data-inline-target]` is the documented exception, not a loophole: 2.5.8
+   * exempts a target "in a sentence or block of text", and the citation pills
+   * are exactly that. Padding one to 44px would double-space the answer
+   * paragraph and break the reading rhythm the grounding depends on.
+   */
+  @media (pointer: coarse) {
+    button:not([data-inline-target]),
+    summary,
+    [role='button']:not([data-inline-target]),
+    label:has(> input[type='checkbox']) {
+      min-height: 44px;
+    }
+  }
+
+  /*
+   * ── Motion ──────────────────────────────────────────────────────────────
+   *
+   * This is an Operate surface: motion is feedback and state, never voice. It
+   * does three jobs and nothing else.
+   *
+   *   Feedback   The 120ms colour transitions already on the controls. They
+   *              acknowledge a press; they do not move anything.
+   *   State      One looping animation in the whole product — the RUNNING
+   *              status dot. It is the only thing here that repeats, and it
+   *              repeats because the state it reports genuinely persists.
+   *   Continuity The pipeline dialog's entrance, and evidence arriving in the
+   *              tray as the tool that produced it finishes.
+   *
+   * The tray entrance is the one authored moment, and it is authored because
+   * it *is* the product: "watch the machine work" is the pitch, and a view
+   * materialising the instant its `artifact` event lands is that claim made
+   * visible. It fires once per element, when React mounts a new `<li>`, so a
+   * re-render never replays it and a finished run never re-animates.
+   *
+   * Everything is transform/opacity/filter only. This UI runs beside a
+   * saturated GPU; nothing here may touch layout.
+   */
+
+  @keyframes sq-status-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.45;
+      transform: scale(0.82);
+    }
+  }
+
+  @keyframes sq-arrive {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes sq-overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes sq-dialog-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* The "System Ready" dot in the top bar. A slow opacity breath, not a
+     pulse: it says the health poll is alive, and it must never compete with
+     the RUNNING dot, which is the one that means "working now". */
+  @keyframes sq-glow {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.6;
+    }
+  }
+
+  /*
+   * "This step is running", wherever a status dot appears.
+   *
+   * On the dot rather than on its container. `animate-pulse` used to sit on the
+   * whole pipeline pill, which faded the tool name in and out — the one string
+   * a judge is trying to read while the run happens. Pulsing the 10px dot says
+   * the same thing and leaves the text alone.
+   */
+  [data-status='RUNNING'] {
+    animation: sq-status-pulse 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .sq-arrive {
+    animation: sq-arrive 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /*
+   * The second, and last, looping animation. It reports the health poll —
+   * a state that genuinely persists — and it moves nothing: opacity only,
+   * between 1 and 0.6, over two seconds. Anything faster or larger would
+   * read as an alert.
+   */
+  .sq-glow {
+    animation: sq-glow 2s ease-in-out infinite;
+  }
+
+  /*
+   * The dialog's entrance lives here rather than in an arbitrary Tailwind
+   * `[animation:...]` utility, and that is not a style preference. Utilities
+   * land in the `utilities` layer, which is emitted after `base`, so the
+   * reduced-motion override below lost the cascade to it every time and the
+   * dialog kept flying in for a user who had asked it not to. Same layer, same
+   * specificity, later rule wins — which is the only arrangement where the
+   * media query can actually do its job.
+   *
+   * Entrance only: `PipelineDialog` gates its content on `open`, so the element
+   * is unmounted before an exit could play.
+   */
+  [data-sq-overlay][data-state='open'] {
+    animation: sq-overlay-in 200ms ease-out;
+  }
+
+  [data-sq-dialog][data-state='open'] {
+    animation: sq-dialog-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /*
+   * Reduced motion: fewer and gentler, not off.
+   *
+   * The blanket `* { animation: 0.01ms !important }` recipe would take the
+   * running-state signal with it, and this product's whole claim is that you
+   * can see what the machine is doing. So each animation gets an intentional
+   * still alternative rather than a global kill:
+   *
+   *   - The status dot stops pulsing and stays fully opaque. RUNNING is still
+   *     unmistakable, because it was never only the motion — the dot is
+   *     `--color-accent-warm` and the pill carries a rust border and tint,
+   *     none of which move.
+   *   - The dialog and the tray keep their opacity fade and lose the transform.
+   *     A cross-fade still explains that something arrived; it just does not
+   *     travel.
+   *   - Colour transitions are untouched. They are feedback, not movement, and
+   *     removing them makes controls feel broken rather than calm.
+   *
+   * The DAG's animated edge dash is the one case CSS cannot reach — React Flow
+   * takes it as a prop — so `useReducedMotion` handles it in JS and swaps the
+   * moving dash for a heavier rust stroke.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    [data-status='RUNNING'] {
+      animation: none;
+      opacity: 1;
+    }
+
+    .sq-arrive {
+      animation-name: sq-overlay-in;
+      animation-duration: 160ms;
+    }
+
+    /* The health dot stops breathing and stays fully opaque; its colour
+       already carries the state. */
+    .sq-glow {
+      animation: none;
+      opacity: 1;
+    }
+
+    /* Keep the cross-fade, drop the travel: something still arrives, it just
+       does not move to get here. */
+    [data-sq-dialog][data-state='open'] {
+      animation-name: sq-overlay-in;
+      animation-duration: 200ms;
+    }
+
+    /* React Flow's own edge dash, which ships as a CSS animation. */
+    .react-flow__edge-path {
+      animation: none !important;
+    }
+  }
+
+  /* The honesty signal of API_CONTRACT §8.5, as a single reusable class:
+     a number the CitationValidator could not resolve to any measurement. */
+  /* A mark, not text: 3:1 is the bar (WCAG 1.4.11), and --color-warn clears
+     it at 6.22:1 on a card. The number itself is still --color-text-hi. */
+  .uncited {
+    text-decoration: underline wavy var(--color-warn);
+    text-underline-offset: 3px;
+    text-decoration-thickness: 2px;
+  }
+}
+
+/*
+ * The type scale and the surface vocabulary.
+ *
+ * Four sizes and three surfaces, defined once. Before this the markup carried
+ * eleven ad-hoc font sizes and four different border opacities, which is what
+ * made the dashboard read as a wireframe: nothing was deliberately louder than
+ * anything else.
+ */
+@layer components {
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  .t-page {
+    font-size: 1.5rem;
+    line-height: 1.15;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .t-panel {
+    font-size: 0.875rem;
+    line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: -0.006em;
+  }
+
+  /* Section eyebrows. Small, wide-tracked, quiet — they label a region without
+     competing with the data inside it. */
+  .t-eyebrow {
+    font-size: 0.6875rem;
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-text-lo);
+  }
+
+  .t-meta {
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--color-text-lo);
+  }
+
+  .t-mono {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── surfaces ─────────────────────────────────────────────────────────── */
+  .card {
+    background: var(--color-surface-card);
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+    transition: border-color 120ms ease;
+  }
+
+  /* A card that holds a chart or an image: no inner padding, header and footer
+     bounded by their own rules. */
+  .card-flush {
+    background: var(--color-surface-card);
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    transition: border-color 120ms ease;
+  }
+
+  /* Cards lift on hover by warming their edge, never by moving. Hover-guarded
+     like every hand-written hover rule in this file (see `.btn-primary`). */
+  @media (hover: hover) {
+    .card:hover,
+    .card-flush:hover {
+      border-color: rgba(186, 112, 79, 0.4);
+    }
+  }
+
+  /* The selected navigation row: a 3px terracotta bar on its leading edge and
+     a wash of the accent behind it. The bar is `box-shadow` rather than a
+     border so the row does not shift by 3px when it becomes active. */
+  .nav-active {
+    background: var(--color-accent-glow);
+    box-shadow: inset 3px 0 0 var(--color-accent-warm);
+  }
+
+  .rule {
+    border-color: var(--color-line-soft);
+  }
+
+  /* ── controls ─────────────────────────────────────────────────────────── */
+  .btn-primary {
+    background: var(--color-accent-warm-strong);
+    color: #fff;
+    border-radius: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: filter 120ms ease;
+  }
+  /*
+   * Hover is a capability, not a given.
+   *
+   * Tailwind v4 already wraps every `hover:` utility in `@media (hover: hover)`,
+   * but these hand-written rules are outside that machinery. Without the guard
+   * a touch browser emulates hover on tap and leaves the state stuck on the last
+   * control touched — which, in a product where `--color-accent-cool` means
+   * "selected" and nothing else, is the UI lying about state. `:active` and
+   * `:focus-visible` carry the feedback on touch; both are real.
+   */
+  @media (hover: hover) {
+    .btn-primary:hover:not(:disabled) {
+      filter: brightness(1.08);
+    }
+  }
+  .btn-primary:disabled {
+    opacity: 0.38;
+  }
+
+  /* The border is this control's only boundary, so it has to clear 3:1 like
+     any other control edge — terracotta is 5.11:1 on the ground. */
+  .btn-ghost {
+    border: 1px solid var(--color-accent-warm);
+    color: var(--color-accent-warm-text);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+  @media (hover: hover) {
+    .btn-ghost:hover {
+      background: var(--color-accent-warm-strong);
+      border-color: var(--color-accent-warm-strong);
+      color: #fff;
+    }
+  }
+
+  /* Keycaps in the hint strips. */
+  .kbd {
+    display: inline-flex;
+    min-width: 1.25rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-line);
+    border-bottom-width: 2px;
+    border-radius: 0.25rem;
+    background: var(--color-surface-card);
+    padding: 0 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    line-height: 1.4;
+    color: var(--color-text-lo);
+  }
+
+  /* Chips that carry an id or an enum. Monospace, because they are tokens. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    border-radius: 0.375rem;
+    padding: 0.125rem 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  /* A chip whose content is a long opaque token — a generator id, a checkpoint
+     hash — and must ellipsis rather than push the column open. */
+  .chip-truncate {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    border-radius: 0.375rem;
+    padding: 0.125rem 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}

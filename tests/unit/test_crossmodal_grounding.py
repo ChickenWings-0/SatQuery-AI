@@ -1180,3 +1180,159 @@ def test_the_learned_encoder_is_substituted_visibly_when_it_cannot_run(
     assert substituted, "the DOFA step was skipped rather than degraded"
     assert substituted[0].tool == "physics_agreement"
     assert substituted[0].status is ToolStatus.DEGRADED
+
+
+# ------------------------------------------- boxes without the Qwen sentinels
+
+
+def test_bare_coordinates_are_parsed_when_the_checkpoint_drops_the_sentinels() -> None:
+    """The fine-tuned GGUF's actual output shape, sampled from the served model.
+
+    It emits ``buildings(170,527),(238,577)`` — right coordinates, right frame,
+    no ``<|box_start|>``. The parser found nothing, so no box reached the
+    frontend and the run was marked ungrounded for stating numbers it could not
+    cite: a total failure caused by a missing pair of tags.
+    """
+    boxes = parse("buildings(170,527),(238,577)")
+
+    assert [(b.label, b.x_min, b.y_min, b.x_max, b.y_max) for b in boxes] == [
+        ("buildings", 170, 527, 238, 577)
+    ]
+
+
+def test_a_label_carries_across_a_run_of_bare_boxes() -> None:
+    """One label in front of several boxes labels all of them.
+
+    ``label(a)(b)(c)`` is three of that thing, not one of it and two anonymous
+    boxes — which is what the frontend would otherwise draw.
+    """
+    boxes = parse("buildings(100,738),(330,998)(370,768),(610,1000)(768,607),(998,998)")
+
+    assert len(boxes) == 3
+    assert {box.label for box in boxes} == {"buildings"}
+
+
+def test_bare_parsing_reads_multi_word_labels_and_resets_them() -> None:
+    """Both label spellings the served model produces, and a second class."""
+    spaced = parse("buildings and vehicles(0,0),(1000,1000)")
+    assert spaced[0].label == "buildings and vehicles"
+
+    underscored = parse("buildings_and_vehicles(0,0),(670,1000)")
+    assert underscored[0].label == "buildings_and_vehicles"
+
+    two = parse("buildings(100,100),(200,200) roads(300,300),(400,400)")
+    assert [box.label for box in two] == ["buildings", "roads"]
+
+
+def test_the_canonical_and_json_forms_still_win_over_bare_parsing() -> None:
+    """Bare parsing is the last resort, not a competing reading.
+
+    It treats any pair of coordinate pairs as a box, so letting it run alongside
+    the sentinel form would let stray numbers outvote a correctly tagged answer.
+    """
+    canonical = serialise([NormalisedBox(112, 340, 288, 512, label="aircraft")])
+    assert [b.label for b in parse(canonical)] == ["aircraft"]
+
+    from_json = parse('[{"bbox_2d": [10, 20, 110, 120], "label": "car"}]', width=448, height=448)
+    assert [b.label for b in from_json] == ["car"]
+
+
+def test_bare_parsing_still_yields_nothing_for_an_answer_with_no_boxes() -> None:
+    """"I could not find one" must stay an empty list, not an invented box."""
+    assert parse("There are no buildings in this scene.") == []
+    # Zero extent is a decoding artefact, and survives neither reading.
+    assert parse("thing(5,5),(5,5)") == []
+
+
+def test_bare_boxes_reach_the_frontend_record_with_their_labels() -> None:
+    """The parse is only useful if the label lands on the drawn record."""
+    from satquery.tools.text_grounding import build_box_records
+
+    geometry = _geometry(size=448, crs=None)
+    records, _ = build_box_records(parse("buildings(170,527),(238,577)"), geometry)
+
+    assert len(records) == 1
+    assert records[0]["label"] == "buildings"
+    x_min, y_min, x_max, y_max = records[0]["bbox_px"]
+    assert (x_min, y_min) == (170 * 448 // 1000, 527 * 448 // 1000)
+    assert x_max > x_min and y_max > y_min
+
+
+def test_box_coordinates_are_not_treated_as_uncited_claims() -> None:
+    """A grounding answer must not be penalised for containing boxes.
+
+    The grounding template orders the model to reply with nothing but boxes, and
+    the citation validator then read those coordinates as numeric claims with no
+    measurement behind them. Every grounding run came back DEGRADED with its
+    confidence capped for obeying its own instructions.
+    """
+    from satquery.agent.aggregator import aggregate
+    from satquery.evidence.fact_sheet import FactSheet
+    from satquery.models.prompts.box_format import strip_boxes
+
+    assert strip_boxes("built_up(0,0),(1000,1000)").strip() == "built_up"
+
+    grounded = aggregate(
+        task=TaskType.GROUNDING,
+        pair_type=PairType.SINGLE,
+        sheet=FactSheet(),
+        executions=[],
+        text="built_up(170,527),(238,577)",
+        generator="test",
+    )
+    assert grounded.answer.uncited_numeric_spans == []
+    # The boxes are stripped for the *check*, never from the answer itself.
+    assert grounded.answer.text == "built_up(170,527),(238,577)"
+
+
+def test_prose_numbers_in_a_grounding_answer_are_still_checked() -> None:
+    """Stripping boxes must not become a licence to state uncited measurements."""
+    from satquery.agent.aggregator import aggregate
+    from satquery.evidence.fact_sheet import FactSheet
+
+    answer = aggregate(
+        task=TaskType.GROUNDING,
+        pair_type=PairType.SINGLE,
+        sheet=FactSheet(),
+        executions=[],
+        text="built_up(10,10),(20,20) covering 42.10% of the scene",
+        generator="test",
+    ).answer
+
+    assert answer.uncited_numeric_spans, "an uncited percentage must still be flagged"
+
+
+def test_the_grounding_tool_and_its_synthesiser_get_different_instructions() -> None:
+    """One task, two turns — and only one of them is frozen.
+
+    ``text_grounding`` must emit machine-readable boxes, and its instruction is
+    frozen byte-identical against the Phase 7 corpus. The synthesiser that runs
+    after it writes the sentence the analyst reads, and handing it the same
+    instruction made it print a second, unparsed copy of the coordinates as the
+    chat answer — which is what the UI was showing.
+    """
+    from satquery.models.prompts.templates import get_template
+
+    template = get_template()
+    tool = template.instruction_for(TaskType.GROUNDING)
+    synthesiser = template.instruction_for(TaskType.GROUNDING, "grounding")
+
+    assert "<|box_start|>" in tool, "the tool's box format is frozen"
+    assert synthesiser != tool
+    assert "<|box_start|>" not in synthesiser
+    assert "coordinates" in synthesiser.lower()
+
+    # A mode with no entry of its own must fall through to the task instruction.
+    assert template.instruction_for(TaskType.VQA, "vqa") == template.instruction_for(
+        TaskType.VQA
+    )
+
+
+def test_the_synthesiser_prompt_carries_the_prose_instruction() -> None:
+    """And the tool's prompt keeps the box one, through the real builder."""
+    from satquery.evidence.fact_sheet import FactSheet
+    from satquery.models.prompts.builder import build_system_prompt
+
+    args = (TaskType.GROUNDING, PairType.SINGLE, FactSheet(), ("Image 1",))
+    assert "<|box_start|>" in build_system_prompt(*args)
+    assert "<|box_start|>" not in build_system_prompt(*args, mode="grounding")

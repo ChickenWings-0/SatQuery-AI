@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +18,7 @@ from fastapi.testclient import TestClient
 from satquery.api.app import TRACE_ID_HEADER, app
 from satquery.api.dependencies import get_artifact_store, get_trace_store
 from satquery.core.config import get_settings
+from satquery.models import loader
 from satquery.registry.registry import default_registry
 from satquery.render.artifact_store import ArtifactStore
 from satquery.schemas.api import (
@@ -76,6 +78,18 @@ def _image_parts(count: int = 2) -> list[tuple[str, tuple[str, bytes, str]]]:
 # ----------------------------------------------------------------------- health
 
 
+def _fake_torch(device_count: int, total: int = 24 * 1024**3, free: int = 15 * 1024**3) -> object:
+    """A torch stand-in for the device probe: no ROCm on CI, but the mapping is real."""
+    return SimpleNamespace(
+        cuda=SimpleNamespace(
+            device_count=lambda: device_count,
+            mem_get_info=lambda device: (free, total),
+            memory_allocated=lambda device: 0,
+            get_device_name=lambda device: "AMD Radeon RX 7900 XTX",
+        )
+    )
+
+
 def test_health_returns_200_and_parses(client: TestClient) -> None:
     response = client.get("/v1/health")
     assert response.status_code == 200
@@ -86,11 +100,48 @@ def test_health_returns_200_and_parses(client: TestClient) -> None:
     assert health.tools_available <= health.tools_total
 
 
-def test_health_asserts_igpu_is_masked(client: TestClient) -> None:
-    """A false here is a red flag before any demo (API_CONTRACT §4.9)."""
+def test_health_reports_igpu_masking_from_the_environment(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A false here is a red flag before any demo (API_CONTRACT §4.9).
+
+    Asserted as a *mapping* rather than as a constant: the old test pinned
+    ``igpu_masked is True`` against a fixture, so it passed on a CPU-only
+    runner with nothing masked at all — the check could not fail, which is
+    exactly what a pre-demo assertion must not be.
+    """
+    monkeypatch.setenv("HIP_VISIBLE_DEVICES", "0")
+    monkeypatch.setattr(loader, "torch_cuda_available", lambda: True)
+    fake_torch = _fake_torch(device_count=1)
+    monkeypatch.setattr(loader, "_torch", lambda: fake_torch)
+
     health = HealthResponse.model_validate(client.get("/v1/health").json())
     assert health.device.igpu_masked is True
     assert health.device.hip_visible_devices == "0"
+
+
+def test_health_reports_unmasked_igpu_when_a_second_device_is_visible(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The iGPU enumerating as a second HIP device is the failure being caught."""
+    monkeypatch.setenv("HIP_VISIBLE_DEVICES", "0")
+    monkeypatch.setattr(loader, "torch_cuda_available", lambda: True)
+    fake_torch = _fake_torch(device_count=2)
+    monkeypatch.setattr(loader, "_torch", lambda: fake_torch)
+
+    health = HealthResponse.model_validate(client.get("/v1/health").json())
+    assert health.device.igpu_masked is False
+
+
+def test_health_reports_unmasked_when_the_variable_is_unset(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unset HIP_VISIBLE_DEVICES means nothing was masked."""
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
+
+    health = HealthResponse.model_validate(client.get("/v1/health").json())
+    assert health.device.igpu_masked is False
+    assert health.device.hip_visible_devices is None
 
 
 def test_every_response_carries_a_trace_id_header(client: TestClient) -> None:

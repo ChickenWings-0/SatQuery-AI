@@ -14,6 +14,21 @@ bfloat16 is not a tuning choice. 8B parameters in fp16 or bf16 is ~16 GB before
 activations, fp32 does not fit on a 24 GB card at all, and bf16's exponent range
 avoids the overflow fp16 hits in the vision tower's attention on high-dynamic-range
 index views.
+
+**The weights are never quantised here, and that is deliberate.** The Phase 7
+adapter was trained under NF4, so serving under NF4 would match the training
+path — but bitsandbytes 4-bit *generation* is broken on this hardware (gfx1100,
+ROCm 6.4, torch 2.9.1): the base weights alone, adapter detached, answer "Name
+three primary colours" with a run of close-parens, while the same weights in
+bf16 answer correctly. 4-bit training is unaffected, which is why a 19-hour run
+completed without anyone noticing. bf16 costs ~16.4 GB of weights and a measured
+~18.7 GiB peak with six views attached, inside the 22 GB budget, so there is
+room to simply not quantise. Revisit only against a bitsandbytes build that
+demonstrably generates.
+
+Set ``SATQUERY_VLM_ADAPTER_PATH`` to serve the fine-tuned model; unset, this
+path serves stock Qwen3-VL, which answers in a different format and cites
+nothing.
 """
 
 from __future__ import annotations
@@ -32,6 +47,7 @@ from satquery.models.loader import (
     ModelLoadError,
     PromptImage,
     apply_memory_fraction,
+    apply_stop,
     empty_device_cache,
     estimate_weight_bytes,
     guard_vram,
@@ -52,6 +68,33 @@ def _to_pil(image: PromptImage) -> Any:
     from PIL import Image
 
     return Image.fromarray(np.ascontiguousarray(image.rgb, dtype=np.uint8), mode="RGB")
+
+
+_CHAT_CONTROL_TOKENS: Final[tuple[str, ...]] = (
+    "<|im_end|>",
+    "<|im_start|>",
+    "<|endoftext|>",
+    "<|vision_start|>",
+    "<|vision_end|>",
+    "<|vision_pad|>",
+    "<|image_pad|>",
+    "<|video_pad|>",
+)
+"""Chat and vision scaffolding removed from a decoded answer.
+
+Named explicitly rather than handled by ``skip_special_tokens``, which cannot
+tell these from the box sentinels a grounding answer is *made of*. Listing them
+means a token absent from this tuple survives into the text, which is the safe
+direction: an unexpected marker is visible in the trace, where a silently
+deleted box is not.
+"""
+
+
+def _strip_chat_tokens(text: str) -> str:
+    """Remove chat and vision scaffolding, leaving the box sentinels intact."""
+    for token in _CHAT_CONTROL_TOKENS:
+        text = text.replace(token, "")
+    return text.strip()
 
 
 def build_messages(request: GenerationRequest) -> list[dict[str, Any]]:
@@ -119,6 +162,7 @@ class HuggingFaceBackend(LazyBackend):
             kwargs["attn_implementation"] = self.config.attn_implementation
 
         model = self._from_pretrained(transformers, kwargs)
+        model = self._apply_adapter(model)
         model.to(device)
         model.eval()
 
@@ -129,7 +173,9 @@ class HuggingFaceBackend(LazyBackend):
         # never installed it. Calling through Any is silent under both, where an
         # inline ignore would be needed on the first and unused on the second.
         auto_processor: Any = transformers.AutoProcessor
-        self._processor = auto_processor.from_pretrained(self.source, local_files_only=True)
+        self._processor = auto_processor.from_pretrained(
+            self.processor_source, local_files_only=True
+        )
 
         # The estimate above sized the load; this checks what it actually cost,
         # because a guard that is never reconciled against reality is decoration.
@@ -138,6 +184,58 @@ class HuggingFaceBackend(LazyBackend):
         except ModelLoadError:
             self._unload()
             raise
+
+    @property
+    def processor_source(self) -> str:
+        """Where the processor is read from: the adapter directory when it has one.
+
+        The training run writes ``processor_config.json``, ``tokenizer_config.json``
+        and ``chat_template.jinja`` beside the adapter, and those are the settings
+        the adapter was *fitted under* — the pixel budget in particular. The base
+        repo's copies can differ, and a processor that tiles an image differently
+        from training changes the token stream the adapter learned to read.
+        """
+        adapter = self.config.adapter_path
+        if adapter is not None and (adapter / "processor_config.json").is_file():
+            return str(adapter)
+        return self.source
+
+    def _apply_adapter(self, model: Any) -> Any:
+        """Wrap the base weights in the Phase 7 LoRA adapter, when one is configured.
+
+        **Applied over bf16 base weights, never over NF4**, even though the
+        adapter was trained under NF4. Measured on this box (gfx1100, ROCm 6.4,
+        torch 2.9.1): bitsandbytes 4-bit *generation* emits token soup, base
+        weights alone with no adapter attached, while the same weights in bf16
+        answer correctly. 4-bit training is unaffected, which is why nothing
+        caught it during the run. So the serving path stays unquantised: ~16.4 GB
+        of weights and a measured ~18.7 GiB peak, inside the 22 GB budget.
+
+        Raises:
+            ModelLoadError: An adapter is configured but cannot be applied. A
+                silent fallback to the base model would serve stock Qwen3-VL
+                under the fine-tuned model's name, and the difference does not
+                look like an error — it looks like a bad answer.
+        """
+        adapter = self.config.adapter_path
+        if adapter is None:
+            return model
+        if not (adapter / "adapter_config.json").is_file():
+            raise ModelLoadError(
+                f"{adapter} holds no adapter_config.json. Unset "
+                "SATQUERY_VLM_ADAPTER_PATH to serve the base model deliberately."
+            )
+        try:
+            from peft import PeftModel
+        except ImportError as error:  # pragma: no cover - environment-dependent
+            raise ModelLoadError(
+                f"an adapter is configured at {adapter} but peft is not installed: "
+                f"{error}"
+            ) from error
+        try:
+            return PeftModel.from_pretrained(model, str(adapter), is_trainable=False)
+        except Exception as error:  # noqa: BLE001 - reported, never swallowed
+            raise ModelLoadError(f"could not apply the adapter at {adapter}: {error}") from error
 
     def _from_pretrained(self, transformers: Any, kwargs: dict[str, Any]) -> Any:
         """Instantiate the model through whichever class this build provides.
@@ -202,12 +300,29 @@ class HuggingFaceBackend(LazyBackend):
                 do_sample=not request.greedy,
                 temperature=None if request.greedy else request.temperature,
                 top_p=None if request.greedy else request.top_p,
+                # transformers matches these against the decoded tail, and needs
+                # the tokenizer to do it. Passing the strings without it is
+                # silently ignored, which is the same as not stopping at all.
+                stop_strings=list(request.stop) or None,
+                tokenizer=getattr(processor, "tokenizer", None),
             )
         duration_ms = int((time.perf_counter() - started) * 1000)
 
         new_tokens = produced[0][prompt_tokens:]
         completion_tokens = int(new_tokens.shape[-1])
-        text = processor.decode(new_tokens, skip_special_tokens=True).strip()
+        # Decoded with the special tokens KEPT, then trimmed by hand. Qwen's box
+        # sentinels — <|object_ref_start|>, <|box_start|> and their partners — are
+        # special tokens, so skip_special_tokens=True deletes exactly the markup a
+        # GROUNDING answer consists of. It leaves "lake(800,750),(1000,1000)",
+        # which box_format.parse does still recover, but only through the bare
+        # fallback it keeps for foreign checkpoints: the canonical tagged path
+        # never matches, and label-to-box association stops being structural and
+        # starts being a heuristic over whatever prose precedes the digits. So
+        # the scaffolding is stripped by name and everything else is left alone.
+        text = apply_stop(
+            _strip_chat_tokens(processor.decode(new_tokens, skip_special_tokens=False)),
+            request.stop,
+        )
 
         return GenerationResult(
             text=text,

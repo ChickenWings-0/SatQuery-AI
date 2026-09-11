@@ -27,7 +27,7 @@ from typing import Final
 
 from satquery.evidence.citation_validator import format_number
 from satquery.evidence.fact_sheet import Fact, FactSheet
-from satquery.models.loader import GenerationRequest, PromptImage
+from satquery.models.loader import CHAT_STOP_STRINGS, GenerationRequest, PromptImage
 from satquery.models.prompts.templates import PromptTemplate, get_template
 from satquery.schemas.enums import PairType, TaskType
 
@@ -81,8 +81,14 @@ class BuiltPrompt:
         max_new_tokens: int = 384,
         temperature: float = 0.0,
         seed: int = 0,
+        stop: Sequence[str] = CHAT_STOP_STRINGS,
     ) -> GenerationRequest:
-        """Turn the prompt into a backend-agnostic generation request."""
+        """Turn the prompt into a backend-agnostic generation request.
+
+        The stop set is passed explicitly rather than left to the dataclass
+        default: this is the only place in the system that builds a generation
+        request, so it is the only place where forgetting it goes unnoticed.
+        """
         return GenerationRequest(
             system=self.system,
             user=self.user,
@@ -90,6 +96,7 @@ class BuiltPrompt:
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             seed=seed,
+            stop=tuple(stop),
         )
 
 
@@ -174,6 +181,7 @@ def build_system_prompt(
     view_labels: Sequence[str],
     slots: Mapping[str, object] | None = None,
     template: PromptTemplate | None = None,
+    mode: str | None = None,
 ) -> str:
     """Build the FactSheet-constrained system prompt.
 
@@ -190,7 +198,7 @@ def build_system_prompt(
             render_fact_sheet(sheet, resolved),
             render_context(pair_type, slots or {}),
             resolved.rules,
-            resolved.instruction_for(task),
+            resolved.instruction_for(task, mode),
         )
     )
 
@@ -219,6 +227,7 @@ def build_prompt(
     slots: Mapping[str, object] | None = None,
     prompt_version: str | None = None,
     max_views: int = MAX_VIEWS,
+    mode: str | None = None,
 ) -> BuiltPrompt:
     """Assemble the complete prompt for one ``vlm_*`` step.
 
@@ -232,6 +241,9 @@ def build_prompt(
         slots: Resolved query slots, printed when filled.
         prompt_version: Template version; defaults to the current one.
         max_views: Cap on attached images, for the VRAM budget.
+        mode: The policy table's ``mode`` for this step. Selects a
+            synthesiser-specific instruction where the template defines one;
+            the grounding *tool* passes none and keeps the frozen box format.
 
     Returns:
         The assembled :class:`BuiltPrompt`.
@@ -241,7 +253,9 @@ def build_prompt(
     images = tuple(PromptImage(label=view.label, rgb=view.rgb) for view in selected)  # type: ignore[arg-type]
     labels = tuple(image.label for image in images)
     return BuiltPrompt(
-        system=build_system_prompt(task, pair_type, sheet, labels, slots, template),
+        system=build_system_prompt(
+            task, pair_type, sheet, labels, slots, template, mode
+        ),
         user=build_user_prompt(task, question),
         images=images,
         prompt_version=template.version,

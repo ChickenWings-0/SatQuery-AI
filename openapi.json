@@ -134,6 +134,137 @@
         }
       }
     },
+    "/v1/jobs": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Queue an analysis and watch it stream",
+        "description": "Accept the same body as ``/v1/analyze`` and return immediately.\n\nThe returned ``job_id`` *is* the eventual ``trace_id``, so the client can\naddress the trace before the pipeline has produced it.",
+        "operationId": "create_job_v1_jobs_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_job_v1_jobs_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Poll one job's progress",
+        "description": "Return the job's current stage, progress and \u2014 once finished \u2014 its result.",
+        "operationId": "get_job_v1_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/events": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Server-sent progress events for one job",
+        "description": "Stream the job's events, replaying everything that already happened.\n\nA subscriber that connects late \u2014 the normal case, since the client needs the\n``job_id`` from the 202 first \u2014 receives the buffered history before the live\ntail, so the DAG can always be drawn from the ``plan`` event.",
+        "operationId": "job_events_v1_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream. Event order is guaranteed: queued -> stage -> plan -> interleaved step_started/step_completed/artifact -> answer_delta* -> done|error. `done` and `error` are terminal and mutually exclusive.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or evicted job."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/artifacts/{trace_id}/{artifact_id}.{ext}": {
       "get": {
         "tags": [
@@ -190,6 +321,52 @@
           },
           "410": {
             "description": "The trace has been evicted"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/traces/{trace_id}": {
+      "get": {
+        "tags": [
+          "traces"
+        ],
+        "summary": "Fetch one stored audit trace",
+        "description": "Return the full audit trace for *trace_id*.",
+        "operationId": "get_trace_v1_traces__trace_id__get",
+        "parameters": [
+          {
+            "name": "trace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditTrace"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown trace."
           },
           "422": {
             "description": "Validation Error",
@@ -300,6 +477,67 @@
         ],
         "title": "Answer",
         "description": "The synthesised natural-language answer plus its honesty signals."
+      },
+      "ApiError": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "http_status": {
+            "type": "integer",
+            "maximum": 599.0,
+            "minimum": 400.0,
+            "title": "Http Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint",
+            "description": "An actionable next step."
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "http_status",
+          "message"
+        ],
+        "title": "ApiError",
+        "description": "The error payload (API_CONTRACT \u00a76).\n\n``message`` and ``hint`` are user-facing and safe to display verbatim: never\nleak file paths or stack traces into either."
       },
       "ArtifactGeo": {
         "properties": {
@@ -622,6 +860,42 @@
           "query"
         ],
         "title": "Body_analyze_v1_analyze_post"
+      },
+      "Body_create_job_v1_jobs_post": {
+        "properties": {
+          "images": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Images",
+            "description": "1-2 files. GeoTIFF preferred; PNG/JPEG accepted."
+          },
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "description": "1-1000 chars, UTF-8."
+          },
+          "options": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options",
+            "description": "JSON, see AnalyzeOptions."
+          }
+        },
+        "type": "object",
+        "required": [
+          "images",
+          "query"
+        ],
+        "title": "Body_create_job_v1_jobs_post"
       },
       "Body_validate_v1_validate_post": {
         "properties": {
@@ -1525,6 +1799,128 @@
         ],
         "title": "InputManifest",
         "description": "Everything the ingestion layer learned about one uploaded image.\n\nA field that is *inapplicable* is ``None``. A field that is *unknown* is\n``None`` **and** carries an entry in :attr:`warnings`."
+      },
+      "JobAccepted": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "const": "queued",
+            "title": "Status",
+            "default": "queued"
+          },
+          "poll_url": {
+            "type": "string",
+            "title": "Poll Url",
+            "description": "e.g. '/v1/jobs/b3f1...'."
+          },
+          "events_url": {
+            "type": "string",
+            "title": "Events Url",
+            "description": "SSE endpoint, e.g. '/v1/jobs/b3f1.../events'."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "poll_url",
+          "events_url"
+        ],
+        "title": "JobAccepted",
+        "description": "``POST /v1/jobs`` 202 body (API_CONTRACT \u00a74.2).\n\n``job_id`` *is* the eventual ``trace_id``: the id is minted before the\npipeline runs, so a client can address the trace before it exists."
+      },
+      "JobStatusResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage",
+            "description": "queued|ingesting|validating|rendering|planning|executing|aggregating|done."
+          },
+          "step": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Step"
+          },
+          "total_steps": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Steps"
+          },
+          "pct": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Pct"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalyzeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "stage",
+          "step",
+          "total_steps",
+          "pct",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "JobStatusResponse",
+        "description": "``GET /v1/jobs/{job_id}`` 200 body (API_CONTRACT \u00a74.3).\n\n``result`` is populated only once ``status`` is ``succeeded``, ``error``\nonly once it is ``failed``; they are mutually exclusive, mirroring the\n``done``/``error`` terminal SSE events."
       },
       "Modality": {
         "type": "string",

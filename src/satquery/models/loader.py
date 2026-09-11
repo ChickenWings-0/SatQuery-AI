@@ -28,7 +28,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -127,6 +127,43 @@ class PromptImage:
             raise ValueError(f"expected an (H, W, 3) RGB view, got {self.rgb.shape}")
 
 
+CHAT_STOP_STRINGS: Final[tuple[str, ...]] = (
+    "<|im_end|>",
+    "<|im_start|>",
+    "<|endoftext|>",
+    "<tool_call>",
+    "</tool_call>",
+)
+"""Where a Qwen3-VL turn is allowed to end, as text.
+
+The EOS *token* is the primary stop and llama.cpp honours it, but a fine-tuned
+checkpoint that never emits EOS is not a hypothetical: a QLoRA adapter trained on
+tool-calling transcripts will happily run past the end of its answer and start
+another turn. The observed failure was a grounding answer followed by ``800``
+tokens of ``</tool_call>`` — a decode that ended only on the token budget.
+
+Both tool-call markers are listed because the model reaches them from either
+side: opening one means the prose is over, and closing one appeared in the real
+transcript with no opening tag in sight. These are text stops, so they hold
+whether the marker arrives as a special token or as plain characters."""
+
+
+def apply_stop(text: str, stop: Sequence[str]) -> str:
+    """Cut *text* at the earliest stop string it contains.
+
+    Applied by both backends after generation rather than trusted to either. A
+    server may or may not strip the sequence it stopped on, and transformers only
+    honours ``stop_strings`` when it is handed a tokenizer — neither is a promise
+    worth putting a runaway decode in front of a user for.
+    """
+    cut = len(text)
+    for marker in stop:
+        found = text.find(marker)
+        if found != -1:
+            cut = min(cut, found)
+    return text[:cut].strip()
+
+
 @dataclass(frozen=True)
 class GenerationRequest:
     """One generation call, identical in shape for both backends."""
@@ -138,7 +175,10 @@ class GenerationRequest:
     temperature: float = 0.0
     top_p: float = 1.0
     seed: int = 0
-    stop: tuple[str, ...] = ()
+    stop: tuple[str, ...] = CHAT_STOP_STRINGS
+    """Defaulted, not left empty, because the field is read by both backends and
+    filled by exactly one caller. An empty default made every generation in the
+    system unstoppable while looking configurable."""
 
     @property
     def greedy(self) -> bool:
@@ -267,6 +307,46 @@ def vram_snapshot(device: str = "cuda:0") -> VramSnapshot:
     return VramSnapshot(device=device, total=int(total), free=int(free), allocated=allocated)
 
 
+def device_name(device: str = "cuda:0") -> str:
+    """The accelerator's marketing name, or a CPU label when there is none.
+
+    Read from the driver rather than from settings: a name that came from a
+    config file would keep saying "RX 7900 XTX" on a box that is quietly running
+    on the CPU, which is the exact confusion this endpoint exists to prevent.
+    """
+    torch = _torch()
+    if torch is None or device == "cpu" or not torch_cuda_available():
+        return "cpu"
+    try:
+        return str(torch.cuda.get_device_name(device))
+    except (RuntimeError, AssertionError, ValueError):  # pragma: no cover - driver
+        return "cpu"
+
+
+def igpu_masked(visible_devices: str | None = None) -> bool:
+    """True when ``HIP_VISIBLE_DEVICES`` has actually hidden the integrated GPU.
+
+    Two conditions, because either alone lies. The variable must be set — an
+    unset one means nothing was masked — *and* torch must see exactly one
+    device: on this box the 7800X3D's integrated GPU enumerates as a second,
+    ~512 MB HIP device, and a load that lands on it fails in a way that looks
+    like a driver bug rather than a masking mistake.
+
+    Reported as ``False`` on a CPU-only box, where there is no masking to assert
+    and claiming otherwise would turn a pre-demo check into a rubber stamp.
+    """
+    raw = os.environ.get("HIP_VISIBLE_DEVICES") if visible_devices is None else visible_devices
+    if not raw or not raw.strip():
+        return False
+    torch = _torch()
+    if torch is None or not torch_cuda_available():
+        return False
+    try:
+        return int(torch.cuda.device_count()) == 1
+    except (RuntimeError, AssertionError, ValueError):  # pragma: no cover - driver
+        return False
+
+
 def estimate_weight_bytes(
     param_count: int = DEFAULT_PARAM_COUNT, dtype: str = "bfloat16"
 ) -> int:
@@ -350,6 +430,16 @@ class BackendConfig:
 
     model_id: str = MODEL_ID
     model_path: Path | None = None
+    adapter_path: Path | None = None
+    """The Phase 7 QLoRA adapter to apply over the base weights, or None to serve
+    the base model.
+
+    A directory holding ``adapter_config.json`` and ``adapter_model.safetensors``
+    — what ``scripts/train_vlm.py`` writes. The adapter is applied at load time
+    and is what makes the served model the *fine-tuned* one; without it the HF
+    path serves stock Qwen3-VL, which answers in a different format entirely and
+    cites nothing."""
+
     gguf_path: Path | None = None
     server_url: str | None = None
     device: str = "cuda:0"
@@ -569,6 +659,7 @@ def backend_config(settings: Settings | None = None) -> BackendConfig:
         kind=_requested_kind((resolved.vlm_backend or "auto").strip().lower(), resolved),
         model_id=resolved.vlm_model_id,
         model_path=resolved.vlm_model_path,
+        adapter_path=resolved.vlm_adapter_path,
         gguf_path=resolved.vlm_gguf_path,
         server_url=resolved.vlm_server_url or None,
         device=resolve_torch_device(resolved.vlm_device),
@@ -642,6 +733,17 @@ def release_backend() -> None:
         _BACKEND = None
 
 
+def current_backend() -> VlmBackend | None:
+    """The backend if one is already constructed, without constructing one.
+
+    :func:`get_backend` loads weights on first call. ``/v1/health`` is polled
+    every 15 s by the sidebar, so it must be able to ask "is a model resident?"
+    without being the thing that makes one resident.
+    """
+    with _BACKEND_LOCK:
+        return _BACKEND
+
+
 def set_backend(backend: VlmBackend | None) -> None:
     """Install a backend explicitly. The seam the unit tests inject a fake at."""
     global _BACKEND
@@ -669,10 +771,13 @@ __all__ = [
     "apply_memory_fraction",
     "available_backend",
     "backend_config",
+    "current_backend",
+    "device_name",
     "empty_device_cache",
     "estimate_weight_bytes",
     "get_backend",
     "guard_vram",
+    "igpu_masked",
     "release_backend",
     "resolve_torch_device",
     "set_backend",

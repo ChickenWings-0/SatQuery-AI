@@ -2,13 +2,54 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Final
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from satquery.schemas.version import SCHEMA_VERSION
+
+ENV_FILE: Final[Path] = Path(".env")
+
+
+def load_env_file(path: Path | None = None) -> list[str]:
+    """Copy ``SATQUERY_*`` assignments out of ``.env`` and into ``os.environ``.
+
+    pydantic-settings reads the same file, but only into :class:`Settings`. Two
+    things that are not settings fields read the environment directly and cannot
+    see it — ``SATQUERY_CD_CHECKPOINT`` and ``SATQUERY_SEG_CHECKPOINT``, both
+    resolved deep inside tools that have no business importing application
+    settings. Put either in ``.env`` and it is silently ignored: the segmenter
+    reports no checkpoint, drops out of the registry, and every segmentation plan
+    degrades to spectral indices while the file that was supposed to configure it
+    sits there looking correct.
+
+    A real value in the environment always wins, so ``VAR=x uvicorn ...`` still
+    overrides the file.
+
+    Returns:
+        The names actually set, for the startup log.
+    """
+    source = path or ENV_FILE
+    applied: list[str] = []
+    try:
+        lines = source.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return applied
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        name, _, value = stripped.partition("=")
+        name = name.strip()
+        if not name.startswith("SATQUERY_") or name in os.environ:
+            continue
+        os.environ[name] = value.strip().strip('"').strip("'")
+        applied.append(name)
+    return applied
 
 
 class Settings(BaseSettings):
@@ -74,6 +115,14 @@ class Settings(BaseSettings):
     vlm_model_path: Path | None = Field(
         default=None,
         description="Local weights directory. Overrides the Hugging Face cache lookup.",
+    )
+    vlm_adapter_path: Path | None = Field(
+        default=None,
+        description=(
+            "Directory holding the Phase 7 LoRA adapter (adapter_config.json plus "
+            "adapter_model.safetensors). Applied over the base weights at load. "
+            "Unset serves stock Qwen3-VL, which is not the trained format."
+        ),
     )
     vlm_gguf_path: Path | None = Field(
         default=None, description="GGUF quantisation for the offline llama.cpp path."

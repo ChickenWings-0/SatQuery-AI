@@ -59,6 +59,22 @@ class DataError(RuntimeError):
     """A datamodule could not be constructed."""
 
 
+def _oscd_rgb_bands() -> Any:
+    """The RGB band spec the installed torchgeo's OSCD datamodule expects.
+
+    torchgeo through 0.7 took the literal string ``"rgb"``. 0.8 takes a sequence
+    of Sentinel-2 band names and iterates it to build per-band statistics, so the
+    old string is silently read as ``('r', 'g', 'b')`` and dies on the first
+    ``MEAN['r']`` lookup. Read from the dataset class rather than hard-coded, so
+    a reordering of the bands travels with torchgeo instead of with us.
+    """
+    try:
+        from torchgeo.datasets import OSCD
+    except ImportError:  # pragma: no cover - handled by _torchgeo_datamodules
+        return "rgb"
+    return getattr(OSCD, "rgb_bands", "rgb")
+
+
 def _torchgeo_datamodules() -> Any:
     """Import torchgeo's datamodules, or explain what to install.
 
@@ -210,7 +226,7 @@ class ChangeDataModule:
             common.setdefault("val_split_pct", self.val_split_pct)
             # OSCD's 13-band product would otherwise widen the stem and make the
             # two ablation rows differ in more than resolution.
-            common.setdefault("bands", "rgb")
+            common.setdefault("bands", _oscd_rgb_bands())
 
         try:
             self._inner = factory(**common)

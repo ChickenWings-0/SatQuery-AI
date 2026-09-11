@@ -1,0 +1,2657 @@
+[
+  {
+    "event": "queued",
+    "data": {
+      "job_id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+    }
+  },
+  {
+    "event": "stage",
+    "data": {
+      "stage": "ingesting",
+      "pct": 5
+    }
+  },
+  {
+    "event": "stage",
+    "data": {
+      "stage": "validating",
+      "pct": 10
+    }
+  },
+  {
+    "event": "stage",
+    "data": {
+      "stage": "planning",
+      "pct": 30
+    }
+  },
+  {
+    "event": "plan",
+    "data": {
+      "steps": [
+        {
+          "step": 1,
+          "tool": "spectral_renderer",
+          "depends_on": [],
+          "input_refs": [
+            "img_0",
+            "img_1"
+          ],
+          "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+        },
+        {
+          "step": 2,
+          "tool": "siamese_change_detector",
+          "depends_on": [
+            1
+          ],
+          "input_refs": [
+            "img_0",
+            "img_1"
+          ],
+          "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+        },
+        {
+          "step": 3,
+          "tool": "change_statistics",
+          "depends_on": [
+            2
+          ],
+          "input_refs": [
+            "@2:CHANGE_MASK"
+          ],
+          "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+        },
+        {
+          "step": 4,
+          "tool": "spectral_index_analyzer",
+          "depends_on": [
+            1
+          ],
+          "input_refs": [
+            "img_0",
+            "img_1"
+          ],
+          "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+        },
+        {
+          "step": 5,
+          "tool": "vlm_change_vqa",
+          "depends_on": [
+            1,
+            3,
+            4
+          ],
+          "input_refs": [
+            "@1",
+            "@2:CHANGE_MASK"
+          ],
+          "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+        }
+      ]
+    }
+  },
+  {
+    "event": "stage",
+    "data": {
+      "stage": "executing",
+      "pct": 45
+    }
+  },
+  {
+    "event": "step_started",
+    "data": {
+      "step": 1,
+      "tool": "spectral_renderer",
+      "est_ms": 420
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_0",
+      "type": "RENDERED_VIEW",
+      "mime": "image/jpeg",
+      "label": "Image 1 (optical true colour, pre-change, Sentinel-2, 2019-04-12)",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_0.jpg",
+      "geotiff_url": null,
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "view_id": "TC",
+        "source_image": "img_0",
+        "pad": {
+          "top": 0,
+          "left": 0,
+          "bottom": 0,
+          "right": 0
+        },
+        "fixed_domain": null
+      },
+      "inline": null,
+      "produced_by_step": 1
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_1",
+      "type": "RENDERED_VIEW",
+      "mime": "image/jpeg",
+      "label": "Image 2 (optical true colour, post-change, Sentinel-2, 2024-04-08)",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_1.jpg",
+      "geotiff_url": null,
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "view_id": "TC",
+        "source_image": "img_1",
+        "pad": {
+          "top": 0,
+          "left": 0,
+          "bottom": 0,
+          "right": 0
+        },
+        "fixed_domain": null
+      },
+      "inline": null,
+      "produced_by_step": 1
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_2",
+      "type": "RENDERED_VIEW",
+      "mime": "image/jpeg",
+      "label": "Image 3 (optical false colour infrared, pre-change, Sentinel-2, 2019-04-12)",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_2.jpg",
+      "geotiff_url": null,
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "view_id": "FCIR",
+        "source_image": "img_0",
+        "pad": {
+          "top": 0,
+          "left": 0,
+          "bottom": 0,
+          "right": 0
+        },
+        "fixed_domain": null
+      },
+      "inline": null,
+      "produced_by_step": 1
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_3",
+      "type": "RENDERED_VIEW",
+      "mime": "image/jpeg",
+      "label": "Image 4 (optical false colour infrared, post-change, Sentinel-2, 2024-04-08)",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_3.jpg",
+      "geotiff_url": null,
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "view_id": "FCIR",
+        "source_image": "img_1",
+        "pad": {
+          "top": 0,
+          "left": 0,
+          "bottom": 0,
+          "right": 0
+        },
+        "fixed_domain": null
+      },
+      "inline": null,
+      "produced_by_step": 1
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_4",
+      "type": "HEATMAP",
+      "mime": "image/png",
+      "label": "Image 5 (optical NDBI heatmap, pre-change, Sentinel-2, 2019-04-12, fixed scale -1 to +1)",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_4.png",
+      "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_4.tif",
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "view_id": "NDBI",
+        "source_image": "img_0",
+        "pad": {
+          "top": 0,
+          "left": 0,
+          "bottom": 0,
+          "right": 0
+        },
+        "fixed_domain": [
+          -1.0,
+          1.0
+        ],
+        "ndbi_mean": 0.0729537308216095,
+        "ndbi_std": 0.016710354015231133,
+        "ndbi_min": -0.1508379876613617,
+        "ndbi_max": 0.09229099005460739,
+        "ndbi_valid_pct": 100.0
+      },
+      "inline": null,
+      "produced_by_step": 1
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_5",
+      "type": "HEATMAP",
+      "mime": "image/png",
+      "label": "Image 6 (optical NDBI heatmap, post-change, Sentinel-2, 2024-04-08, fixed scale -1 to +1)",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_5.png",
+      "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_5.tif",
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "view_id": "NDBI",
+        "source_image": "img_1",
+        "pad": {
+          "top": 0,
+          "left": 0,
+          "bottom": 0,
+          "right": 0
+        },
+        "fixed_domain": [
+          -1.0,
+          1.0
+        ],
+        "ndbi_mean": 0.07464444637298584,
+        "ndbi_std": 0.01625695824623108,
+        "ndbi_min": -0.1508379876613617,
+        "ndbi_max": 0.09229099005460739,
+        "ndbi_valid_pct": 100.0
+      },
+      "inline": null,
+      "produced_by_step": 1
+    }
+  },
+  {
+    "event": "step_completed",
+    "data": {
+      "step": 1,
+      "status": "OK",
+      "duration_ms": 3,
+      "confidence": 0.99,
+      "output_refs": [
+        "art_0",
+        "art_1",
+        "art_2",
+        "art_3",
+        "art_4",
+        "art_5"
+      ]
+    }
+  },
+  {
+    "event": "step_started",
+    "data": {
+      "step": 2,
+      "tool": "siamese_change_detector",
+      "est_ms": 1800
+    }
+  },
+  {
+    "event": "step_started",
+    "data": {
+      "step": 4,
+      "tool": "spectral_index_analyzer",
+      "est_ms": 260
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_6",
+      "type": "CHANGE_MASK",
+      "mime": "image/png",
+      "label": "Change mask (binary)",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_6.png",
+      "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_6.tif",
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "method": "cva",
+        "threshold": 1.084935,
+        "changed_pixel_count": 10723,
+        "valid_pixel_count": 200704
+      },
+      "inline": null,
+      "produced_by_step": 2
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_7",
+      "type": "OVERLAY_PNG",
+      "mime": "image/png",
+      "label": "Change overlaid on the post-change view",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_7.png",
+      "geotiff_url": null,
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "alpha": 0.45,
+        "source_image": "img_1"
+      },
+      "inline": null,
+      "produced_by_step": 2
+    }
+  },
+  {
+    "event": "step_completed",
+    "data": {
+      "step": 2,
+      "status": "DEGRADED",
+      "duration_ms": 0,
+      "confidence": 0.72,
+      "output_refs": [
+        "art_6",
+        "art_7"
+      ]
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_8",
+      "type": "HEATMAP",
+      "mime": "image/png",
+      "label": "NDVI (img_0_pre), domain -1 to 1",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_8.png",
+      "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_8.tif",
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "fixed_domain": [
+          -1.0,
+          1.0
+        ],
+        "source_image": "img_0",
+        "ndvi_mean": 0.16117751598358154,
+        "ndvi_std": 0.013841351494193077,
+        "ndvi_min": 0.02106567472219467,
+        "ndvi_max": 0.17848755419254303,
+        "ndvi_valid_pct": 100.0
+      },
+      "inline": null,
+      "produced_by_step": 4
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_9",
+      "type": "HEATMAP",
+      "mime": "image/png",
+      "label": "NDWI (img_0_pre), domain -1 to 1",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_9.png",
+      "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_9.tif",
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "fixed_domain": [
+          -1.0,
+          1.0
+        ],
+        "source_image": "img_0",
+        "ndwi_mean": -0.2474057376384735,
+        "ndwi_std": 0.003701999317854643,
+        "ndwi_min": -0.25199949741363525,
+        "ndwi_max": -0.20644216239452362,
+        "ndwi_valid_pct": 100.0
+      },
+      "inline": null,
+      "produced_by_step": 4
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_10",
+      "type": "HEATMAP",
+      "mime": "image/png",
+      "label": "NDBI (img_0_pre), domain -1 to 1",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_10.png",
+      "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_10.tif",
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "fixed_domain": [
+          -1.0,
+          1.0
+        ],
+        "source_image": "img_0",
+        "ndbi_mean": 0.0729537308216095,
+        "ndbi_std": 0.016710354015231133,
+        "ndbi_min": -0.1508379876613617,
+        "ndbi_max": 0.09229099005460739,
+        "ndbi_valid_pct": 100.0
+      },
+      "inline": null,
+      "produced_by_step": 4
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_11",
+      "type": "HEATMAP",
+      "mime": "image/png",
+      "label": "NDVI (img_1_post), domain -1 to 1",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_11.png",
+      "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_11.tif",
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "fixed_domain": [
+          -1.0,
+          1.0
+        ],
+        "source_image": "img_1",
+        "ndvi_mean": 0.1626579612493515,
+        "ndvi_std": 0.013582578860223293,
+        "ndvi_min": 0.02106567472219467,
+        "ndvi_max": 0.17848755419254303,
+        "ndvi_valid_pct": 100.0
+      },
+      "inline": null,
+      "produced_by_step": 4
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_12",
+      "type": "HEATMAP",
+      "mime": "image/png",
+      "label": "NDWI (img_1_post), domain -1 to 1",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_12.png",
+      "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_12.tif",
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "fixed_domain": [
+          -1.0,
+          1.0
+        ],
+        "source_image": "img_1",
+        "ndwi_mean": -0.24779242277145386,
+        "ndwi_std": 0.0036195931024849415,
+        "ndwi_min": -0.25199949741363525,
+        "ndwi_max": -0.20644216239452362,
+        "ndwi_valid_pct": 100.0
+      },
+      "inline": null,
+      "produced_by_step": 4
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_13",
+      "type": "HEATMAP",
+      "mime": "image/png",
+      "label": "NDBI (img_1_post), domain -1 to 1",
+      "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_13.png",
+      "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_13.tif",
+      "geojson_url": null,
+      "geo": {
+        "crs": "EPSG:32643",
+        "transform": [
+          5.7142857142857135,
+          0.0,
+          712340.0,
+          0.0,
+          -5.7142857142857135,
+          3161780.0
+        ]
+      },
+      "width": 448,
+      "height": 448,
+      "stats": {
+        "fixed_domain": [
+          -1.0,
+          1.0
+        ],
+        "source_image": "img_1",
+        "ndbi_mean": 0.07464444637298584,
+        "ndbi_std": 0.01625695824623108,
+        "ndbi_min": -0.1508379876613617,
+        "ndbi_max": 0.09229099005460739,
+        "ndbi_valid_pct": 100.0
+      },
+      "inline": null,
+      "produced_by_step": 4
+    }
+  },
+  {
+    "event": "step_completed",
+    "data": {
+      "step": 4,
+      "status": "OK",
+      "duration_ms": 4,
+      "confidence": 0.95,
+      "output_refs": [
+        "art_8",
+        "art_9",
+        "art_10",
+        "art_11",
+        "art_12",
+        "art_13"
+      ]
+    }
+  },
+  {
+    "event": "step_started",
+    "data": {
+      "step": 3,
+      "tool": "change_statistics",
+      "est_ms": 90
+    }
+  },
+  {
+    "event": "artifact",
+    "data": {
+      "id": "art_14",
+      "type": "SCALARS",
+      "mime": "application/json",
+      "label": "Change statistics",
+      "url": null,
+      "geotiff_url": null,
+      "geojson_url": null,
+      "geo": null,
+      "width": null,
+      "height": null,
+      "stats": null,
+      "inline": {
+        "components": [
+          {
+            "bbox_px": [
+              69,
+              263,
+              192,
+              385
+            ],
+            "area_px": 10722,
+            "area_m2": 350106.12,
+            "centroid_px": [
+              132.8,
+              320.76
+            ]
+          }
+        ],
+        "component_count": 1,
+        "min_component_px": 25
+      },
+      "produced_by_step": 3
+    }
+  },
+  {
+    "event": "step_completed",
+    "data": {
+      "step": 3,
+      "status": "DEGRADED",
+      "duration_ms": 0,
+      "confidence": 0.97,
+      "output_refs": [
+        "art_14"
+      ]
+    }
+  },
+  {
+    "event": "step_started",
+    "data": {
+      "step": 5,
+      "tool": "vlm_change_vqa",
+      "est_ms": 4200
+    }
+  },
+  {
+    "event": "step_completed",
+    "data": {
+      "step": 5,
+      "status": "SKIPPED",
+      "duration_ms": 0,
+      "confidence": 0.0,
+      "output_refs": []
+    }
+  },
+  {
+    "event": "stage",
+    "data": {
+      "stage": "aggregating",
+      "pct": 85
+    }
+  },
+  {
+    "event": "done",
+    "data": {
+      "trace_id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      "answer": {
+        "text": "Approximately 5.34% of the analysed scene (0.35 km2) changed between the two acquisitions. The change is distributed across 1 distinct region, the largest covering 350,106.12 m2. Mean NDBI is essentially unchanged across the pair (0.07 then 0.07). Mean NDVI is essentially unchanged across the pair (0.16 then 0.16). This answer was written directly from the measured evidence because vlm_change_vqa did not run.",
+        "citations": [
+          {
+            "claim": "5.34%",
+            "source": "step:3/scalars.changed_area_pct",
+            "value": 5.3422
+          },
+          {
+            "claim": "0.35 km2",
+            "source": "step:3/scalars.changed_area_km2",
+            "value": 0.350106
+          },
+          {
+            "claim": "1",
+            "source": "step:3/scalars.component_count",
+            "value": 1.0
+          },
+          {
+            "claim": "350,106.12 m2",
+            "source": "step:3/scalars.changed_area_m2",
+            "value": 350106.12
+          },
+          {
+            "claim": "0.07",
+            "source": "step:4/scalars.ndbi_mean_pre",
+            "value": 0.072954
+          },
+          {
+            "claim": "0.16",
+            "source": "step:4/scalars.ndvi_mean_pre",
+            "value": 0.161178
+          }
+        ],
+        "uncited_numeric_spans": [],
+        "generator": "template_answer_v1",
+        "template_fallback": true
+      },
+      "artifacts": [
+        {
+          "id": "art_0",
+          "type": "RENDERED_VIEW",
+          "mime": "image/jpeg",
+          "label": "Image 1 (optical true colour, pre-change, Sentinel-2, 2019-04-12)",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_0.jpg",
+          "geotiff_url": null,
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "view_id": "TC",
+            "source_image": "img_0",
+            "pad": {
+              "top": 0,
+              "left": 0,
+              "bottom": 0,
+              "right": 0
+            },
+            "fixed_domain": null
+          },
+          "inline": null,
+          "produced_by_step": 1
+        },
+        {
+          "id": "art_1",
+          "type": "RENDERED_VIEW",
+          "mime": "image/jpeg",
+          "label": "Image 2 (optical true colour, post-change, Sentinel-2, 2024-04-08)",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_1.jpg",
+          "geotiff_url": null,
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "view_id": "TC",
+            "source_image": "img_1",
+            "pad": {
+              "top": 0,
+              "left": 0,
+              "bottom": 0,
+              "right": 0
+            },
+            "fixed_domain": null
+          },
+          "inline": null,
+          "produced_by_step": 1
+        },
+        {
+          "id": "art_2",
+          "type": "RENDERED_VIEW",
+          "mime": "image/jpeg",
+          "label": "Image 3 (optical false colour infrared, pre-change, Sentinel-2, 2019-04-12)",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_2.jpg",
+          "geotiff_url": null,
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "view_id": "FCIR",
+            "source_image": "img_0",
+            "pad": {
+              "top": 0,
+              "left": 0,
+              "bottom": 0,
+              "right": 0
+            },
+            "fixed_domain": null
+          },
+          "inline": null,
+          "produced_by_step": 1
+        },
+        {
+          "id": "art_3",
+          "type": "RENDERED_VIEW",
+          "mime": "image/jpeg",
+          "label": "Image 4 (optical false colour infrared, post-change, Sentinel-2, 2024-04-08)",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_3.jpg",
+          "geotiff_url": null,
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "view_id": "FCIR",
+            "source_image": "img_1",
+            "pad": {
+              "top": 0,
+              "left": 0,
+              "bottom": 0,
+              "right": 0
+            },
+            "fixed_domain": null
+          },
+          "inline": null,
+          "produced_by_step": 1
+        },
+        {
+          "id": "art_4",
+          "type": "HEATMAP",
+          "mime": "image/png",
+          "label": "Image 5 (optical NDBI heatmap, pre-change, Sentinel-2, 2019-04-12, fixed scale -1 to +1)",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_4.png",
+          "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_4.tif",
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "view_id": "NDBI",
+            "source_image": "img_0",
+            "pad": {
+              "top": 0,
+              "left": 0,
+              "bottom": 0,
+              "right": 0
+            },
+            "fixed_domain": [
+              -1.0,
+              1.0
+            ],
+            "ndbi_mean": 0.0729537308216095,
+            "ndbi_std": 0.016710354015231133,
+            "ndbi_min": -0.1508379876613617,
+            "ndbi_max": 0.09229099005460739,
+            "ndbi_valid_pct": 100.0
+          },
+          "inline": null,
+          "produced_by_step": 1
+        },
+        {
+          "id": "art_5",
+          "type": "HEATMAP",
+          "mime": "image/png",
+          "label": "Image 6 (optical NDBI heatmap, post-change, Sentinel-2, 2024-04-08, fixed scale -1 to +1)",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_5.png",
+          "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_5.tif",
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "view_id": "NDBI",
+            "source_image": "img_1",
+            "pad": {
+              "top": 0,
+              "left": 0,
+              "bottom": 0,
+              "right": 0
+            },
+            "fixed_domain": [
+              -1.0,
+              1.0
+            ],
+            "ndbi_mean": 0.07464444637298584,
+            "ndbi_std": 0.01625695824623108,
+            "ndbi_min": -0.1508379876613617,
+            "ndbi_max": 0.09229099005460739,
+            "ndbi_valid_pct": 100.0
+          },
+          "inline": null,
+          "produced_by_step": 1
+        },
+        {
+          "id": "art_6",
+          "type": "CHANGE_MASK",
+          "mime": "image/png",
+          "label": "Change mask (binary)",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_6.png",
+          "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_6.tif",
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "method": "cva",
+            "threshold": 1.084935,
+            "changed_pixel_count": 10723,
+            "valid_pixel_count": 200704
+          },
+          "inline": null,
+          "produced_by_step": 2
+        },
+        {
+          "id": "art_7",
+          "type": "OVERLAY_PNG",
+          "mime": "image/png",
+          "label": "Change overlaid on the post-change view",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_7.png",
+          "geotiff_url": null,
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "alpha": 0.45,
+            "source_image": "img_1"
+          },
+          "inline": null,
+          "produced_by_step": 2
+        },
+        {
+          "id": "art_8",
+          "type": "HEATMAP",
+          "mime": "image/png",
+          "label": "NDVI (img_0_pre), domain -1 to 1",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_8.png",
+          "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_8.tif",
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "fixed_domain": [
+              -1.0,
+              1.0
+            ],
+            "source_image": "img_0",
+            "ndvi_mean": 0.16117751598358154,
+            "ndvi_std": 0.013841351494193077,
+            "ndvi_min": 0.02106567472219467,
+            "ndvi_max": 0.17848755419254303,
+            "ndvi_valid_pct": 100.0
+          },
+          "inline": null,
+          "produced_by_step": 4
+        },
+        {
+          "id": "art_9",
+          "type": "HEATMAP",
+          "mime": "image/png",
+          "label": "NDWI (img_0_pre), domain -1 to 1",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_9.png",
+          "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_9.tif",
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "fixed_domain": [
+              -1.0,
+              1.0
+            ],
+            "source_image": "img_0",
+            "ndwi_mean": -0.2474057376384735,
+            "ndwi_std": 0.003701999317854643,
+            "ndwi_min": -0.25199949741363525,
+            "ndwi_max": -0.20644216239452362,
+            "ndwi_valid_pct": 100.0
+          },
+          "inline": null,
+          "produced_by_step": 4
+        },
+        {
+          "id": "art_10",
+          "type": "HEATMAP",
+          "mime": "image/png",
+          "label": "NDBI (img_0_pre), domain -1 to 1",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_10.png",
+          "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_10.tif",
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "fixed_domain": [
+              -1.0,
+              1.0
+            ],
+            "source_image": "img_0",
+            "ndbi_mean": 0.0729537308216095,
+            "ndbi_std": 0.016710354015231133,
+            "ndbi_min": -0.1508379876613617,
+            "ndbi_max": 0.09229099005460739,
+            "ndbi_valid_pct": 100.0
+          },
+          "inline": null,
+          "produced_by_step": 4
+        },
+        {
+          "id": "art_11",
+          "type": "HEATMAP",
+          "mime": "image/png",
+          "label": "NDVI (img_1_post), domain -1 to 1",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_11.png",
+          "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_11.tif",
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "fixed_domain": [
+              -1.0,
+              1.0
+            ],
+            "source_image": "img_1",
+            "ndvi_mean": 0.1626579612493515,
+            "ndvi_std": 0.013582578860223293,
+            "ndvi_min": 0.02106567472219467,
+            "ndvi_max": 0.17848755419254303,
+            "ndvi_valid_pct": 100.0
+          },
+          "inline": null,
+          "produced_by_step": 4
+        },
+        {
+          "id": "art_12",
+          "type": "HEATMAP",
+          "mime": "image/png",
+          "label": "NDWI (img_1_post), domain -1 to 1",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_12.png",
+          "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_12.tif",
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "fixed_domain": [
+              -1.0,
+              1.0
+            ],
+            "source_image": "img_1",
+            "ndwi_mean": -0.24779242277145386,
+            "ndwi_std": 0.0036195931024849415,
+            "ndwi_min": -0.25199949741363525,
+            "ndwi_max": -0.20644216239452362,
+            "ndwi_valid_pct": 100.0
+          },
+          "inline": null,
+          "produced_by_step": 4
+        },
+        {
+          "id": "art_13",
+          "type": "HEATMAP",
+          "mime": "image/png",
+          "label": "NDBI (img_1_post), domain -1 to 1",
+          "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_13.png",
+          "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_13.tif",
+          "geojson_url": null,
+          "geo": {
+            "crs": "EPSG:32643",
+            "transform": [
+              5.7142857142857135,
+              0.0,
+              712340.0,
+              0.0,
+              -5.7142857142857135,
+              3161780.0
+            ]
+          },
+          "width": 448,
+          "height": 448,
+          "stats": {
+            "fixed_domain": [
+              -1.0,
+              1.0
+            ],
+            "source_image": "img_1",
+            "ndbi_mean": 0.07464444637298584,
+            "ndbi_std": 0.01625695824623108,
+            "ndbi_min": -0.1508379876613617,
+            "ndbi_max": 0.09229099005460739,
+            "ndbi_valid_pct": 100.0
+          },
+          "inline": null,
+          "produced_by_step": 4
+        },
+        {
+          "id": "art_14",
+          "type": "SCALARS",
+          "mime": "application/json",
+          "label": "Change statistics",
+          "url": null,
+          "geotiff_url": null,
+          "geojson_url": null,
+          "geo": null,
+          "width": null,
+          "height": null,
+          "stats": null,
+          "inline": {
+            "components": [
+              {
+                "bbox_px": [
+                  69,
+                  263,
+                  192,
+                  385
+                ],
+                "area_px": 10722,
+                "area_m2": 350106.12,
+                "centroid_px": [
+                  132.8,
+                  320.76
+                ]
+              }
+            ],
+            "component_count": 1,
+            "min_component_px": 25
+          },
+          "produced_by_step": 3
+        }
+      ],
+      "confidence": {
+        "overall": 0.65,
+        "method": "weighted_tool_agreement_v1",
+        "components": {
+          "task_classification": 0.92,
+          "input_quality": 1.0,
+          "tool_mean": 0.5983,
+          "cross_tool_agreement": 0.75
+        },
+        "caps_applied": [
+          "degraded_execution",
+          "template_fallback"
+        ]
+      },
+      "compatibility": {
+        "pair_type": "BI_TEMPORAL",
+        "pair_type_source": "metadata",
+        "checks": [
+          {
+            "name": "crs_match",
+            "status": "PASS",
+            "value": "EPSG:32643",
+            "threshold": "identical CRS",
+            "detail": "Both images are in EPSG:32643; no reprojection was needed."
+          },
+          {
+            "name": "bounds_overlap_iou",
+            "status": "PASS",
+            "value": 1.0,
+            "threshold": "iou >= 0.80",
+            "detail": "The two footprints overlap by 100% of their combined extent."
+          },
+          {
+            "name": "gsd_ratio",
+            "status": "PASS",
+            "value": 1.0,
+            "threshold": "ratio <= 1.5",
+            "detail": "Resolutions are 10.00 m and 10.00 m (ratio 1.00)."
+          },
+          {
+            "name": "coregistration_offset_px",
+            "status": "PASS",
+            "value": 0.0,
+            "threshold": "offset <= 1.0 px",
+            "detail": "Phase correlation recovered a shift of 0.00 px (dx +0.00, dy +0.00) on a 10.00 m grid."
+          },
+          {
+            "name": "band_sufficiency",
+            "status": "PASS",
+            "value": "blue,green,nir,red,swir1,swir2",
+            "threshold": "required bands present",
+            "detail": "Every band required by the detected modality is present."
+          },
+          {
+            "name": "modality_distinct",
+            "status": "SKIP",
+            "value": null,
+            "threshold": "CROSS_MODAL only",
+            "detail": "Not applicable outside a cross-modal pair."
+          },
+          {
+            "name": "temporal_ordering",
+            "status": "PASS",
+            "value": "2019-04-12 -> 2024-04-08",
+            "threshold": "timestamps present and ordered",
+            "detail": "Acquisition times were read from metadata and define a clear interval."
+          },
+          {
+            "name": "georeference_present",
+            "status": "PASS",
+            "value": "both",
+            "threshold": "both georeferenced",
+            "detail": "Every image carries a CRS and an affine transform."
+          },
+          {
+            "name": "size_ratio",
+            "status": "PASS",
+            "value": 1.0,
+            "threshold": "ratio <= 1.5",
+            "detail": "The images are 256x256 and 256x256 pixels (ratio 1.00)."
+          },
+          {
+            "name": "nodata_extent",
+            "status": "PASS",
+            "value": 0.0,
+            "threshold": "nodata < 5 %",
+            "detail": "At most 0.00% of any image is nodata."
+          }
+        ],
+        "overall": "PASS",
+        "actions_taken": [
+          "measured a 0.00 px residual shift (dx +0.00, dy +0.00)",
+          "resampled both images onto a common 10.00 m grid in EPSG:32643 (256x256 px, bilinear)"
+        ],
+        "common_grid": {
+          "crs": "EPSG:32643",
+          "transform": [
+            10.0,
+            0.0,
+            712340.0,
+            0.0,
+            -10.0,
+            3161780.0
+          ],
+          "width": 256,
+          "height": 256,
+          "gsd_m": 10.0,
+          "resampling": "bilinear"
+        }
+      },
+      "resolved_task": {
+        "primary": "CHANGE_VQA",
+        "secondary": [
+          "CHANGE_MAP"
+        ],
+        "slots": {
+          "target_class": "built_up",
+          "spatial_constraint": null,
+          "output_format": "text",
+          "metric": "area_delta",
+          "direction": "increase"
+        },
+        "confidence": 0.92,
+        "classifier": "rules_v1+llm_slotfill_v1"
+      },
+      "trace": {
+        "trace_id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+        "schema_version": "1.0",
+        "created_at": "2026-09-07T00:45:53.237509Z",
+        "duration_ms": 10,
+        "query": {
+          "raw": "How much built-up area appeared?",
+          "normalized": "how much built-up area appeared?",
+          "language": "en"
+        },
+        "resolved_task": {
+          "primary": "CHANGE_VQA",
+          "secondary": [
+            "CHANGE_MAP"
+          ],
+          "slots": {
+            "target_class": "built_up",
+            "spatial_constraint": null,
+            "output_format": "text",
+            "metric": "area_delta",
+            "direction": "increase"
+          },
+          "confidence": 0.92,
+          "classifier": "rules_v1+llm_slotfill_v1"
+        },
+        "inputs": [
+          {
+            "id": "img_0",
+            "role": "pre",
+            "filename": "s2_pre.tif",
+            "sha256": "3e519037c0d28a07187e6f80a16ccca86e3654133d3d826a1078a66196b07513",
+            "size_bytes": 1194029,
+            "driver": "GTiff",
+            "modality": "optical",
+            "modality_confidence": 0.96,
+            "sensor_guess": "Sentinel-2 (BigEarthNet-v2, 12-band)",
+            "crs": "EPSG:32643",
+            "transform": [
+              10.0,
+              0.0,
+              712340.0,
+              0.0,
+              -10.0,
+              3161780.0
+            ],
+            "bounds_native": [
+              712340.0,
+              3159220.0,
+              714900.0,
+              3161780.0
+            ],
+            "bounds_wgs84": [
+              77.17031038202552,
+              28.54205751638987,
+              77.19693973528616,
+              28.56556952583287
+            ],
+            "gsd_m": 10.0,
+            "width": 256,
+            "height": 256,
+            "band_count": 12,
+            "dtype": "uint16",
+            "band_names": null,
+            "nodata_pct": 0.0,
+            "acquisition_time": "2019-04-12T05:26:41Z",
+            "is_georeferenced": true,
+            "warnings": [
+              "matched Sentinel-2 (BigEarthNet-v2, 12-band): 12 uint16 bands"
+            ]
+          },
+          {
+            "id": "img_1",
+            "role": "post",
+            "filename": "s2_post.tif",
+            "sha256": "5cadb8d78a6182c1f674edbaee74567446cd342c8a0ce19b6954c6e7699d50a7",
+            "size_bytes": 1120780,
+            "driver": "GTiff",
+            "modality": "optical",
+            "modality_confidence": 0.96,
+            "sensor_guess": "Sentinel-2 (BigEarthNet-v2, 12-band)",
+            "crs": "EPSG:32643",
+            "transform": [
+              10.0,
+              0.0,
+              712340.0,
+              0.0,
+              -10.0,
+              3161780.0
+            ],
+            "bounds_native": [
+              712340.0,
+              3159220.0,
+              714900.0,
+              3161780.0
+            ],
+            "bounds_wgs84": [
+              77.17031038202552,
+              28.54205751638987,
+              77.19693973528616,
+              28.56556952583287
+            ],
+            "gsd_m": 10.0,
+            "width": 256,
+            "height": 256,
+            "band_count": 12,
+            "dtype": "uint16",
+            "band_names": null,
+            "nodata_pct": 0.0,
+            "acquisition_time": "2024-04-08T05:26:33Z",
+            "is_georeferenced": true,
+            "warnings": [
+              "matched Sentinel-2 (BigEarthNet-v2, 12-band): 12 uint16 bands"
+            ]
+          }
+        ],
+        "compatibility": {
+          "pair_type": "BI_TEMPORAL",
+          "pair_type_source": "metadata",
+          "checks": [
+            {
+              "name": "crs_match",
+              "status": "PASS",
+              "value": "EPSG:32643",
+              "threshold": "identical CRS",
+              "detail": "Both images are in EPSG:32643; no reprojection was needed."
+            },
+            {
+              "name": "bounds_overlap_iou",
+              "status": "PASS",
+              "value": 1.0,
+              "threshold": "iou >= 0.80",
+              "detail": "The two footprints overlap by 100% of their combined extent."
+            },
+            {
+              "name": "gsd_ratio",
+              "status": "PASS",
+              "value": 1.0,
+              "threshold": "ratio <= 1.5",
+              "detail": "Resolutions are 10.00 m and 10.00 m (ratio 1.00)."
+            },
+            {
+              "name": "coregistration_offset_px",
+              "status": "PASS",
+              "value": 0.0,
+              "threshold": "offset <= 1.0 px",
+              "detail": "Phase correlation recovered a shift of 0.00 px (dx +0.00, dy +0.00) on a 10.00 m grid."
+            },
+            {
+              "name": "band_sufficiency",
+              "status": "PASS",
+              "value": "blue,green,nir,red,swir1,swir2",
+              "threshold": "required bands present",
+              "detail": "Every band required by the detected modality is present."
+            },
+            {
+              "name": "modality_distinct",
+              "status": "SKIP",
+              "value": null,
+              "threshold": "CROSS_MODAL only",
+              "detail": "Not applicable outside a cross-modal pair."
+            },
+            {
+              "name": "temporal_ordering",
+              "status": "PASS",
+              "value": "2019-04-12 -> 2024-04-08",
+              "threshold": "timestamps present and ordered",
+              "detail": "Acquisition times were read from metadata and define a clear interval."
+            },
+            {
+              "name": "georeference_present",
+              "status": "PASS",
+              "value": "both",
+              "threshold": "both georeferenced",
+              "detail": "Every image carries a CRS and an affine transform."
+            },
+            {
+              "name": "size_ratio",
+              "status": "PASS",
+              "value": 1.0,
+              "threshold": "ratio <= 1.5",
+              "detail": "The images are 256x256 and 256x256 pixels (ratio 1.00)."
+            },
+            {
+              "name": "nodata_extent",
+              "status": "PASS",
+              "value": 0.0,
+              "threshold": "nodata < 5 %",
+              "detail": "At most 0.00% of any image is nodata."
+            }
+          ],
+          "overall": "PASS",
+          "actions_taken": [
+            "measured a 0.00 px residual shift (dx +0.00, dy +0.00)",
+            "resampled both images onto a common 10.00 m grid in EPSG:32643 (256x256 px, bilinear)"
+          ],
+          "common_grid": {
+            "crs": "EPSG:32643",
+            "transform": [
+              10.0,
+              0.0,
+              712340.0,
+              0.0,
+              -10.0,
+              3161780.0
+            ],
+            "width": 256,
+            "height": 256,
+            "gsd_m": 10.0,
+            "resampling": "bilinear"
+          }
+        },
+        "plan": {
+          "planner": "policy_table_v1",
+          "policy_key": "CHANGE_VQA|BI_TEMPORAL|optical",
+          "steps": [
+            {
+              "step": 1,
+              "tool": "spectral_renderer",
+              "depends_on": [],
+              "input_refs": [
+                "img_0",
+                "img_1"
+              ],
+              "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+            },
+            {
+              "step": 2,
+              "tool": "siamese_change_detector",
+              "depends_on": [
+                1
+              ],
+              "input_refs": [
+                "img_0",
+                "img_1"
+              ],
+              "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+            },
+            {
+              "step": 3,
+              "tool": "change_statistics",
+              "depends_on": [
+                2
+              ],
+              "input_refs": [
+                "@2:CHANGE_MASK"
+              ],
+              "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+            },
+            {
+              "step": 4,
+              "tool": "spectral_index_analyzer",
+              "depends_on": [
+                1
+              ],
+              "input_refs": [
+                "img_0",
+                "img_1"
+              ],
+              "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+            },
+            {
+              "step": 5,
+              "tool": "vlm_change_vqa",
+              "depends_on": [
+                1,
+                3,
+                4
+              ],
+              "input_refs": [
+                "@1",
+                "@2:CHANGE_MASK"
+              ],
+              "reason": "policy_table:CHANGE_VQA|BI_TEMPORAL|optical"
+            }
+          ]
+        },
+        "executions": [
+          {
+            "step": 1,
+            "tool": "spectral_renderer",
+            "version": "1.0.0",
+            "status": "OK",
+            "device_used": "cpu",
+            "duration_ms": 3,
+            "params": {
+              "size_px": 448,
+              "pair_type": "BI_TEMPORAL"
+            },
+            "input_refs": [
+              "img_0",
+              "img_1"
+            ],
+            "output_refs": [
+              "art_0",
+              "art_1",
+              "art_2",
+              "art_3",
+              "art_4",
+              "art_5"
+            ],
+            "scalars": {
+              "views_unavailable": 0.0,
+              "views_rendered": 6.0
+            },
+            "confidence": 0.99,
+            "cache_hit": true,
+            "fallback_of": null,
+            "error": null
+          },
+          {
+            "step": 2,
+            "tool": "image_diff_change",
+            "version": "1.0.0",
+            "status": "DEGRADED",
+            "device_used": "cpu",
+            "duration_ms": 0,
+            "params": {
+              "threshold": 0.5,
+              "tile": 512,
+              "overlap": 64,
+              "tta": false,
+              "method": "cva",
+              "bands": [
+                "blue",
+                "green",
+                "red",
+                "nir",
+                "swir1",
+                "swir2"
+              ],
+              "sensitivity": 1.0,
+              "min_threshold": 0.0,
+              "threshold_rule": "otsu"
+            },
+            "input_refs": [
+              "img_0",
+              "img_1"
+            ],
+            "output_refs": [
+              "art_6",
+              "art_7"
+            ],
+            "scalars": {
+              "changed_area_pct": 5.3427,
+              "changed_pixel_count": 10723.0,
+              "threshold": 1.084935,
+              "method": "cva",
+              "magnitude_mean": 0.126043,
+              "magnitude_std": 0.506853
+            },
+            "confidence": 0.72,
+            "cache_hit": true,
+            "fallback_of": "siamese_change_detector",
+            "error": null
+          },
+          {
+            "step": 3,
+            "tool": "change_statistics",
+            "version": "1.0.0",
+            "status": "DEGRADED",
+            "device_used": "cpu",
+            "duration_ms": 0,
+            "params": {
+              "min_component_px": 25,
+              "connectivity": 2,
+              "emit_geojson": false,
+              "per_class": false,
+              "classes": []
+            },
+            "input_refs": [
+              "art_6"
+            ],
+            "output_refs": [
+              "art_14"
+            ],
+            "scalars": {
+              "changed_pixel_count": 10722.0,
+              "changed_area_pct": 5.3422,
+              "component_count": 1.0,
+              "min_component_px": 25.0,
+              "changed_area_m2": 350106.12,
+              "changed_area_km2": 0.350106,
+              "largest_component_m2": 350106.12,
+              "mean_component_m2": 350106.12
+            },
+            "confidence": 0.97,
+            "cache_hit": true,
+            "fallback_of": null,
+            "error": "an upstream step ran degraded"
+          },
+          {
+            "step": 4,
+            "tool": "spectral_index_analyzer",
+            "version": "1.0.0",
+            "status": "OK",
+            "device_used": "cpu",
+            "duration_ms": 4,
+            "params": {
+              "indices": [
+                "ndvi",
+                "ndwi",
+                "ndbi"
+              ],
+              "suffixes": [
+                "_pre",
+                "_post"
+              ],
+              "vegetation_fraction_pct": 0.3,
+              "water_fraction_pct": 0.0,
+              "built_up_fraction_pct": 0.0
+            },
+            "input_refs": [
+              "img_0",
+              "img_1"
+            ],
+            "output_refs": [
+              "art_8",
+              "art_9",
+              "art_10",
+              "art_11",
+              "art_12",
+              "art_13"
+            ],
+            "scalars": {
+              "ndvi_mean_pre": 0.161178,
+              "ndvi_std_pre": 0.013841,
+              "ndvi_min_pre": 0.021066,
+              "ndvi_max_pre": 0.178488,
+              "ndvi_valid_pct_pre": 100.0,
+              "ndwi_mean_pre": -0.247406,
+              "ndwi_std_pre": 0.003702,
+              "ndwi_min_pre": -0.251999,
+              "ndwi_max_pre": -0.206442,
+              "ndwi_valid_pct_pre": 100.0,
+              "ndbi_mean_pre": 0.072954,
+              "ndbi_std_pre": 0.01671,
+              "ndbi_min_pre": -0.150838,
+              "ndbi_max_pre": 0.092291,
+              "ndbi_valid_pct_pre": 100.0,
+              "vegetation_fraction_pct_pre": 0.0,
+              "water_fraction_pct_pre": 0.0,
+              "built_up_fraction_pct_pre": 99.4998,
+              "ndvi_mean_post": 0.162658,
+              "ndvi_std_post": 0.013583,
+              "ndvi_min_post": 0.021066,
+              "ndvi_max_post": 0.178488,
+              "ndvi_valid_pct_post": 100.0,
+              "ndwi_mean_post": -0.247792,
+              "ndwi_std_post": 0.00362,
+              "ndwi_min_post": -0.251999,
+              "ndwi_max_post": -0.206442,
+              "ndwi_valid_pct_post": 100.0,
+              "ndbi_mean_post": 0.074644,
+              "ndbi_std_post": 0.016257,
+              "ndbi_min_post": -0.150838,
+              "ndbi_max_post": 0.092291,
+              "ndbi_valid_pct_post": 100.0,
+              "vegetation_fraction_pct_post": 0.0,
+              "water_fraction_pct_post": 0.0,
+              "built_up_fraction_pct_post": 99.5894,
+              "indices_computed": "ndvi,ndwi,ndbi"
+            },
+            "confidence": 0.95,
+            "cache_hit": true,
+            "fallback_of": null,
+            "error": null
+          },
+          {
+            "step": 5,
+            "tool": "vlm_change_vqa",
+            "version": "1.0.0+zeroshot:qwen3vl8b",
+            "status": "SKIPPED",
+            "device_used": "rocm:0",
+            "duration_ms": 0,
+            "params": {
+              "mode": "vqa",
+              "max_new_tokens": 384,
+              "temperature": 0.0
+            },
+            "input_refs": [],
+            "output_refs": [],
+            "scalars": {},
+            "confidence": 0.0,
+            "cache_hit": false,
+            "fallback_of": null,
+            "error": "The tool is implemented, but no Qwen3-VL backend is servable here: neither a local snapshot nor a llama.cpp server was found. No fallback is declared."
+          }
+        ],
+        "artifacts": [
+          {
+            "id": "art_0",
+            "type": "RENDERED_VIEW",
+            "mime": "image/jpeg",
+            "label": "Image 1 (optical true colour, pre-change, Sentinel-2, 2019-04-12)",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_0.jpg",
+            "geotiff_url": null,
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "view_id": "TC",
+              "source_image": "img_0",
+              "pad": {
+                "top": 0,
+                "left": 0,
+                "bottom": 0,
+                "right": 0
+              },
+              "fixed_domain": null
+            },
+            "inline": null,
+            "produced_by_step": 1
+          },
+          {
+            "id": "art_1",
+            "type": "RENDERED_VIEW",
+            "mime": "image/jpeg",
+            "label": "Image 2 (optical true colour, post-change, Sentinel-2, 2024-04-08)",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_1.jpg",
+            "geotiff_url": null,
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "view_id": "TC",
+              "source_image": "img_1",
+              "pad": {
+                "top": 0,
+                "left": 0,
+                "bottom": 0,
+                "right": 0
+              },
+              "fixed_domain": null
+            },
+            "inline": null,
+            "produced_by_step": 1
+          },
+          {
+            "id": "art_2",
+            "type": "RENDERED_VIEW",
+            "mime": "image/jpeg",
+            "label": "Image 3 (optical false colour infrared, pre-change, Sentinel-2, 2019-04-12)",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_2.jpg",
+            "geotiff_url": null,
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "view_id": "FCIR",
+              "source_image": "img_0",
+              "pad": {
+                "top": 0,
+                "left": 0,
+                "bottom": 0,
+                "right": 0
+              },
+              "fixed_domain": null
+            },
+            "inline": null,
+            "produced_by_step": 1
+          },
+          {
+            "id": "art_3",
+            "type": "RENDERED_VIEW",
+            "mime": "image/jpeg",
+            "label": "Image 4 (optical false colour infrared, post-change, Sentinel-2, 2024-04-08)",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_3.jpg",
+            "geotiff_url": null,
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "view_id": "FCIR",
+              "source_image": "img_1",
+              "pad": {
+                "top": 0,
+                "left": 0,
+                "bottom": 0,
+                "right": 0
+              },
+              "fixed_domain": null
+            },
+            "inline": null,
+            "produced_by_step": 1
+          },
+          {
+            "id": "art_4",
+            "type": "HEATMAP",
+            "mime": "image/png",
+            "label": "Image 5 (optical NDBI heatmap, pre-change, Sentinel-2, 2019-04-12, fixed scale -1 to +1)",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_4.png",
+            "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_4.tif",
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "view_id": "NDBI",
+              "source_image": "img_0",
+              "pad": {
+                "top": 0,
+                "left": 0,
+                "bottom": 0,
+                "right": 0
+              },
+              "fixed_domain": [
+                -1.0,
+                1.0
+              ],
+              "ndbi_mean": 0.0729537308216095,
+              "ndbi_std": 0.016710354015231133,
+              "ndbi_min": -0.1508379876613617,
+              "ndbi_max": 0.09229099005460739,
+              "ndbi_valid_pct": 100.0
+            },
+            "inline": null,
+            "produced_by_step": 1
+          },
+          {
+            "id": "art_5",
+            "type": "HEATMAP",
+            "mime": "image/png",
+            "label": "Image 6 (optical NDBI heatmap, post-change, Sentinel-2, 2024-04-08, fixed scale -1 to +1)",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_5.png",
+            "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_5.tif",
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "view_id": "NDBI",
+              "source_image": "img_1",
+              "pad": {
+                "top": 0,
+                "left": 0,
+                "bottom": 0,
+                "right": 0
+              },
+              "fixed_domain": [
+                -1.0,
+                1.0
+              ],
+              "ndbi_mean": 0.07464444637298584,
+              "ndbi_std": 0.01625695824623108,
+              "ndbi_min": -0.1508379876613617,
+              "ndbi_max": 0.09229099005460739,
+              "ndbi_valid_pct": 100.0
+            },
+            "inline": null,
+            "produced_by_step": 1
+          },
+          {
+            "id": "art_6",
+            "type": "CHANGE_MASK",
+            "mime": "image/png",
+            "label": "Change mask (binary)",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_6.png",
+            "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_6.tif",
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "method": "cva",
+              "threshold": 1.084935,
+              "changed_pixel_count": 10723,
+              "valid_pixel_count": 200704
+            },
+            "inline": null,
+            "produced_by_step": 2
+          },
+          {
+            "id": "art_7",
+            "type": "OVERLAY_PNG",
+            "mime": "image/png",
+            "label": "Change overlaid on the post-change view",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_7.png",
+            "geotiff_url": null,
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "alpha": 0.45,
+              "source_image": "img_1"
+            },
+            "inline": null,
+            "produced_by_step": 2
+          },
+          {
+            "id": "art_8",
+            "type": "HEATMAP",
+            "mime": "image/png",
+            "label": "NDVI (img_0_pre), domain -1 to 1",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_8.png",
+            "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_8.tif",
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "fixed_domain": [
+                -1.0,
+                1.0
+              ],
+              "source_image": "img_0",
+              "ndvi_mean": 0.16117751598358154,
+              "ndvi_std": 0.013841351494193077,
+              "ndvi_min": 0.02106567472219467,
+              "ndvi_max": 0.17848755419254303,
+              "ndvi_valid_pct": 100.0
+            },
+            "inline": null,
+            "produced_by_step": 4
+          },
+          {
+            "id": "art_9",
+            "type": "HEATMAP",
+            "mime": "image/png",
+            "label": "NDWI (img_0_pre), domain -1 to 1",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_9.png",
+            "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_9.tif",
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "fixed_domain": [
+                -1.0,
+                1.0
+              ],
+              "source_image": "img_0",
+              "ndwi_mean": -0.2474057376384735,
+              "ndwi_std": 0.003701999317854643,
+              "ndwi_min": -0.25199949741363525,
+              "ndwi_max": -0.20644216239452362,
+              "ndwi_valid_pct": 100.0
+            },
+            "inline": null,
+            "produced_by_step": 4
+          },
+          {
+            "id": "art_10",
+            "type": "HEATMAP",
+            "mime": "image/png",
+            "label": "NDBI (img_0_pre), domain -1 to 1",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_10.png",
+            "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_10.tif",
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "fixed_domain": [
+                -1.0,
+                1.0
+              ],
+              "source_image": "img_0",
+              "ndbi_mean": 0.0729537308216095,
+              "ndbi_std": 0.016710354015231133,
+              "ndbi_min": -0.1508379876613617,
+              "ndbi_max": 0.09229099005460739,
+              "ndbi_valid_pct": 100.0
+            },
+            "inline": null,
+            "produced_by_step": 4
+          },
+          {
+            "id": "art_11",
+            "type": "HEATMAP",
+            "mime": "image/png",
+            "label": "NDVI (img_1_post), domain -1 to 1",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_11.png",
+            "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_11.tif",
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "fixed_domain": [
+                -1.0,
+                1.0
+              ],
+              "source_image": "img_1",
+              "ndvi_mean": 0.1626579612493515,
+              "ndvi_std": 0.013582578860223293,
+              "ndvi_min": 0.02106567472219467,
+              "ndvi_max": 0.17848755419254303,
+              "ndvi_valid_pct": 100.0
+            },
+            "inline": null,
+            "produced_by_step": 4
+          },
+          {
+            "id": "art_12",
+            "type": "HEATMAP",
+            "mime": "image/png",
+            "label": "NDWI (img_1_post), domain -1 to 1",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_12.png",
+            "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_12.tif",
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "fixed_domain": [
+                -1.0,
+                1.0
+              ],
+              "source_image": "img_1",
+              "ndwi_mean": -0.24779242277145386,
+              "ndwi_std": 0.0036195931024849415,
+              "ndwi_min": -0.25199949741363525,
+              "ndwi_max": -0.20644216239452362,
+              "ndwi_valid_pct": 100.0
+            },
+            "inline": null,
+            "produced_by_step": 4
+          },
+          {
+            "id": "art_13",
+            "type": "HEATMAP",
+            "mime": "image/png",
+            "label": "NDBI (img_1_post), domain -1 to 1",
+            "url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_13.png",
+            "geotiff_url": "/v1/artifacts/0f1e2d3c4b5a69788796a5b4c3d2e1f0/art_13.tif",
+            "geojson_url": null,
+            "geo": {
+              "crs": "EPSG:32643",
+              "transform": [
+                5.7142857142857135,
+                0.0,
+                712340.0,
+                0.0,
+                -5.7142857142857135,
+                3161780.0
+              ]
+            },
+            "width": 448,
+            "height": 448,
+            "stats": {
+              "fixed_domain": [
+                -1.0,
+                1.0
+              ],
+              "source_image": "img_1",
+              "ndbi_mean": 0.07464444637298584,
+              "ndbi_std": 0.01625695824623108,
+              "ndbi_min": -0.1508379876613617,
+              "ndbi_max": 0.09229099005460739,
+              "ndbi_valid_pct": 100.0
+            },
+            "inline": null,
+            "produced_by_step": 4
+          },
+          {
+            "id": "art_14",
+            "type": "SCALARS",
+            "mime": "application/json",
+            "label": "Change statistics",
+            "url": null,
+            "geotiff_url": null,
+            "geojson_url": null,
+            "geo": null,
+            "width": null,
+            "height": null,
+            "stats": null,
+            "inline": {
+              "components": [
+                {
+                  "bbox_px": [
+                    69,
+                    263,
+                    192,
+                    385
+                  ],
+                  "area_px": 10722,
+                  "area_m2": 350106.12,
+                  "centroid_px": [
+                    132.8,
+                    320.76
+                  ]
+                }
+              ],
+              "component_count": 1,
+              "min_component_px": 25
+            },
+            "produced_by_step": 3
+          }
+        ],
+        "fact_sheet": {
+          "spectral_renderer.views_unavailable": 0.0,
+          "spectral_renderer.views_rendered": 6.0,
+          "image_diff_change.changed_area_pct": 5.3427,
+          "image_diff_change.changed_pixel_count": 10723.0,
+          "image_diff_change.threshold": 1.084935,
+          "image_diff_change.method": "cva",
+          "image_diff_change.magnitude_mean": 0.126043,
+          "image_diff_change.magnitude_std": 0.506853,
+          "change_statistics.changed_pixel_count": 10722.0,
+          "change_statistics.changed_area_pct": 5.3422,
+          "change_statistics.component_count": 1.0,
+          "change_statistics.min_component_px": 25.0,
+          "change_statistics.changed_area_m2": 350106.12,
+          "change_statistics.changed_area_km2": 0.350106,
+          "change_statistics.largest_component_m2": 350106.12,
+          "change_statistics.mean_component_m2": 350106.12,
+          "spectral_index_analyzer.ndvi_mean_pre": 0.161178,
+          "spectral_index_analyzer.ndvi_std_pre": 0.013841,
+          "spectral_index_analyzer.ndvi_min_pre": 0.021066,
+          "spectral_index_analyzer.ndvi_max_pre": 0.178488,
+          "spectral_index_analyzer.ndvi_valid_pct_pre": 100.0,
+          "spectral_index_analyzer.ndwi_mean_pre": -0.247406,
+          "spectral_index_analyzer.ndwi_std_pre": 0.003702,
+          "spectral_index_analyzer.ndwi_min_pre": -0.251999,
+          "spectral_index_analyzer.ndwi_max_pre": -0.206442,
+          "spectral_index_analyzer.ndwi_valid_pct_pre": 100.0,
+          "spectral_index_analyzer.ndbi_mean_pre": 0.072954,
+          "spectral_index_analyzer.ndbi_std_pre": 0.01671,
+          "spectral_index_analyzer.ndbi_min_pre": -0.150838,
+          "spectral_index_analyzer.ndbi_max_pre": 0.092291,
+          "spectral_index_analyzer.ndbi_valid_pct_pre": 100.0,
+          "spectral_index_analyzer.vegetation_fraction_pct_pre": 0.0,
+          "spectral_index_analyzer.water_fraction_pct_pre": 0.0,
+          "spectral_index_analyzer.built_up_fraction_pct_pre": 99.4998,
+          "spectral_index_analyzer.ndvi_mean_post": 0.162658,
+          "spectral_index_analyzer.ndvi_std_post": 0.013583,
+          "spectral_index_analyzer.ndvi_min_post": 0.021066,
+          "spectral_index_analyzer.ndvi_max_post": 0.178488,
+          "spectral_index_analyzer.ndvi_valid_pct_post": 100.0,
+          "spectral_index_analyzer.ndwi_mean_post": -0.247792,
+          "spectral_index_analyzer.ndwi_std_post": 0.00362,
+          "spectral_index_analyzer.ndwi_min_post": -0.251999,
+          "spectral_index_analyzer.ndwi_max_post": -0.206442,
+          "spectral_index_analyzer.ndwi_valid_pct_post": 100.0,
+          "spectral_index_analyzer.ndbi_mean_post": 0.074644,
+          "spectral_index_analyzer.ndbi_std_post": 0.016257,
+          "spectral_index_analyzer.ndbi_min_post": -0.150838,
+          "spectral_index_analyzer.ndbi_max_post": 0.092291,
+          "spectral_index_analyzer.ndbi_valid_pct_post": 100.0,
+          "spectral_index_analyzer.vegetation_fraction_pct_post": 0.0,
+          "spectral_index_analyzer.water_fraction_pct_post": 0.0,
+          "spectral_index_analyzer.built_up_fraction_pct_post": 99.5894,
+          "spectral_index_analyzer.indices_computed": "ndvi,ndwi,ndbi"
+        },
+        "answer": {
+          "text": "Approximately 5.34% of the analysed scene (0.35 km2) changed between the two acquisitions. The change is distributed across 1 distinct region, the largest covering 350,106.12 m2. Mean NDBI is essentially unchanged across the pair (0.07 then 0.07). Mean NDVI is essentially unchanged across the pair (0.16 then 0.16). This answer was written directly from the measured evidence because vlm_change_vqa did not run.",
+          "citations": [
+            {
+              "claim": "5.34%",
+              "source": "step:3/scalars.changed_area_pct",
+              "value": 5.3422
+            },
+            {
+              "claim": "0.35 km2",
+              "source": "step:3/scalars.changed_area_km2",
+              "value": 0.350106
+            },
+            {
+              "claim": "1",
+              "source": "step:3/scalars.component_count",
+              "value": 1.0
+            },
+            {
+              "claim": "350,106.12 m2",
+              "source": "step:3/scalars.changed_area_m2",
+              "value": 350106.12
+            },
+            {
+              "claim": "0.07",
+              "source": "step:4/scalars.ndbi_mean_pre",
+              "value": 0.072954
+            },
+            {
+              "claim": "0.16",
+              "source": "step:4/scalars.ndvi_mean_pre",
+              "value": 0.161178
+            }
+          ],
+          "uncited_numeric_spans": [],
+          "generator": "template_answer_v1",
+          "template_fallback": true
+        },
+        "confidence": {
+          "overall": 0.65,
+          "method": "weighted_tool_agreement_v1",
+          "components": {
+            "task_classification": 0.92,
+            "input_quality": 1.0,
+            "tool_mean": 0.5983,
+            "cross_tool_agreement": 0.75
+          },
+          "caps_applied": [
+            "degraded_execution",
+            "template_fallback"
+          ]
+        },
+        "warnings": [
+          {
+            "code": "INPUT_QUALITY",
+            "message": "matched Sentinel-2 (BigEarthNet-v2, 12-band): 12 uint16 bands",
+            "ref": "img_0"
+          },
+          {
+            "code": "INPUT_QUALITY",
+            "message": "matched Sentinel-2 (BigEarthNet-v2, 12-band): 12 uint16 bands",
+            "ref": "img_1"
+          },
+          {
+            "code": "TOOL_SUBSTITUTED",
+            "message": "siamese_change_detector was replaced by image_diff_change. The tool is implemented, but no trained change-detection checkpoint was found. Train one with scripts/train_cd.py or set SATQUERY_CD_CHECKPOINT. Change questions are still answered by the image_diff_change fallback. Substituted declared fallback image_diff_change.",
+            "ref": null
+          },
+          {
+            "code": "TOOL_SKIPPED",
+            "message": "vlm_change_vqa: The tool is implemented, but no Qwen3-VL backend is servable here: neither a local snapshot nor a llama.cpp server was found. No fallback is declared.",
+            "ref": null
+          }
+        ],
+        "errors": []
+      }
+    }
+  }
+]

@@ -25,6 +25,7 @@ identity lives in :mod:`satquery.tools.change_common`.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -54,6 +55,8 @@ from satquery.tools.tiled_inference import (
     predict_tiled,
 )
 
+log = logging.getLogger(__name__)
+
 NAME: Final[str] = "siamese_change_detector"
 
 INFERENCE_SIZE_PX: Final[int] = 1024
@@ -69,6 +72,23 @@ latency one: the tile count grows quadratically and the demo has a budget."""
 
 OTSU: Final[str] = "otsu"
 """``threshold: otsu`` re-derives the operating point from this scene."""
+
+SELF_CHECK_TOLERANCE: Final[float] = 0.02
+"""Default absolute tolerance on the self-test's changed fraction.
+
+Across thirty loads a healthy detector returned 0.1152-0.1163 on the stored pair
+— a spread of 0.001 — while the corrupt loads returned 0.0000, 0.0000, 0.2872 and
+0.5661. Two percentage points is twenty times the observed healthy spread and an
+order of magnitude inside the nearest failure."""
+
+SELF_CHECK_ATTEMPTS: Final[int] = 4
+"""How many times to rebuild a model that fails its own known-answer test.
+
+Corruption is per-load, not per-process: it appeared in 4 of 30 loads on this
+card, and reloading after one cleared it every time. Retrying therefore turns a
+detected fault into a recovered one, which is the difference between a demo that
+degrades one run in eight and a demo that does not. Four attempts takes the
+residual failure rate from 13% to about one run in three thousand."""
 
 _OPTICAL_BANDS: Final[tuple[str, ...]] = ("red", "green", "blue")
 _SAR_BANDS: Final[tuple[str, ...]] = ("vv",)
@@ -115,6 +135,51 @@ class LoadedModel:
         return result
 
 
+def _self_check(loaded: LoadedModel) -> None:
+    """Verify a freshly loaded detector against the known answer in its bundle.
+
+    Both failure modes this system has produced are silent. A checkpoint loaded
+    onto a busy card comes up numerically corrupt and marks a third of every scene
+    changed, for the life of the process; a training/serving normalisation skew
+    once made it mark nothing changed, equally confidently. Neither raises. Both
+    produce a mask, a percentage and a fluent sentence quoting it, and nothing
+    downstream can tell the number is invented — so this is the last place the
+    fault can be caught at all.
+
+    On this machine it is not rare: 4 of 30 loads were corrupt.
+
+    Raises:
+        DetectorUnavailableError: The weights loaded but do not reproduce the
+            answer this checkpoint is known to give.
+    """
+    probe = loaded.bundle.self_test
+    if not probe or probe.get("pre") is None or probe.get("post") is None:
+        # A checkpoint from before the probe existed. Nothing to check against,
+        # and refusing to serve it would be worse than serving it unverified.
+        return
+
+    pre = np.asarray(probe["pre"], dtype=np.float32)
+    post = np.asarray(probe["post"], dtype=np.float32)
+    expected = float(probe["changed_fraction"])
+    tolerance = float(probe.get("tolerance") or SELF_CHECK_TOLERANCE)
+
+    probabilities = loaded.predict(pre, post)
+    if not np.isfinite(probabilities).all():
+        raise DetectorUnavailableError(
+            f"the detector returned non-finite probabilities on its own self-test "
+            f"after loading onto {loaded.device}"
+        )
+
+    measured = float((probabilities >= loaded.bundle.threshold).mean())
+    if abs(measured - expected) > tolerance:
+        raise DetectorUnavailableError(
+            f"the detector marked {measured:.2%} of its own self-test pair changed, "
+            f"where this checkpoint is known to mark {expected:.2%} "
+            f"(tolerance {tolerance:.2%}). The weights did not survive the load "
+            f"onto {loaded.device}."
+        )
+
+
 class ModelCache:
     """Loads the checkpoint once per process and keeps it on the device.
 
@@ -142,9 +207,42 @@ class ModelCache:
             cached = self._loaded.get(key)
             if cached is not None:
                 return cached
-            loaded = self._load(path, device)
+            loaded = self._build_verified(path, device)
             self._loaded[key] = loaded
             return loaded
+
+    def _build_verified(self, path: Path, device: str) -> LoadedModel:
+        """Load until the weights pass their own known-answer test.
+
+        The corruption this defends against is introduced *by* the load, not by
+        the checkpoint, so building again is a real fix rather than a retry in
+        hope. Nothing is cached until a model passes, so a caller never inherits
+        one that failed.
+
+        Raises:
+            DetectorUnavailableError: Every attempt produced unusable weights.
+        """
+        last: DetectorUnavailableError | None = None
+        for attempt in range(1, SELF_CHECK_ATTEMPTS + 1):
+            loaded = self._load(path, device)
+            try:
+                _self_check(loaded)
+            except DetectorUnavailableError as error:
+                last = error
+                log.warning(
+                    "change detector failed its self-test on attempt %d/%d: %s",
+                    attempt,
+                    SELF_CHECK_ATTEMPTS,
+                    error,
+                )
+                continue
+            if attempt > 1:
+                log.info("change detector loaded cleanly on attempt %d", attempt)
+            return loaded
+        raise DetectorUnavailableError(
+            f"the change detector failed its self-test on all {SELF_CHECK_ATTEMPTS} "
+            f"load attempts: {last}"
+        )
 
     def _load(self, path: Path, device: str) -> LoadedModel:
         """Read a bundle and instantiate its model."""
@@ -434,6 +532,8 @@ class SiameseChangeDetector:
 
 __all__ = [
     "INFERENCE_SIZE_PX",
+    "SELF_CHECK_ATTEMPTS",
+    "SELF_CHECK_TOLERANCE",
     "MAX_INFERENCE_SIZE_PX",
     "NAME",
     "OTSU",

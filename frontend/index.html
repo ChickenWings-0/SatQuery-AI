@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The browser chrome takes the ground colour, so a phone's status bar
+         and a desktop's title bar do not frame a dark console in white. -->
+    <meta name="theme-color" content="#100C0A" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="SatQuery AI — mission control for grounded Earth-observation analysis. Ask a question of satellite imagery and get an answer where every number is traced to the tool that measured it."
+    />
+
+    <!--
+      Preload the body face only.
+
+      Inter's Latin subset is on every screen from the first paint, so fetching
+      it in parallel with the CSS rather than after it removes the one swap the
+      user would actually notice. Geist Mono is deliberately not preloaded: it
+      carries metadata — ids, chips, manifest fields — and it sits at
+      size-adjust 100% against its fallback, so its swap costs no reflow and
+      does not deserve to compete with the stylesheet for bandwidth.
+
+      `crossorigin` is required even same-origin: fonts are fetched in CORS
+      mode, and without it the browser downloads the file twice.
+    -->
+    <link
+      rel="preload"
+      href="/fonts/inter-latin-wght-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+
+    <title>SatQuery AI — Mission Control</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
