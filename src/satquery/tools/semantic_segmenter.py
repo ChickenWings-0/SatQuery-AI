@@ -26,6 +26,7 @@ and the trace says so.
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 from collections.abc import Mapping, Sequence
@@ -55,6 +56,14 @@ CHECKPOINT_ENV: Final[str] = "SATQUERY_SEG_CHECKPOINT"
 MODEL_ID: Final[str] = "nvidia/segformer-b2-finetuned-ade-512-512"
 INPUT_PX: Final[int] = 512
 MIN_REGION_PX: Final[int] = 32
+
+IMAGENET_MEAN: Final[tuple[float, float, float]] = (0.485, 0.456, 0.406)
+IMAGENET_STD: Final[tuple[float, float, float]] = (0.229, 0.224, 0.225)
+DEFAULT_RESCALE: Final[float] = 1.0 / 255.0
+"""The preprocessing a SegFormer checkpoint is trained under, used when the
+checkpoint ships no ``preprocessor_config.json`` of its own. These are the
+ImageNet statistics every published SegFormer uses, and the 1/255 that turns an
+8-bit view into the unit range they were computed on."""
 
 LOVEDA_CLASSES: Final[tuple[str, ...]] = (
     "background",
@@ -122,6 +131,32 @@ class Segmenter(Protocol):
 # ------------------------------------------------------------------- the model
 
 
+def _read_preprocessing(checkpoint: str) -> tuple[float, tuple[float, ...], tuple[float, ...]]:
+    """The rescale factor, mean and std the *checkpoint itself* declares.
+
+    Taken from the checkpoint's ``preprocessor_config.json`` rather than
+    hard-coded, because it is the checkpoint's own contract: a model fine-tuned
+    under different statistics than we feed it produces a confident,
+    systematically wrong map rather than an obvious failure. Falls back to the
+    ImageNet constants every published SegFormer is trained under.
+    """
+    config = Path(checkpoint) / "preprocessor_config.json"
+    if not config.is_file():
+        return DEFAULT_RESCALE, IMAGENET_MEAN, IMAGENET_STD
+    try:
+        payload = json.loads(config.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return DEFAULT_RESCALE, IMAGENET_MEAN, IMAGENET_STD
+    scale = float(payload.get("rescale_factor", DEFAULT_RESCALE))
+    if not payload.get("do_rescale", True):
+        scale = 1.0
+    mean = tuple(float(v) for v in payload.get("image_mean", IMAGENET_MEAN))
+    std = tuple(float(v) for v in payload.get("image_std", IMAGENET_STD))
+    if not payload.get("do_normalize", True):
+        mean, std = (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
+    return scale, mean, std
+
+
 class SegformerSegmenter:
     """The real model: a SegFormer checkpoint loaded once and kept on the device."""
 
@@ -134,6 +169,7 @@ class SegformerSegmenter:
         self._lock = threading.Lock()
         self._model: Any = None
         self._torch: Any = None
+        self._preprocessing: tuple[float, tuple[float, ...], tuple[float, ...]] | None = None
 
     def _load(self) -> tuple[Any, Any]:
         """Bring the weights up once per process.
@@ -165,6 +201,7 @@ class SegformerSegmenter:
                 ) from error
             loaded: Any = model  # torch is an optional extra; see hf_backend.
             loaded.eval().to(self.device)
+            self._preprocessing = _read_preprocessing(self.checkpoint)
             self._model, self._torch = model, torch
             return model, torch
 
@@ -175,8 +212,24 @@ class SegformerSegmenter:
             SegmenterUnavailableError: The model could not be run.
         """
         model, torch = self._load()
+        scale, mean, std = self._preprocessing or (DEFAULT_RESCALE, IMAGENET_MEAN, IMAGENET_STD)
         with torch.no_grad():
-            tensor = torch.from_numpy(np.ascontiguousarray(rgb)).unsqueeze(0).to(self.device)
+            tensor = (
+                torch.from_numpy(np.ascontiguousarray(rgb, dtype=np.float32))
+                .unsqueeze(0)
+                .to(self.device)
+            )
+            # The view stack carries native raster values — 0..255 for the 8-bit
+            # RGB renders this tool actually receives — while SegFormer was
+            # trained on unit-scaled, ImageNet-standardised input. Feeding the
+            # raw stack is a ~250x distribution shift: the model still returns a
+            # full map, which is exactly why the error is worth being explicit
+            # about here rather than leaving to the caller.
+            shape = (1, -1, 1, 1)
+            tensor = tensor * scale
+            tensor = (tensor - torch.tensor(mean, device=self.device).reshape(shape)) / (
+                torch.tensor(std, device=self.device).reshape(shape)
+            )
             logits = model(pixel_values=tensor).logits
             # SegFormer decodes at a quarter of the input stride, so the logits
             # come back smaller than the image they describe.

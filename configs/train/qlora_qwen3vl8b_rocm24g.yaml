@@ -56,7 +56,12 @@ train:
   bf16: true
   seed: 42
   dataloader_num_workers: 8        # 16 logical cores, leave headroom
-  save_steps: 250
+  # Fault tolerance, not optimisation: this is how much work a crash can
+  # cost. At the measured 0.248 samples/s an optimiser step is ~65 s, so
+  # the old 250 put 4.5 h between checkpoints on a three-day run. 50 puts
+  # it at ~54 min, for 81 writes of ~183 MB each — and save_total_limit
+  # keeps only 3, so the disk cost is bounded at ~550 MB either way.
+  save_steps: 50
   eval_steps: 250
   logging_steps: 10
   resume_from_checkpoint: auto

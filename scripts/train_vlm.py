@@ -38,13 +38,20 @@ from satquery.models.loader import VRAM_BUDGET_BYTES, VramGuardError  # noqa: E4
 from satquery.training.vlm.qlora import (  # noqa: E402
     DEFAULT_PROFILE_PATH,
     SANITY_SAMPLES,
+    InterruptRequest,
+    ProfileError,
     QLoraProfile,
     RunPlan,
     VramEstimate,
     build_peft_model,
     build_trainer,
+    checkpoint_step,
+    describe_resume,
     estimate_footprint,
     guard_budget,
+    guard_images_present,
+    install_interrupt_handler,
+    latest_checkpoint,
     load_corpus,
     load_model_and_processor,
     load_profile,
@@ -70,6 +77,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--corpus", type=Path, default=None, help="Override data.corpus.")
     parser.add_argument("--val", type=Path, default=None, help="Override data.val.")
+    parser.add_argument(
+        "--max-eval-samples",
+        type=int,
+        default=None,
+        help="Cap the validation samples an eval pass reads (0 or 'all' for the "
+        "whole file). Overrides the profile; an unbounded eval can outlast the "
+        "training it reports on.",
+    )
     parser.add_argument("--image-root", type=Path, default=None)
     parser.add_argument(
         "--max-steps", type=int, default=None, help="Stop after this many optimiser steps."
@@ -77,7 +92,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--resume",
         default=None,
-        help="auto | true | false | a checkpoint path. Defaults to the profile.",
+        help="auto | true | false | a checkpoint path. Defaults to the profile's "
+        "'auto', which resumes when a checkpoint is present and starts fresh "
+        "when it is not — so the same command line restarts an interrupted run.",
+    )
+    parser.add_argument(
+        "--save-steps",
+        type=int,
+        default=None,
+        help="Write a resumable checkpoint every N optimiser steps. Overrides the "
+        "profile; lower it when the run has to survive being killed.",
+    )
+    parser.add_argument(
+        "--save-total-limit",
+        type=int,
+        default=None,
+        help="How many checkpoints to keep on disk. The newest is always kept.",
     )
     parser.add_argument(
         "--dry-run",
@@ -103,6 +133,12 @@ def resolve_profile(args: argparse.Namespace) -> QLoraProfile:
         profile.data.val = args.val
     if args.resume is not None:
         profile.train.resume_from_checkpoint = args.resume
+    if args.max_eval_samples is not None:
+        profile.data.eval_samples = args.max_eval_samples or None
+    if args.save_steps is not None:
+        profile.train.save_steps = args.save_steps
+    if args.save_total_limit is not None:
+        profile.train.save_total_limit = args.save_total_limit
     if args.sanity_check:
         profile.run_name = f"{profile.run_name}-sanity"
         profile.train.num_train_epochs = 1
@@ -119,7 +155,13 @@ def output_dir_for(args: argparse.Namespace, profile: QLoraProfile) -> Path:
     return Path("runs") / profile.run_name
 
 
-def report_plan(profile: QLoraProfile, plan: RunPlan, estimate: VramEstimate) -> None:
+def report_plan(
+    profile: QLoraProfile,
+    plan: RunPlan,
+    estimate: VramEstimate,
+    steps: int | None = None,
+    eval_samples: int = 0,
+) -> None:
     """Print what this run will do before it does any of it."""
     print(f"profile      : {profile.run_name} ({profile.base_model})")
     print(f"quantisation : {'nf4 4-bit' if profile.quantization.load_in_4bit else 'bf16'}")
@@ -128,6 +170,18 @@ def report_plan(profile: QLoraProfile, plan: RunPlan, estimate: VramEstimate) ->
         f"vram estimate: {estimate.total_gib:.1f} GiB of "
         f"{VRAM_BUDGET_BYTES / 1024**3:.0f} GiB budget "
         f"({estimate.adapter_params / 1e6:.1f} M trainable adapter params)"
+    )
+    # Against the steps this invocation will actually run, which --max-steps can
+    # cut well below the plan's. Reporting the plan's count here told an operator
+    # to expect 381 checkpoints from a 10-step run.
+    running = steps if steps is not None else plan.steps
+    print(
+        f"eval         : {eval_samples} samples every {profile.train.eval_steps} steps"
+    )
+    print(
+        f"checkpoints  : every {profile.train.save_steps} steps, keeping "
+        f"{profile.train.save_total_limit} "
+        f"({running // max(1, profile.train.save_steps)} scheduled over {running} steps)"
     )
 
 
@@ -147,6 +201,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     profile = resolve_profile(args)
     profile.apply_env()  # Must precede the first torch import.
+    interrupt = InterruptRequest()
 
     limit = SANITY_SAMPLES if args.sanity_check else None
     train_records = load_corpus(
@@ -158,16 +213,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     eval_records = (
         load_corpus(
             profile.data.val,
-            limit=16 if args.sanity_check else None,
+            limit=16 if args.sanity_check else profile.data.eval_samples,
             max_views=profile.data.max_views_per_sample,
             image_root=args.image_root,
         )
         if profile.data.val.is_file()
         else []
     )
+    # Before the 17 GB of weights, not after: a corpus pointing at unrendered
+    # views otherwise fails inside the dataloader, hours in and far from the cause.
+    try:
+        guard_images_present(train_records, str(profile.data.corpus))
+        if eval_records:
+            guard_images_present(eval_records, str(profile.data.val))
+    except ProfileError as error:
+        # A refusal, not a crash: the operator has a corpus to rebuild, and a
+        # traceback through PIL is the least useful way to be told so.
+        print(f"refusing to start: {error}", file=sys.stderr)
+        return 4
+
     plan = plan_run(profile, len(train_records), sanity_check=args.sanity_check)
     estimate = estimate_footprint(profile)
-    report_plan(profile, plan, estimate)
+    running_steps = args.max_steps if args.max_steps is not None else plan.steps
+    report_plan(
+        profile, plan, estimate, steps=running_steps, eval_samples=len(eval_records)
+    )
 
     if not args.skip_vram_guard:
         try:
@@ -231,16 +301,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         output_dir=output_dir,
+        interrupt=interrupt,
         max_steps=args.max_steps if args.max_steps is not None else (
             plan.steps if args.sanity_check else None
         ),
         total_steps=plan.steps,
     )
-    result = trainer.train(
-        resume_from_checkpoint=resume_target(
-            output_dir, profile.train.resume_from_checkpoint
-        )
+    print(f"resume       : {describe_resume(output_dir, profile.train.resume_from_checkpoint)}")
+    print(
+        "interrupt    : Ctrl+C once checkpoints at the next optimiser step and "
+        "stops cleanly; twice aborts immediately."
     )
+    restore_handlers = install_interrupt_handler(interrupt)
+    try:
+        result = trainer.train(
+            resume_from_checkpoint=resume_target(
+                output_dir, profile.train.resume_from_checkpoint
+            )
+        )
+    finally:
+        restore_handlers()
+
+    # Reached on a graceful stop as well as on a completed run: the callback
+    # ends training through the trainer's own control flow, so `train()`
+    # returns normally and the adapter and manifest below still get written.
+    stopped_early = interrupt.requested
 
     adapter_dir = output_dir / "adapter"
     trainer.model.save_pretrained(adapter_dir)
@@ -258,12 +343,54 @@ def main(argv: Sequence[str] | None = None) -> int:
             "trainable_parameters": counts,
             "metrics": getattr(result, "metrics", {}),
             "adapter": str(adapter_dir),
+            "interrupted": stopped_early,
+            "interrupted_by": interrupt.signal_name,
+            "last_checkpoint": str(last) if (last := latest_checkpoint(output_dir)) else None,
         },
     )
     print(f"adapter      : {adapter_dir}")
     print(f"peak vram    : {peak_memory_gib()} GiB")
     print(json.dumps(getattr(result, "metrics", {}), indent=2, default=str))
+
+    if stopped_early:
+        # The one thing an operator needs at this moment is the command that
+        # picks the run back up, not a stack trace and a guess.
+        resume_from = latest_checkpoint(output_dir)
+        where = (
+            f"checkpoint-{checkpoint_step(resume_from)}" if resume_from else "no checkpoint"
+        )
+        print()
+        print(f"stopped on {interrupt.signal_name} at {where}. Resume with:")
+        print(f"  {resume_command(args, output_dir)}")
+        return 130
     return 0
+
+
+def resume_command(args: argparse.Namespace, output_dir: Path) -> str:
+    """The exact command line that continues this run.
+
+    Rebuilt from the arguments this process was given rather than hardcoded, so
+    a run started with a non-default corpus or profile resumes with them too —
+    resuming under a different plan is how a schedule silently changes shape
+    halfway through.
+    """
+    parts = ["uv", "run", "python", "scripts/train_vlm.py"]
+    parts += ["--config", str(args.config)]
+    parts += ["--output-dir", str(output_dir)]
+    if args.corpus is not None:
+        parts += ["--corpus", str(args.corpus)]
+    if args.val is not None:
+        parts += ["--val", str(args.val)]
+    if args.image_root is not None:
+        parts += ["--image-root", str(args.image_root)]
+    if args.max_steps is not None:
+        parts += ["--max-steps", str(args.max_steps)]
+    if args.save_steps is not None:
+        parts += ["--save-steps", str(args.save_steps)]
+    if args.sanity_check:
+        parts.append("--sanity-check")
+    parts += ["--resume", "auto"]
+    return " ".join(parts)
 
 
 if __name__ == "__main__":  # pragma: no cover - process entry point

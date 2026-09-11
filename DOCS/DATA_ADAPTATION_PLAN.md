@@ -192,13 +192,25 @@ Tasks: `VQA`, `CAPTION`, `GROUNDING`. Views: `TC` only (already 3-channel). Samp
 
 > The official VRSBench **test** split is quarantined for Phase 8 and must never enter the corpus. `build_corpus.py` asserts this by id.
 
+> **Read from disk, never through `load_dataset`.** `xiang709/VRSBench` publishes four archives and no table. Hugging Face's data-file inference sweeps every filename containing `train` into the train split and hands the lot to the JSON packaged builder — including `Images_train.zip`, 8.4 GB of PNG — so pyarrow raises `ArrowInvalid: JSON parse error: Invalid value. in row 0` on the first image header it meets. It fails *late*, after the annotation zip is exhausted, which is why a small `--limit` smoke run passed and the full pass did not. This is what excluded VRSBench from the previous corpus. `local_sources.iter_vrsbench` reads the unpacked `Annotations_{train,val}/` directories instead; those 20,264 + 9,350 objects are the whole published dataset, and the quarantined test split is simply not among them.
+
 ### 4.3 `rsvqa.py`
 
 RSVQA-HR: 10,659 images, 1,066,316 QA pairs across presence / comparison / count / area. Sample **10,000**, balanced across the four question types (they are wildly imbalanced in the raw data, and unbalanced sampling teaches the model to guess the majority type). Tasks: `VQA`, `COUNT`. Views: `TC`.
 
+> **Provenance.** There is no usable RSVQA-HR release on Hugging Face — the one entry, `dmarsili/RSVQA-HR-2k`, is a 2,000-row *validation* subset. The canonical release is Zenodo record **6344367**, fetched by `scripts/fetch_sources.py --source rsvqa_hr`.
+>
+> **The `active` flag is the split.** Every `USGS_split_<split>_*.json` contains *all* 955,664 questions and marks that split's members with `active: true`. Reading the train file at face value pulls the official test and Philadelphia splits into training — 330,324 of its rows are not train rows. `local_sources.iter_rsvqa_hr` filters on it, and §4.7 makes failing to a build error rather than a warning.
+>
+> `area` answers ("521m2") are supervised as citations of `semantic_segmenter.area_m2`, exactly as `count` answers cite `object_counter.count`. Both are measurements; passing a bare number through uncited fails the §4.6 citation audit, which is the correct outcome.
+
 ### 4.4 `cdvqa.py`
 
 CDVQA — change-detection VQA built over the SECOND bi-temporal dataset. Sample **8,000**. Task: `CHANGE_VQA`. `pair_type: BI_TEMPORAL`. Views: `TC(pre), TC(post)`.
+
+> **Provenance.** `ljx620/CDVQA` on Hugging Face, published as a **WebDataset**: 1,533 tar shards of `<key>.0.img` (pre), `<key>.1.img` (post) and `<key>.json` (a LLaVA turn plus metadata). `load_dataset` yields conversation dicts and inline bytes, which is neither the row shape `from_cdvqa` reads nor something the render pass can address by path, so `scripts/fetch_sources.py --source cdvqa` unpacks shards into pre/post PNG pairs and flat record rows.
+>
+> The shards repeat each pair's image bytes once per question (~40 questions per pair), so the full train split is 52 GB for 2,968 distinct scenes. `--shards` bounds the download; **scene count, not row count, is what bounds the variety** — 300 shards is ~24 GB and ~1,300 scenes behind ~30,000 candidate rows.
 
 ### 4.5 `dior_rsvg.py`
 
@@ -232,6 +244,8 @@ Templates:
 3. A hard assertion that no image in `train.jsonl` appears — by either hash — in any quarantined test split (VRSBench test, RSVQA test, CDVQA test, DIOR-RSVG test).
 
 Step 3 failing is a **build error**, not a warning. A leaked benchmark is worse than no benchmark.
+
+**Steps 1 and 2 dedup *images*, not samples.** Four of the six sources publish many samples per image — VRSBench averages ten annotations per tile, RSVQA-HR around a hundred questions, CDVQA around forty per bi-temporal pair. Checked as if each sample were its own image, the second annotation of a tile collides with the first on an exact hash and is dropped, which collapses VRSBench's 205,121 candidate samples to its 20,264 tiles and CDVQA's 9,000 to 220 pairs — every §5 target out of reach. `Deduplicator.check` therefore takes an `image_key` (the path of the corpus line's first view) and treats a repeat of an already-admitted image as re-use. A collision between two *different* images is still exactly as fatal.
 
 ---
 

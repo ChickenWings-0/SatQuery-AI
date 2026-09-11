@@ -1,0 +1,1 @@
+{"status":"ok","version":"0.1.0","schema_version":"1.0","device":{"backend":"rocm","name":"AMD Radeon RX 7900 XTX","hip_visible_devices":"0","vram_total_mb":24576,"vram_used_mb":9210,"igpu_masked":true},"models":[{"name":"qwen3-vl-8b","backend":"hf","loaded":true,"adapter":"sq-lora-v3"}],"tools_available":5,"tools_total":6}

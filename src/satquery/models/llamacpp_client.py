@@ -40,6 +40,7 @@ from satquery.models.loader import (
     LazyBackend,
     ModelLoadError,
     PromptImage,
+    apply_stop,
 )
 
 CHAT_PATH: Final[str] = "/v1/chat/completions"
@@ -152,7 +153,13 @@ class LlamaCppBackend(LazyBackend):
         if not choices:
             raise LlamaCppError(f"llama.cpp returned no choices: {response}")
         choice = choices[0]
-        text = str((choice.get("message") or {}).get("content") or "").strip()
+        # llama-server strips the sequence it stopped on, but only the one it
+        # matched, and only when it stopped on a string rather than the budget.
+        # Trimming again here costs nothing and is what makes the two backends
+        # return the same text for the same runaway decode.
+        text = apply_stop(
+            str((choice.get("message") or {}).get("content") or ""), request.stop
+        )
         usage = response.get("usage") or {}
 
         return GenerationResult(

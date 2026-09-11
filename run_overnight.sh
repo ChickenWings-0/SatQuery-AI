@@ -10,22 +10,16 @@
 # Stage 2  render pass   CPU-bound, ~6 h, 16 threads
 # Stage 3  GPU probe     ~30 min on the 7900 XTX
 #
-# READ THIS BEFORE RUNNING. Two of the three stages are not fully implemented,
-# and this script stops at each of those with instructions rather than guessing:
+# BigEarthNet mirror: torchgeo/bigearthnet V2, verified 2026-09-07. Its patch_id
+# and s1_name match our annotation export byte for byte, and its split agrees on
+# 1,764 of 1,770 patches checked — the six differences are patches the export
+# calls "bench" and the mirror calls "test", held out either way. No patch the
+# export calls train or validation is called test by the mirror.
 #
-#   * BigEarthNet imagery. The repo id in DOCS is the annotation export
-#     (BigEarthNet.txt), not the S1/S2 patches. `BIFOLD-BigEarthNetv2-0/
-#     BigEarthNet-V2` returns 401. Candidates exist on the Hub
-#     (earthnets/BigEarthNetV2, GFM-Bench/BigEarthNet, torchgeo/bigearthnet)
-#     but none is verified to key patches by the `patch_id` our corpus records,
-#     and picking the wrong mirror is how a quarantined test split gets in.
-#   * The Phase 2 render pass. There is no CLI driving `render.renderer`, so
-#     stage 2 has nothing to execute. `src/satquery/render/` has the renderer;
-#     what is missing is the script that walks patches, writes the views, and
-#     records each patch's FactSheet.
-#
-# What DOES run unattended tonight: the VRSBench download (verified — the repo
-# publishes Images_train.zip / Images_val.zip) and the GPU throughput probe.
+# Size: 118.6 GB of tarballs (S1 54.8 + S2 63.5), which cannot be subsetted —
+# they are monolithic archives, so the metadata-first selector §9.1 describes
+# cannot avoid the bulk download. Budget ~270 GB with extraction. This box has
+# 862 GB free, so it fits, but §9.1's "15 GB" line is stale.
 #
 set -euo pipefail
 
@@ -38,9 +32,22 @@ LOG="${LOG_DIR}/overnight-${STAMP}.log"
 RAW_DIR="data/raw"
 CORPUS_DIR="data/processed/corpus"
 VIEWS_DIR="data/processed/views"
-PROBE_DIR="runs/throughput-probe-${STAMP}"
+# Stable, deliberately not stamped. --resume auto looks for checkpoints in
+# this directory, and a name carrying the launch time is a different
+# directory on every launch — so an interrupted probe could never find its
+# own checkpoints and silently started again from step zero. The log keeps
+# the timestamp; the run state has to stay put to be resumable.
+PROBE_DIR="${PROBE_DIR:-runs/throughput-probe}"
 PROFILE="configs/train/qlora_qwen3vl8b_rocm24g.yaml"
 PROBE_STEPS=200
+BEN_MIRROR="torchgeo/bigearthnet"
+RENDER_PATCHES=20000
+# CDVQA is a WebDataset that repeats each pair's image bytes once per question,
+# so the whole train split is 52 GB for 2,968 distinct scenes. 300 shards is
+# ~24 GB and ~1,300 scenes behind ~30,000 candidate samples — comfortably above
+# the 8,000 §5 target, and the scene count is what actually bounds the variety.
+CDVQA_SHARDS="${CDVQA_SHARDS:-300}"
+CDVQA_VAL_SHARDS="${CDVQA_VAL_SHARDS:-40}"
 
 ONLY_STAGE=""
 while [[ $# -gt 0 ]]; do
@@ -51,7 +58,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-mkdir -p "$LOG_DIR" "$RAW_DIR"
+mkdir -p "$LOG_DIR" "$RAW_DIR" "$CORPUS_DIR" "$VIEWS_DIR"
 exec > >(tee -a "$LOG") 2>&1
 
 banner() { echo; echo "==================== $* ===================="; echo "[$(date '+%F %T')]"; }
@@ -81,6 +88,17 @@ done
 note "BigEarthNet.txt annotations: already streamed by build_corpus.py; no bulk download needed."
 
 echo
+note "RSVQA-HR: Zenodo record 6344367 (off-Hub), ~13.5 GB into ${RAW_DIR}/rsvqa_hr"
+note "  the Hub has no usable RSVQA-HR release; see scripts/fetch_sources.py"
+uv run python scripts/fetch_sources.py --source rsvqa_hr --out "${RAW_DIR}"
+
+echo
+note "CDVQA: ${CDVQA_SHARDS} WebDataset shards from ljx620/CDVQA into ${RAW_DIR}/cdvqa"
+note "  ~79 MB a shard, 100 samples each; the §5 target is 8,000"
+uv run python scripts/fetch_sources.py --source cdvqa --out "${RAW_DIR}" \
+    --shards "${CDVQA_SHARDS}" --val-shards "${CDVQA_VAL_SHARDS}"
+
+echo
 note "DIOR-RSVG (gated — needs an accepted licence and HF_TOKEN):"
 if [[ -n "${HF_TOKEN:-}" ]]; then
   uv run hf download danielz01/DIOR-RSVG \
@@ -93,47 +111,73 @@ else
 fi
 
 echo
-note "BigEarthNet S1/S2 PATCH IMAGERY — not attempted."
-cat <<'BEN'
-        The id in DOCS/OPEN_SOURCE_ASSETS.md is the text export, and
-        BIFOLD-BigEarthNetv2-0/BigEarthNet-V2 returns 401. Unverified
-        candidates:
-            earthnets/BigEarthNetV2
-            GFM-Bench/BigEarthNet
-            torchgeo/bigearthnet
-        Before scripting one, confirm it keys patches by the same patch_id the
-        corpus records, e.g. S2A_MSIL2A_20170613T101031_N9999_R022_T33UUP_26_57,
-        and that its splits match reBEN's. A mirror that renames or re-splits
-        patches puts held-out data into training (§4.7).
-BEN
+note "BigEarthNet S1/S2 patches from ${BEN_MIRROR} — 118.6 GB, the long pole"
+AVAIL_GB="$(df -BG --output=avail . | tail -1 | tr -dc '0-9')"
+if (( AVAIL_GB < 300 )); then
+  echo "  !! only ${AVAIL_GB} GB free; the archives plus extraction need ~270 GB." >&2
+  exit 1
+fi
+note "  ${AVAIL_GB} GB free — proceeding"
+uv run hf download "$BEN_MIRROR" \
+    --repo-type dataset \
+    --local-dir "${RAW_DIR}/ben" \
+    --include "V2/*"
+
+note "reassembling the split archives and extracting"
+for part in S1 S2; do
+  if [[ ! -d "${RAW_DIR}/ben/BigEarthNet-${part}" ]]; then
+    cat "${RAW_DIR}"/ben/V2/BigEarthNet-${part}.tar.gza* > "${RAW_DIR}/ben/${part}.tar.gz"
+    tar -xzf "${RAW_DIR}/ben/${part}.tar.gz" -C "${RAW_DIR}/ben"
+    rm -f "${RAW_DIR}/ben/${part}.tar.gz"
+    note "  BigEarthNet-${part} extracted"
+  else
+    note "  BigEarthNet-${part} already extracted — skipping"
+  fi
+done
+
 fi
 
 # --------------------------------------------------------------- stage 2
 if wants 2; then
 banner "STAGE 2/3 — Phase 2 render pass (CPU-bound, ~6 h)"
-if [[ -f scripts/render_views.py ]]; then
-  note "rendering views + FactSheets into ${VIEWS_DIR}"
-  uv run python scripts/render_views.py \
+note "rendering ${RENDER_PATCHES} train patches into ${VIEWS_DIR}/bigearthnet_v2"
+uv run python scripts/render_views.py \
+    --input "${RAW_DIR}/ben" \
+    --out "${VIEWS_DIR}" \
+    --split train \
+    --limit "${RENDER_PATCHES}" \
+    --size 448 \
+    --workers 16
+
+note "rendering the validation patches"
+uv run python scripts/render_views.py \
+    --input "${RAW_DIR}/ben" \
+    --out "${VIEWS_DIR}" \
+    --split validation \
+    --limit 3234 \
+    --size 448 \
+    --workers 16
+
+note "rendering the 3-channel VHR sources — TC only, no FactSheets to measure"
+for vhr in vrsbench rsvqa_hr cdvqa; do
+  note "  ${vhr}"
+  uv run python scripts/render_vhr_views.py \
+      --source "$vhr" \
       --input "${RAW_DIR}" \
       --out "${VIEWS_DIR}" \
+      --split all \
       --size 448 \
       --workers 16
-  note "regenerating evidence_qa from the MEASURED FactSheets"
-  uv run python training/data/builders/evidence_qa.py --count 3000
-else
-  skip "scripts/render_views.py does not exist — nothing drives the renderer yet."
-  cat <<'RENDER'
-        The renderer itself is in src/satquery/render/ (render_views(),
-        RenderSource, the frozen view catalogue). What is missing is the driver:
-        walk the downloaded patches, select views per §2.4, write JPEG/PNG to
-        data/processed/views/<source>/<patch_id>/<VIEW>.{jpg,png}, and record
-        each patch's measured scalars so evidence_qa can be regenerated from
-        real numbers instead of the mock sheets it currently uses.
+done
 
-        Until this exists the corpus points at solid-black placeholders, and any
-        adapter trained on it has learned nothing about imagery.
-RENDER
+FACTS="${VIEWS_DIR}/bigearthnet_v2/factsheets.jsonl"
+if [[ ! -s "$FACTS" ]]; then
+  echo "  !! ${FACTS} is empty after both render passes. Stopping — regenerating" >&2
+  echo "     evidence_qa from an empty sheet would silently fall back to nothing." >&2
+  exit 1
 fi
+note "regenerating evidence_qa from the MEASURED FactSheets in ${FACTS} ($(wc -l < "$FACTS") sheets)"
+uv run python training/data/builders/evidence_qa.py --count 3000 --factsheets "$FACTS"
 fi
 
 # --------------------------------------------------------------- stage 3
@@ -147,7 +191,13 @@ note "HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES} (the iGPU must stay hidden)"
 PROBE_CORPUS="${CORPUS_DIR}/probe.train.jsonl"
 : > "$PROBE_CORPUS"
 for part in "${CORPUS_DIR}/train.jsonl" "${CORPUS_DIR}/evidence_qa.train.jsonl"; do
-  [[ -f "$part" ]] && cat "$part" >> "$PROBE_CORPUS"
+  # An `[[ -f ]] && cat` here ends the loop body with a false test whenever a
+  # part is absent, and under `set -e` that exits the whole script silently.
+  if [[ -f "$part" ]]; then
+    cat "$part" >> "$PROBE_CORPUS"
+  else
+    note "  ${part} not present — omitted from the probe corpus"
+  fi
 done
 if [[ ! -s "$PROBE_CORPUS" ]]; then
   echo "  !! no corpus to probe with. Run scripts/build_corpus.py first." >&2
@@ -156,7 +206,11 @@ fi
 note "probe corpus: $(wc -l < "$PROBE_CORPUS") rows -> ${PROBE_CORPUS}"
 
 note "checking every referenced view resolves to a real file"
-uv run python scripts/patch_dummy_images.py --corpus "$PROBE_CORPUS" || true
+uv run python scripts/patch_dummy_images.py --corpus "$PROBE_CORPUS"
+# --verify exits 1 whenever the corpus still leans on placeholders, which is the
+# expected state for a throughput probe. Informational here, so its code is not
+# allowed to end the run. The patching call above no longer carries "|| true",
+# so a genuine failure to write the placeholders now stops the stage.
 uv run python scripts/patch_dummy_images.py --corpus "$PROBE_CORPUS" --verify || true
 
 note "profile: ${PROFILE} (384 px, 6 views, effective batch 16)"
@@ -186,7 +240,11 @@ fi
 banner "OVERNIGHT RUN FINISHED"
 echo "[$(date '+%F %T')]  full log: ${LOG}"
 echo
-echo "Blocked on a decision from you, in priority order:"
-echo "  1. BigEarthNet patch imagery — which mirror, verified against patch_id."
-echo "  2. scripts/render_views.py — the Phase 2 driver does not exist yet."
-echo "  3. RSVQA-HR and CDVQA sources (29% of the §5 composition, still unresolved)."
+echo "Still open, in priority order:"
+echo "  1. Throughput: 0.248 samples/s puts one epoch of 65k at ~73 h. Decide the"
+echo "     corpus size and view count before committing the GPU (see the notes)."
+echo "  2. DIOR-RSVG — 9.2% of the §5 composition, still unresolved: the canonical"
+echo "     release is gated. Accept the terms and set HF_TOKEN. (RSVQA-HR and CDVQA"
+echo "     are resolved; they are fetched in stage 1 above.)"
+echo "  3. Re-run scripts/build_corpus.py once the real views exist, so the corpus"
+echo "     points at rendered pixels rather than placeholders."

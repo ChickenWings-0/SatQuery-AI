@@ -59,11 +59,18 @@ DEFAULT_BANDS: Final[tuple[str, ...]] = ("red", "green", "blue")
 """What LEVIR-CD provides, and the minimum every optical pair in the registry
 declares as ``required_bands``."""
 
-SSL4EO_WEIGHTS: Final[dict[str, str]] = {
-    "resnet18": "RESNET18_SENTINEL2_ALL_MOCO",
-    "resnet50": "RESNET50_SENTINEL2_ALL_MOCO",
+SSL4EO_WEIGHTS: Final[dict[str, tuple[str, ...]]] = {
+    "resnet18": ("ResNet18_Weights.SENTINEL2_ALL_MOCO", "RESNET18_SENTINEL2_ALL_MOCO"),
+    "resnet50": ("ResNet50_Weights.SENTINEL2_ALL_MOCO", "RESNET50_SENTINEL2_ALL_MOCO"),
 }
-"""torchgeo weight enum members carrying SSL4EO-S12 pretraining, by backbone."""
+"""torchgeo weight enum members carrying SSL4EO-S12 pretraining, by backbone.
+
+Two spellings per backbone, newest first. torchgeo 0.8 renamed these to the
+qualified ``<Enum>.<MEMBER>`` form; the bare ``RESNET18_...`` name is what 0.7
+and earlier answered to. Both are tried because getting this wrong does not
+fail — :func:`_torchgeo_weights` falls back to random initialisation, and a run
+that quietly starts from noise instead of SSL4EO-S12 looks exactly like a run
+that did not, until the F1 gate is missed."""
 
 FEATURE_CHANNELS: Final[dict[str, tuple[int, ...]]] = {
     "resnet18": (64, 128, 256, 512),
@@ -102,8 +109,8 @@ def _torchgeo_weights(backbone: str) -> Any | None:
     (worse) and can still run inference from a checkpoint (identically), and
     turning a missing optional dependency into a crash would break both.
     """
-    member = SSL4EO_WEIGHTS.get(backbone)
-    if member is None:
+    members = SSL4EO_WEIGHTS.get(backbone)
+    if not members:
         return None
     try:
         from torchgeo.models import api as torchgeo_api  # noqa: F401
@@ -115,11 +122,18 @@ def _torchgeo_weights(backbone: str) -> Any | None:
             "from ImageNet or random initialisation."
         )
         return None
-    try:
-        return get_weight(member)
-    except (ValueError, KeyError) as error:  # pragma: no cover - torchgeo version skew
-        log.warning("torchgeo does not expose %s: %s", member, error)
-        return None
+    for member in members:
+        try:
+            return get_weight(member)
+        except (ValueError, KeyError):  # torchgeo version skew; try the next spelling
+            continue
+    log.warning(
+        "torchgeo %s exposes none of %s, so the encoder starts from random "
+        "initialisation rather than SSL4EO-S12.",
+        getattr(__import__("torchgeo"), "__version__", "?"),
+        list(members),
+    )
+    return None
 
 
 def adapt_stem(
@@ -248,8 +262,16 @@ class ResNetEncoder(nn.Module):
     def _load_ssl4eo(self, trunk: Any, state: dict[str, Tensor]) -> tuple[str, str]:
         """Load an SSL4EO state dict, keeping the 13-band stem aside for adaptation."""
         self._pretrained_stem = state["conv1.weight"].clone()
-        missing, unexpected = trunk.load_state_dict(state, strict=False)
-        skipped = [key for key in missing if not key.startswith("fc.")]
+        # The stem is withheld deliberately. SSL4EO's is 13-channel and the trunk's
+        # is 3-channel, and ``strict=False`` forgives a *missing* key but not a
+        # shape mismatch — it raises, which the caller turns into a silent fall
+        # back to random initialisation. It is re-applied, band-adapted, by
+        # :func:`adapt_stem` once the trunk has been reshaped.
+        payload = {key: value for key, value in state.items() if key != "conv1.weight"}
+        missing, unexpected = trunk.load_state_dict(payload, strict=False)
+        skipped = [
+            key for key in missing if not key.startswith("fc.") and key != "conv1.weight"
+        ]
         note = (
             f"SSL4EO-S12: {len(skipped)} tensors were not in the checkpoint"
             if skipped

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from satquery.schemas.compatibility import CompatibilityReport
@@ -59,6 +62,45 @@ class AnalyzeResponse(BaseModel):
     trace: AuditTrace | None = Field(
         default=None, description="None when options.include_trace is false."
     )
+
+
+class JobAccepted(BaseModel):
+    """``POST /v1/jobs`` 202 body (API_CONTRACT §4.2).
+
+    ``job_id`` *is* the eventual ``trace_id``: the id is minted before the
+    pipeline runs, so a client can address the trace before it exists.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
+    status: Literal["queued"] = "queued"
+    poll_url: str = Field(description="e.g. '/v1/jobs/b3f1...'.")
+    events_url: str = Field(description="SSE endpoint, e.g. '/v1/jobs/b3f1.../events'.")
+
+
+class JobStatusResponse(BaseModel):
+    """``GET /v1/jobs/{job_id}`` 200 body (API_CONTRACT §4.3).
+
+    ``result`` is populated only once ``status`` is ``succeeded``, ``error``
+    only once it is ``failed``; they are mutually exclusive, mirroring the
+    ``done``/``error`` terminal SSE events.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
+    status: Literal["queued", "running", "succeeded", "failed"]
+    stage: str = Field(
+        description="queued|ingesting|validating|rendering|planning|executing|aggregating|done."
+    )
+    step: int = Field(ge=0)
+    total_steps: int = Field(ge=0)
+    pct: int = Field(ge=0, le=100)
+    created_at: datetime
+    updated_at: datetime
+    result: AnalyzeResponse | None = None
+    error: ApiError | None = None
 
 
 class ValidateResponse(BaseModel):

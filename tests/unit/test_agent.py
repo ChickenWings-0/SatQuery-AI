@@ -351,7 +351,17 @@ def test_18_unavailable_tool_is_substituted_by_capability_matching(
     assert decision.status is MatchStatus.SUBSTITUTED
     assert decision.tool == "spectral_index_analyzer"
 
-    trace = _run(scene_paths, store, "outline the water bodies", "s2_pre")
+    # Availability is pinned rather than inherited from the machine: with a
+    # segmentation checkpoint actually installed the substitution correctly does
+    # not happen, and the test would be asserting a property of the developer's
+    # filesystem instead of one of the capability matcher.
+    trace = _run(
+        scene_paths,
+        store,
+        "outline the water bodies",
+        "s2_pre",
+        registry=registry.with_availability({"semantic_segmenter": False}),
+    )
     segmenter = next(e for e in trace.executions if e.step == 3)
     assert segmenter.tool == "spectral_index_analyzer"
     assert segmenter.fallback_of == "semantic_segmenter"
@@ -552,3 +562,131 @@ def test_20b_strip_policy_removes_the_offending_sentence(
     assert stripped.uncited_numeric_spans == []
     assert "42%" not in stripped.text
     assert stripped.citations
+
+
+# ------------------------------------------------- silent bi-temporal failures
+
+
+def test_two_uploads_sharing_a_filename_stay_two_images(
+    scene_paths: dict[str, Path],
+) -> None:
+    """A pair must join to its files by position, never by name.
+
+    Change datasets are organised by epoch directory, so both halves of a pair
+    routinely arrive under one basename — LEVIR-CD ships ``A/test_100.png`` and
+    ``B/test_100.png``. Joining on the filename collapsed them onto whichever
+    file was written last, and the detector then compared the post-change image
+    against itself: a black mask and 0% changed area, for every scene, with no
+    error anywhere in the trace to say so.
+    """
+    from satquery.agent.pipeline import bundles_for
+
+    paths = [scene_paths["s2_pre"], scene_paths["s2_post"]]
+    shared = paths[0].name
+    sources = [SourceImage(path=path, filename=shared) for path in paths]
+
+    images = bundles_for(
+        AnalysisRequest(query="what changed?", sources=sources, ingest=ingest(sources))
+    )
+
+    assert [image.path for image in images] == paths, "the two epochs collapsed onto one file"
+    assert images[0].path != images[1].path
+
+
+def test_a_skipped_optional_step_does_not_cascade(
+    scene_paths: dict[str, Path], store: ArtifactStore, registry: Any
+) -> None:
+    """An enrichment step that cannot run must not take the synthesiser with it.
+
+    ``spectral_index_analyzer`` needs NIR, which RGB imagery does not carry, so
+    it skips — and the change entry lists it among ``vlm_change_vqa``'s
+    dependencies only for ordering, since the synthesiser reads ``@1`` and
+    ``@2:CHANGE_MASK``. Cascading the skip answered a change question from a
+    template while a measured mask sat unused in the evidence gallery.
+    """
+
+    class NoIndices:
+        name = "spectral_index_analyzer"
+
+        def run(self, ctx: ToolContext, params: Mapping[str, Any]) -> ToolResult:
+            raise ToolError("no NIR band on either epoch")
+
+    trace = _run(
+        scene_paths,
+        store,
+        "what changed between these two images",
+        "s2_pre",
+        "s2_post",
+        tools={"spectral_index_analyzer": NoIndices()},
+    )
+
+    indices = next(e for e in trace.executions if e.tool == "spectral_index_analyzer")
+    assert indices.status in {ToolStatus.SKIPPED, ToolStatus.FAILED}
+
+    # Whether the synthesiser then runs depends on a VLM backend being servable,
+    # which a unit run has no business requiring. What is asserted is the thing
+    # under test: it was never turned away at the dependency gate.
+    synthesiser = next(e for e in trace.executions if e.tool == "vlm_change_vqa")
+    assert "did not produce output" not in (synthesiser.error or ""), (
+        "an optional dependency's skip must not skip the synthesiser"
+    )
+    assert not any(
+        error.code == "DEPENDENCY_SKIPPED" and error.step == synthesiser.step
+        for error in trace.errors
+    )
+    # The reduced evidence is recorded rather than passed over in silence.
+    assert any(warning.code == "DEPENDENCY_INCOMPLETE" for warning in trace.warnings)
+
+
+def test_a_coverage_question_routes_to_segmentation() -> None:
+    """"What percentage is covered by X" is the segmentation question.
+
+    It named no tool and matched no rule, so it fell through to the nearest seed
+    neighbour and came back VQA — a plan with no segmenter in it. The FactSheet
+    then carried no class fractions and the VLM answered the proportion question
+    from the pixels alone, with "Forest: 100%".
+    """
+    coverage = task_classifier.classify(
+        "What percentage of this area is covered by forest versus barren land?",
+        PairType.SINGLE,
+    )
+    assert coverage.primary is TaskType.SEGMENTATION
+
+    # The neighbouring intents must not be swallowed by it.
+    assert (
+        task_classifier.classify("How many buildings are there?", PairType.SINGLE).primary
+        is TaskType.COUNT
+    )
+    assert (
+        task_classifier.classify(
+            "What percentage of the scene changed between the two dates?",
+            PairType.BI_TEMPORAL,
+        ).primary
+        is TaskType.CHANGE_VQA
+    )
+
+
+def test_the_cache_key_moves_when_the_checkpoint_does(tmp_path: Path) -> None:
+    """Weights are part of a step's identity, and the registry version is not.
+
+    ``tool_version`` is a constant in the registry YAML, so it does not move when
+    a checkpoint is retrained or repointed. Without the weights in the key, every
+    pair analysed before a retrain keeps returning the old model's mask.
+    """
+    from satquery.tools.catalog import checkpoint_fingerprint
+
+    bundle = tmp_path / "detector.ckpt.pt"
+    bundle.write_bytes(b"weights")
+    monkey = pytest.MonkeyPatch()
+    monkey.setenv("SATQUERY_CD_CHECKPOINT", str(bundle))
+    try:
+        before = checkpoint_fingerprint("siamese_change_detector")
+        bundle.write_bytes(b"retrained weights, a different size")
+        after = checkpoint_fingerprint("siamese_change_detector")
+    finally:
+        monkey.undo()
+
+    assert before != after, "a rewritten checkpoint must invalidate the cache"
+    assert checkpoint_fingerprint("raster_statistics") == "", (
+        "a tool with no weights must not pay for a stat on every step"
+    )

@@ -50,9 +50,16 @@ class CheckpointError(RuntimeError):
 class Normalisation:
     """Per-channel standardisation, in the order the model's bands are declared.
 
-    Reflectance rather than digital numbers: everything upstream of the model
-    reads through :func:`satquery.render.tiling.render_source`, which already
-    scales to ``[0, 1]``, so these statistics are computed on that scale.
+    These are digital numbers, not reflectance.
+    :func:`satquery.render.tiling.render_source` returns the raster's own values
+    — 0-255 for the 8-bit RGB that LEVIR-CD ships — and does *not* rescale, so
+    anything written here must be on that scale.
+
+    This field records what the training forward pass actually applied, and
+    serving replays it verbatim. Statistics that were measured but never applied
+    do not belong here: writing them makes the served model see a distribution it
+    was never fitted to, which presents as a detector that predicts no change
+    anywhere. A model trained on raw loader output takes :meth:`identity`.
     """
 
     mean: tuple[float, ...]
@@ -114,6 +121,22 @@ class CheckpointBundle:
     format_version: int = FORMAT_VERSION
     notes: str = ""
 
+    self_test: dict[str, Any] | None = None
+    """A known-answer test for the weights, run once after every load.
+
+    ``{"pre": uint8 (C,H,W), "post": uint8 (C,H,W), "changed_fraction": float,
+    "tolerance": float}`` — a real co-registered pair and the fraction of it this
+    checkpoint marks as changed when it is working.
+
+    It has to be a *real* pair. The obvious cheaper probe, running one image
+    against itself and asserting no change, is worthless here: the architecture
+    subtracts the two epochs' features, so identical inputs make that difference
+    exactly zero and the decoder answers from its biases alone. Measured across
+    thirty loads, a corrupt model and a healthy one both returned 8.944353e-06 on
+    that test — the probe never touched the weights that were broken. Only a pair
+    that actually differs exercises the encoder.
+    """
+
     @property
     def version(self) -> str:
         """The registry-shaped version string this checkpoint answers to."""
@@ -133,6 +156,16 @@ class CheckpointBundle:
             "trained_at": self.trained_at,
             "format_version": self.format_version,
             "notes": self.notes,
+            # The arrays stay out of the sidecar; only the answer is provenance.
+            "self_test": (
+                {
+                    key: value
+                    for key, value in self.self_test.items()
+                    if key not in {"pre", "post"}
+                }
+                if self.self_test
+                else None
+            ),
         }
 
 
@@ -146,7 +179,13 @@ def save_bundle(bundle: CheckpointBundle, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     import torch
 
-    payload = {**bundle.metadata(), "state_dict": bundle.state_dict}
+    payload = {
+        **bundle.metadata(),
+        "state_dict": bundle.state_dict,
+        # metadata() strips the probe's pixels for the sidecar; the bundle itself
+        # needs them, so they are restored here.
+        "self_test": bundle.self_test,
+    }
     torch.save(payload, path)
     path.with_suffix(".json").write_text(
         json.dumps(bundle.metadata(), indent=2, default=str), encoding="utf-8"
@@ -193,6 +232,7 @@ def load_bundle(path: Path, map_location: str = "cpu") -> CheckpointBundle:
         trained_at=str(payload.get("trained_at") or datetime.now(UTC).isoformat()),
         format_version=version or FORMAT_VERSION,
         notes=str(payload.get("notes", "")),
+        self_test=(payload.get("self_test") or None),
     )
 
 

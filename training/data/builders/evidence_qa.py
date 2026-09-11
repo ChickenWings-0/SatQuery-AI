@@ -69,6 +69,10 @@ model to reach for "this system did not measure it" when the sheet in front of i
 would have supported an answer. The headline metric is cited answers, not
 abstentions."""
 
+PASSES_OVER_RECORDS: Final[int] = 4
+"""How many times the sheet file is cycled when it holds fewer scenes than the
+sample budget asks for."""
+
 VAL_EVERY: Final[int] = 10
 """One scene in ten feeds ``val.jsonl``. Deterministic rather than random so two
 builds of one seed produce the same split."""
@@ -318,12 +322,87 @@ def generate(
     return samples[:count]
 
 
+def generate_from_factsheets(
+    factsheets: Path,
+    count: int = DEFAULT_COUNT,
+    seed: int = 42,
+) -> list[CorpusSample]:
+    """Generate from the FactSheets ``scripts/render_views.py`` measured.
+
+    This is what §4.6 actually specifies, and what the mock path above stands in
+    for: the numbers are measurements of real patches, the views are the pixels
+    those measurements were taken from, and the pairing between "NDVI averages
+    0.62" and a green NDVI heatmap is finally present in the training signal.
+
+    Each line of *factsheets* carries a patch's id, split, rendered view paths,
+    view labels and namespaced scalars.
+    """
+    rng = random.Random(seed)
+    samples: list[CorpusSample] = []
+    with factsheets.open(encoding="utf-8") as handle:
+        records = [json.loads(line) for line in handle if line.strip()]
+    if not records:
+        raise SystemExit(f"{factsheets} is empty; run scripts/render_views.py first")
+
+    index = 0
+    while len(samples) < count and index < len(records) * PASSES_OVER_RECORDS:
+        record = records[index % len(records)]
+        pass_number = index // len(records)
+        views = [
+            SourceView(
+                ViewId(view_id),
+                path,
+                Modality.SAR if view_id.startswith("SAR") else Modality.OPTICAL,
+                SAR_SENSOR if view_id.startswith("SAR") else OPTICAL_SENSOR,
+                ImageRole.SAR if view_id.startswith("SAR") else ImageRole.OPTICAL,
+            )
+            for view_id, path in record["views"].items()
+        ][:6]
+        if not views:
+            index += 1
+            continue
+        meta = SampleMeta(
+            sensor=f"{OPTICAL_SENSOR} + {SAR_SENSOR}" if record.get("s1_name") else OPTICAL_SENSOR,
+            gsd_m=GSD_M,
+            labels=list(record.get("labels") or []),
+            split="val" if str(record.get("split", "train")).startswith("val") else "train",
+            source_split=str(record.get("split", "train")),
+        )
+        samples.extend(
+            build_evidence_qa(
+                # A second pass over the same patch draws different templates from
+            # the rng, so it is a distinct sample and needs a distinct id — two
+            # rows sharing one sample_id defeat every downstream dedup.
+            sample_id=(
+                f"evidence_qa:{record['patch_id']}"
+                + (f":p{pass_number}" if pass_number else "")
+            ),
+                views=views,
+                fact_sheet=record["fact_sheet"],
+                pair_type=PairType(record.get("pair_type", "CROSS_MODAL")),
+                meta=meta,
+                rng=rng,
+                refusal_probability=REFUSAL_PROBABILITY,
+            )
+        )
+        index += 1
+    return samples[:count]
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command line."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--count", type=int, default=DEFAULT_COUNT)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument(
+        "--factsheets",
+        type=Path,
+        default=None,
+        help="factsheets.jsonl from scripts/render_views.py. When given, the "
+        "sheets and views are the measured ones and nothing is mocked — which is "
+        "what §4.6 specifies and what the submitted adapter must be trained on.",
+    )
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument(
         "--append",
@@ -337,7 +416,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     """Generate, report and write. Returns a process exit code."""
     args = parse_args(argv)
-    samples = generate(args.count, args.manifest, args.seed)
+    if args.factsheets is not None:
+        samples = generate_from_factsheets(args.factsheets, args.count, args.seed)
+        provenance = f"measured FactSheets from {args.factsheets}"
+    else:
+        samples = generate(args.count, args.manifest, args.seed)
+        provenance = "MOCK FactSheets over placeholder views"
+    print(f"source          : {provenance}")
 
     train = [sample for sample in samples if sample.meta.split == "train"]
     val = [sample for sample in samples if sample.meta.split == "val"]
@@ -368,12 +453,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             written = write_jsonl(args.out_dir / name, rows)
             print(f"wrote    {written:>5d} -> {args.out_dir / name}")
 
-    print(
-        "\nThese sheets are plausible mock measurements against placeholder views: "
-        "they hold the citation format, they do not teach what an NDVI heatmap "
-        "looks like. Regenerate from the Phase 2 render pass before the submitted "
-        "adapter."
-    )
+    if args.factsheets is None:
+        print(
+            "\nThese sheets are plausible mock measurements against placeholder "
+            "views: they hold the citation format, they do not teach what an NDVI "
+            "heatmap looks like. Pass --factsheets from scripts/render_views.py "
+            "before the submitted adapter."
+        )
     assert all(sample.source is CorpusSource.EVIDENCE_QA for sample in samples)
     return 0
 

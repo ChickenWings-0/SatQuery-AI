@@ -30,6 +30,7 @@ from satquery.evidence.citation_validator import (
     validate,
 )
 from satquery.evidence.fact_sheet import FactSheet
+from satquery.models.prompts.box_format import strip_boxes
 from satquery.schemas.enums import ArtifactType, PairType, TaskType, ToolStatus
 from satquery.schemas.tool import Execution
 from satquery.schemas.trace import Answer, ArtifactRef
@@ -351,9 +352,12 @@ def aggregate(
                 f"{', '.join(sorted(set(skipped)))} did not run."
             )
 
-    result = validate(body, sheet, policy=policy)
+    # Boxes are removed before the claim check, never from the answer itself:
+    # the coordinates are the grounding answer, and they are not citable claims.
+    claims = strip_boxes(body) if task is TaskType.GROUNDING else body
+    result = validate(claims, sheet, policy=policy)
     answer = Answer(
-        text=result.text,
+        text=body if task is TaskType.GROUNDING else result.text,
         citations=result.citations,
         uncited_numeric_spans=result.uncited_numeric_spans,
         generator=generator or (TEMPLATE_GENERATOR if templated else "vlm"),

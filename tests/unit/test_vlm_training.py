@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,7 @@ from satquery.render.view_labels import label_for_view
 from satquery.render.views import ViewId
 from satquery.schemas.enums import Modality, PairType, TaskType
 from satquery.training import corpus_builder as cb
+from satquery.training import local_sources
 from satquery.training.vlm import qlora
 
 # ------------------------------------------------------------------- fixtures
@@ -621,6 +623,34 @@ def test_deduplicator_drops_exact_and_near_duplicates() -> None:
     assert dedup.check("d", "sha-3", cb.phash(_other_scene())).accepted
 
 
+def test_many_samples_of_one_image_are_not_duplicates_of_each_other() -> None:
+    """§4.7 dedups images; four of the six sources publish many samples per image.
+
+    VRSBench averages ten annotations per tile and CDVQA around forty questions
+    per pair. Checked as if every sample were its own image, the second
+    annotation collides with the first on an exact hash and is dropped — which
+    is 205 000 VRSBench samples collapsing to 20 264 and every §5 target going
+    out of reach. A *different* image with the same bytes is still a duplicate.
+    """
+    dedup = cb.Deduplicator()
+    base = cb.phash(_scene())
+
+    assert dedup.check("vrsbench:t1:cap", "sha-1", base, image_key="t1").accepted
+    assert dedup.check("vrsbench:t1:qa0", "sha-1", base, image_key="t1").accepted
+    assert dedup.check("vrsbench:t1:ref3", "sha-1", base, image_key="t1").accepted
+    assert dedup.dropped == []
+
+    collision = dedup.check("dior_rsvg:t2:0", "sha-1", base, image_key="t2")
+    assert collision.verdict is cb.DedupVerdict.EXACT_DUPLICATE
+    assert collision.collided_with == "t1"
+
+
+def test_the_image_key_is_the_view_a_corpus_line_points_at() -> None:
+    """Not the sample id: the path is what the line actually resolves to."""
+    sample = _sample(1, cb.CorpusSource.VRSBENCH)
+    assert cb.image_key_of(sample) == sample.views[0].path
+
+
 def test_quarantined_test_images_are_a_build_error() -> None:
     """A leaked benchmark is worse than no benchmark, so the build fails."""
     dedup = cb.Deduplicator()
@@ -655,6 +685,76 @@ def _sample(index: int, source: cb.CorpusSource, split: str = "train") -> cb.Cor
         answer="Farmland.",
         meta=cb.SampleMeta(split=split, source_split=split),
     )
+
+
+def test_a_reservoir_caps_what_it_holds_and_keeps_arrival_order() -> None:
+    """The whole point: a uniform draw whose memory is the target, not the stream.
+
+    ``take`` needs the population as a Sequence, and materialising 9.6 M reBEN
+    samples to choose 18 k of them is what got the build OOM-killed.
+    """
+    reservoir = cb.Reservoir(10, random.Random(0))
+    for index in range(10_000):
+        reservoir.offer(_sample(index, cb.CorpusSource.VRSBENCH))
+
+    kept = reservoir.collect()
+    assert len(kept) == 10
+    assert reservoir.seen == 10_000
+    # Arrival order survives, so two builds of one seed stay diffable.
+    order = [int(sample.id.split(":")[1]) for sample in kept]
+    assert order == sorted(order)
+    # And it is a draw from the whole stream, not just the head.
+    assert max(order) > 10
+
+
+def test_a_reservoir_without_a_capacity_keeps_everything() -> None:
+    """``None`` is 'no target' — unbounded, which is the caller's choice to make."""
+    reservoir = cb.Reservoir(None, random.Random(0))
+    for index in range(5):
+        reservoir.offer(_sample(index, cb.CorpusSource.VRSBENCH))
+    assert len(reservoir.collect()) == 5
+    assert cb.Reservoir(0, random.Random(0)).collect() == []
+
+
+def test_streaming_build_never_materialises_the_population(tmp_path: Path) -> None:
+    """``build_corpus_streaming`` reads an iterator once and holds only the budget.
+
+    The generator counts what it was asked for: if the builder listed its input,
+    the count would be the population rather than the corpus.
+    """
+    produced = 0
+
+    def stream() -> Any:
+        nonlocal produced
+        for index in range(2_000):
+            produced += 1
+            split = "train" if index % 2 else "val"
+            yield cb.CorpusSource.VRSBENCH, _sample(index, cb.CorpusSource.VRSBENCH, split)
+
+    report = cb.build_corpus_streaming(
+        stream(), tmp_path, composition={cb.CorpusSource.VRSBENCH: 40}, seed=7
+    )
+
+    assert produced == 2_000
+    row = next(r for r in report.sources if r.source is cb.CorpusSource.VRSBENCH)
+    assert row.built == 2_000
+    assert row.kept == 2_000
+    assert row.train + row.val == 40
+    assert report.train + report.val == 40
+    assert len(cb.read_jsonl(tmp_path / "train.jsonl")) == report.train
+    assert len(cb.read_jsonl(tmp_path / "val.jsonl")) == report.val
+
+
+def test_streaming_build_still_refuses_a_leaked_image(tmp_path: Path) -> None:
+    """§4.7 is not relaxed by streaming: the quarantine check runs as rows pass."""
+    sample = _sample(1, cb.CorpusSource.VRSBENCH)
+    sample.meta.image_sha256 = "abc"
+    dedup = cb.Deduplicator()
+    dedup.quarantine("test:1", sha256="abc")
+    with pytest.raises(cb.LeakageError):
+        cb.build_corpus_streaming(
+            iter([(cb.CorpusSource.VRSBENCH, sample)]), tmp_path, dedup=dedup
+        )
 
 
 def test_corpus_round_trips_through_jsonl(tmp_path: Path) -> None:
@@ -959,10 +1059,98 @@ def test_sanity_check_truncates_to_one_hundred_items_for_one_epoch() -> None:
 def test_resume_is_automatic_only_when_a_checkpoint_exists(tmp_path: Path) -> None:
     """An interrupted overnight run restarts with the same command line."""
     assert qlora.resume_target(tmp_path, "auto") is None
-    (tmp_path / "checkpoint-250").mkdir()
+    checkpoint = tmp_path / "checkpoint-250"
+    checkpoint.mkdir()
+    (checkpoint / "trainer_state.json").write_text("{}", encoding="utf-8")
     assert qlora.resume_target(tmp_path, "auto") is True
     assert qlora.resume_target(tmp_path, "false") is None
-    assert qlora.resume_target(tmp_path, "runs/x/checkpoint-500") == "runs/x/checkpoint-500"
+    assert qlora.resume_target(tmp_path, str(checkpoint)) == str(checkpoint)
+
+    # A named checkpoint is verified here, not by the trainer: a typo otherwise
+    # surfaces after the 4-bit weights are on the card.
+    with pytest.raises(qlora.ProfileError, match="not a resumable checkpoint"):
+        qlora.resume_target(tmp_path, "runs/x/checkpoint-500")
+
+
+def profile_save_steps() -> int:
+    """The checkpoint cadence the shipped profile declares."""
+    return qlora.load_profile(qlora.DEFAULT_PROFILE_PATH).train.save_steps
+
+
+def test_checkpoints_carry_the_optimiser_state_that_makes_them_resumable() -> None:
+    """``save_only_model`` is the difference between servable and resumable.
+
+    True writes an adapter you can serve and cannot resume; the optimiser
+    momentum and the LR schedule position are simply absent, and Adam silently
+    restarts from zero moment estimates on the next run.
+    """
+    kwargs = qlora.sft_config_kwargs(
+        profile=qlora.load_profile(qlora.DEFAULT_PROFILE_PATH),
+        output_dir=Path("runs/x"),
+        has_eval=False,
+    )
+    assert kwargs["save_only_model"] is False
+    assert kwargs["save_strategy"] == "steps"
+    # The profile's own value, not a number repeated here: what this test defends
+    # is that the checkpoint is *resumable*, and the cadence is a separate
+    # decision the profile documents (50, ~54 min apart at the measured
+    # throughput). Restating it turned a deliberate profile change into a test
+    # failure that said nothing about resumability.
+    assert kwargs["save_steps"] == profile_save_steps()
+    assert kwargs["save_total_limit"] == 3
+
+
+def test_the_newest_checkpoint_is_found_by_step_not_by_mtime(tmp_path: Path) -> None:
+    """``save_total_limit`` prunes, and copied trees carry meaningless mtimes."""
+    assert qlora.latest_checkpoint(tmp_path) is None
+    for step in (250, 1_000, 750):
+        (tmp_path / f"checkpoint-{step}").mkdir()
+    (tmp_path / "checkpoint-not-a-number").mkdir()
+    (tmp_path / "adapter").mkdir()
+
+    found = qlora.latest_checkpoint(tmp_path)
+    assert found is not None
+    assert qlora.checkpoint_step(found) == 1_000
+
+
+def test_an_interrupt_asks_the_trainer_to_save_and_stop() -> None:
+    """Ctrl+C must checkpoint at a step boundary, not raise from mid-backward."""
+    pytest.importorskip("transformers", reason="transformers is the vlm-train extra")
+
+    request = qlora.InterruptRequest()
+    callback = qlora.graceful_stop_callback(request)
+
+    class _Control:
+        should_save = False
+        should_training_stop = False
+
+    control = _Control()
+    callback.on_step_end(None, None, control)
+    assert (control.should_save, control.should_training_stop) == (False, False)
+
+    request.request("SIGINT")
+    callback.on_step_end(None, None, control)
+    assert control.should_save
+    assert control.should_training_stop
+
+
+def test_the_interrupt_handler_restores_itself_so_a_second_ctrl_c_aborts() -> None:
+    """An operator who has decided not to wait must always be able to leave."""
+    import signal
+
+    request = qlora.InterruptRequest()
+    original = signal.getsignal(signal.SIGINT)
+    restore = qlora.install_interrupt_handler(request, signals=(signal.SIGINT,))
+    try:
+        assert signal.getsignal(signal.SIGINT) is not original
+        signal.raise_signal(signal.SIGINT)
+        assert request.requested
+        assert request.signal_name == "SIGINT"
+        # The first signal put the default handler back.
+        assert signal.getsignal(signal.SIGINT) is original
+    finally:
+        restore()
+        signal.signal(signal.SIGINT, original)
 
 
 def test_profile_env_is_applied_without_clobbering_an_explicit_one(
@@ -1199,17 +1387,29 @@ class _FakeDatasets:
     """
 
     def __init__(self, rows: dict[str, list[dict[str, Any]]]) -> None:
-        """Hold the rows each split should yield, and a call log."""
+        """Hold the rows each split should yield, a call log and a read counter."""
         self.rows = rows
         self.calls: list[dict[str, Any]] = []
+        self.rows_read = 0
 
-    def load_dataset(self, name: str, **kwargs: Any) -> list[dict[str, Any]]:
-        """Mimic ``load_dataset``, raising the error a bad split name gives."""
+    def load_dataset(self, name: str, **kwargs: Any) -> Iterator[dict[str, Any]]:
+        """Mimic ``load_dataset``, raising the error a bad split name gives.
+
+        Yields rather than returns, because ``streaming=True`` does: a caller
+        that stops early must be able to leave rows unread, and ``rows_read``
+        is how a test sees that it did.
+        """
         self.calls.append({"name": name, **kwargs})
         split = kwargs["split"]
         if split not in self.rows:
             raise ValueError(f"Bad split: {split}. Available splits: {list(self.rows)}")
-        return self.rows[split]
+
+        def stream() -> Iterator[dict[str, Any]]:
+            for row in self.rows[split]:
+                self.rows_read += 1
+                yield row
+
+        return stream()
 
 
 def _install_datasets(
@@ -1277,6 +1477,126 @@ def test_bigearthnet_is_loaded_as_one_bundle_and_filtered_by_its_split_column(
     assert "p3" not in {row["patch_id"] for row in train + validation}
 
 
+def test_a_bundled_source_is_read_once_for_both_splits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One pass, not one per split.
+
+    BigEarthNet.txt is a single 467 MB parquet of 9.6 M rows; opening it once per
+    split downloaded and decoded all of it twice to keep a different subset each
+    time. The split column is right there in the row, so the routing is free.
+    """
+    import build_corpus
+
+    fake = _install_datasets(monkeypatch, {"train": REBEN_ROWS})
+
+    tagged = list(
+        build_corpus.load_rows_by_split(
+            cb.CorpusSource.BIGEARTHNET_V2, ("train", "validation"), None, False
+        )
+    )
+
+    assert len(fake.calls) == 1
+    assert [(split, row["patch_id"]) for split, row in tagged] == [
+        ("train", "p1"),
+        ("validation", "p2"),
+        ("train", "p4"),
+    ]
+    # The quarantined split is reachable by neither request.
+    assert "p3" not in {row["patch_id"] for _, row in tagged}
+
+
+def test_a_bundled_smoke_run_stops_instead_of_scanning_to_the_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once every requested split has its rows there is nothing left to read."""
+    import build_corpus
+
+    rows = [{"patch_id": f"p{i}", "split": "train", "labels": []} for i in range(100)]
+    fake = _install_datasets(monkeypatch, {"train": rows})
+
+    tagged = list(
+        build_corpus.load_rows_by_split(
+            cb.CorpusSource.BIGEARTHNET_V2, ("train",), 2, False
+        )
+    )
+    assert [row["patch_id"] for _, row in tagged] == ["p0", "p1"]
+    assert fake.rows_read < len(rows)
+
+
+def test_source_samples_are_streamed_not_collected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``iter_source_samples`` is lazy: nothing is read until it is iterated."""
+    import argparse
+
+    import build_corpus
+
+    fake = _install_datasets(monkeypatch, {"train": REBEN_ROWS})
+    args = argparse.Namespace(
+        limit=None,
+        download=False,
+        views_root=Path("views"),
+        require_views=False,
+        sources=["bigearthnet_v2"],
+    )
+
+    stream = build_corpus.iter_source_samples(
+        cb.CorpusSource.BIGEARTHNET_V2, args, random.Random(0)
+    )
+    assert fake.calls == []
+
+    source, first = next(iter(stream))
+    assert source is cb.CorpusSource.BIGEARTHNET_V2
+    assert first.source is cb.CorpusSource.BIGEARTHNET_V2
+
+
+def test_missing_views_can_be_kept_skipped_or_fatal(tmp_path: Path) -> None:
+    """Three situations that were previously two, and the middle one is the useful one.
+
+    A render pass covers a subset of the patches the annotation export mentions
+    (§7.2). ``keep`` writes lines pointing at files nobody rendered; ``fail``
+    refuses the whole build. Neither of those builds a corpus over the pixels
+    that do exist, which is what a training run actually needs.
+    """
+    import build_corpus
+
+    sample = _sample(1, cb.CorpusSource.VRSBENCH)
+    assert build_corpus.missing_views(sample) == [sample.views[0].path]
+
+    assert build_corpus.keep_sample(sample, "keep") is True
+    assert build_corpus.keep_sample(sample, "skip") is False
+    with pytest.raises(cb.CorpusError, match="pre-rendered views missing"):
+        build_corpus.keep_sample(sample, "fail")
+
+    # A sample whose views are on disk survives every policy.
+    present = tmp_path / "TC.jpg"
+    present.write_bytes(b"x")
+    real = sample.model_copy(deep=True)
+    real.views[0] = real.views[0].model_copy(update={"path": str(present)})
+    assert build_corpus.missing_views(real) == []
+    assert all(build_corpus.keep_sample(real, mode) for mode in ("keep", "skip", "fail"))
+
+
+def test_require_views_is_the_old_name_for_the_fail_policy() -> None:
+    """The flag the overnight script and the docs already say, kept working."""
+    import argparse
+
+    import build_corpus
+
+    def args(require: bool, mode: str | None) -> argparse.Namespace:
+        return argparse.Namespace(require_views=require, on_missing_views=mode)
+
+    assert build_corpus.view_policy(args(False, None)) == "keep"
+    assert build_corpus.view_policy(args(True, None)) == "fail"
+    assert build_corpus.view_policy(args(False, "skip")) == "skip"
+    assert build_corpus.view_policy(args(True, "fail")) == "fail"
+
+    # Naming both, disagreeing, is the one combination worth refusing.
+    with pytest.raises(cb.CorpusError, match="Pass one of them"):
+        build_corpus.view_policy(args(True, "skip"))
+
+
 def test_the_hub_glob_is_derived_from_the_one_repository_id() -> None:
     """The repo id lives in ``HF_DATASETS`` and nowhere else."""
     import build_corpus
@@ -1290,22 +1610,55 @@ def test_the_hub_glob_is_derived_from_the_one_repository_id() -> None:
 def test_the_other_five_sources_still_ask_for_their_split_by_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VRSBench, RSVQA-HR, CDVQA and DIOR-RSVG use standard splits, untouched."""
+    """A source read from the Hub asks for its split by name, untouched."""
     import build_corpus
 
     rows = {"train": [{"image_id": "a"}], "validation": [{"image_id": "b"}]}
     fake = _install_datasets(monkeypatch, rows)
 
     assert [r["image_id"] for r in build_corpus.load_rows(
-        cb.CorpusSource.VRSBENCH, "train", None, False
+        cb.CorpusSource.DIOR_RSVG, "train", None, False
     )] == ["a"]
     # Named by repo id, split by name, and still gated by --download.
-    assert fake.calls[0]["name"] == "xiang709/VRSBench"
+    assert fake.calls[0]["name"] == "danielz01/DIOR-RSVG"
     assert fake.calls[0]["split"] == "train"
     assert "data_dir" not in fake.calls[0]
     assert fake.calls[0]["download_mode"] == "reuse_cache_if_exists"
-    assert build_corpus.hf_split(cb.CorpusSource.CDVQA, "validation") == "validation"
+    assert build_corpus.hf_split(cb.CorpusSource.DIOR_RSVG, "validation") == "validation"
     assert build_corpus.hf_split(cb.CorpusSource.BIGEARTHNET_V2, "validation") == "train"
+
+
+def test_the_archive_sources_never_reach_the_hub_loader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The regression that excluded VRSBench from the last corpus.
+
+    ``xiang709/VRSBench`` publishes four archives and no table, so Hugging Face's
+    data-file inference hands ``Images_train.zip`` — 8.4 GB of PNG — to the JSON
+    packaged builder and pyarrow dies with ``ArrowInvalid: JSON parse error``.
+    It dies *late*, after the annotation zip is exhausted, which is why a small
+    ``--limit`` smoke run passed and the full pass did not. The fix is that these
+    three sources are read from disk and ``load_dataset`` is never called for
+    them at all — so the assertion is on the *absence* of a call.
+    """
+    import build_corpus
+
+    fake = _install_datasets(monkeypatch, {"train": [{"image_id": "from-the-hub"}]})
+    annotations = tmp_path / "vrsbench" / "Annotations_train"
+    annotations.mkdir(parents=True)
+    (annotations / "P0001_0001.json").write_text(
+        json.dumps({"image": "P0001_0001.png", "caption": "a field", "qa_pairs": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(local_sources, "RAW_ROOT", tmp_path)
+
+    rows = list(build_corpus.load_rows(cb.CorpusSource.VRSBENCH, "train", None, False))
+    assert [row["image_id"] for row in rows] == ["P0001_0001"]
+    assert rows[0]["split"] == "train"
+    assert fake.calls == []
+    assert {cb.CorpusSource.VRSBENCH, cb.CorpusSource.RSVQA_HR, cb.CorpusSource.CDVQA} == (
+        build_corpus.LOCAL_SOURCES
+    )
 
 
 def test_a_bundled_source_without_a_split_column_is_a_build_error(
@@ -1338,6 +1691,28 @@ def test_split_column_aliases_are_normalised() -> None:
     assert build_corpus.row_split({"original_split": "val"}) == "validation"
     assert build_corpus.row_split({"set": "TESTING"}) == "test"
     assert build_corpus.row_split({"patch_id": "p"}) is None
+
+
+def test_a_corpus_pointing_at_unrendered_views_is_refused_before_the_weights(
+    tmp_path: Path,
+) -> None:
+    """The images decode lazily, so this otherwise surfaces hours into a run.
+
+    It happened: a sanity check spent seven minutes loading a 17 GB model and
+    five optimiser steps before the first eval batch hit a FileNotFoundError
+    from inside PIL.
+    """
+    present = tmp_path / "TC.jpg"
+    present.write_bytes(b"x")
+
+    good = [{"images": [str(present)], "messages": []}]
+    assert qlora.missing_images(good) == []
+    qlora.guard_images_present(good, "good.jsonl")
+
+    bad = [{"images": [str(present), str(tmp_path / "gone.png")], "messages": []}]
+    assert qlora.missing_images(bad) == [str(tmp_path / "gone.png")]
+    with pytest.raises(qlora.ProfileError, match="referenced view file"):
+        qlora.guard_images_present(bad, "bad.jsonl")
 
 
 def test_warmup_is_expressed_in_steps_because_trl_dropped_the_ratio() -> None:
@@ -1510,13 +1885,17 @@ def test_unresolved_sources_are_declared_rather_than_mirrored() -> None:
     """A mirror of unknown provenance is where a quarantined image comes back."""
     import build_corpus
 
-    assert set(build_corpus.UNRESOLVED_SOURCES) == {
+    # RSVQA-HR and CDVQA left this set by being *resolved* — to Zenodo record
+    # 6344367 and to the ljx620/CDVQA WebDataset, both fetched by
+    # scripts/fetch_sources.py — not by being pointed at a convenient mirror.
+    assert set(build_corpus.UNRESOLVED_SOURCES) == {cb.CorpusSource.DIOR_RSVG}
+    for source in (
+        cb.CorpusSource.BIGEARTHNET_V2,
+        cb.CorpusSource.VRSBENCH,
         cb.CorpusSource.RSVQA_HR,
         cb.CorpusSource.CDVQA,
-        cb.CorpusSource.DIOR_RSVG,
-    }
-    assert cb.CorpusSource.BIGEARTHNET_V2 in build_corpus.RESOLVED_SOURCES
-    assert cb.CorpusSource.VRSBENCH in build_corpus.RESOLVED_SOURCES
+    ):
+        assert source in build_corpus.RESOLVED_SOURCES
     for source in build_corpus.UNRESOLVED_SOURCES:
         assert source not in build_corpus.RESOLVED_SOURCES
 
@@ -1528,10 +1907,35 @@ def test_requesting_an_unresolved_source_reports_its_actual_problem() -> None:
     import build_corpus
 
     args = argparse.Namespace(
-        limit=1, download=False, views_root=Path("views"), require_views=False
+        limit=1,
+        download=False,
+        views_root=Path("views"),
+        require_views=False,
+        sources=[cb.CorpusSource.DIOR_RSVG.value],
     )
+    # Eagerly, not on the first `next()`: a bad --sources fails the invocation.
     with pytest.raises(cb.CorpusError, match="has no verified source"):
-        build_corpus.build_source(cb.CorpusSource.RSVQA_HR, args, random.Random(0))
+        build_corpus.iter_source_samples(cb.CorpusSource.DIOR_RSVG, args, random.Random(0))
+
+
+def test_an_unfetched_local_source_says_so_before_the_build_starts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """"Which source is missing" is far cheaper to answer now than three in."""
+    import argparse
+
+    import build_corpus
+
+    monkeypatch.setattr(local_sources, "RAW_ROOT", tmp_path)
+    args = argparse.Namespace(
+        limit=1,
+        download=False,
+        views_root=Path("views"),
+        require_views=False,
+        sources=[cb.CorpusSource.CDVQA.value],
+    )
+    with pytest.raises(cb.CorpusError, match="has not been fetched"):
+        build_corpus.iter_source_samples(cb.CorpusSource.CDVQA, args, random.Random(0))
 
 
 def _evidence_qa_builder() -> Any:

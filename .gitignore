@@ -2,12 +2,20 @@
 # 1. Python & Environments
 # =========================
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .venv/
 venv/
 env/
+ENV/
+.python-version.local
+*.egg-info/
+*.egg
+/build/
+/dist/
+pip-wheel-metadata/
+.eggs/
 
 # =========================
 # 2. Tooling Caches
@@ -15,16 +23,61 @@ env/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.hypothesis/
 .coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+.ipynb_checkpoints/
 
 # =========================
 # 3. SatQuery AI Data & Artifacts
 # =========================
+# Everything under data/ is downloaded, rendered or derived — hundreds of GB —
+# and is rebuilt by run_overnight.sh from the sources in configs/. Only the
+# placeholder is versioned.
 data/*
 !data/.keep
+# The same stores, wherever a script writes them relative to its own cwd.
+data/raw/
+data/processed/
+data/artifacts/
+data/checkpoints/
+/.artifacts/
+/artifacts/
+/views/
+/rendered_views/
+/corpus/
+# Pre-flight, trace and job stores.
 *.sqlite
+*.sqlite3
 *.db
-*.log
+traces.sqlite3
+# Archives and shards: Zenodo tarballs, WebDataset shards, numpy dumps.
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+*.npz
+*.npy
+*.parquet
+*.arrow
+# Rasters and imagery that are inputs or evidence, never source.
+*.tif
+*.tiff
+*.geotiff
+*.jp2
+*.hdf
+*.hdf5
+*.h5
+*.nc
+# Corpus shards. The seed set in configs/ is authored config, so it stays.
+*.jsonl
+!configs/**/*.jsonl
 
 # =========================
 # 4. Training Runs & Logs
@@ -32,26 +85,110 @@ data/*
 # Adapter checkpoints, the merged export, and each run's manifest. A ~200 MB
 # adapter per save x ~20 saves is not what a git history is for; the adapter
 # that ships gets versioned in the registry (Master.md §8 Phase 7), not here.
-runs/
-logs/
+/runs/
+/outputs/
+/output/
+wandb/
+mlruns/
+tensorboard/
+lightning_logs/
+/logs/
+*.log
+*.log.*
+nohup.out
+*.out
+*.err
+# Inference / throughput probe dumps.
+/probe*/
+/runs/**/*.json
+*_probe.json
+probe_*.json
+run_manifest.json
+# Process bookkeeping from background launchers.
+*.pid
+.levircd.pid
+# Scratch space, wherever it is made.
+scratchpad/
+/scratch/
+/tmp/
+/temp/
+*.tmp
+*.bak
+*.swp
 
 # =========================
 # 5. ML Models & Datasets
 # =========================
-checkpoints/
+# Anchored to the repo root: `src/satquery/models/` is a Python package, and
+# an unanchored `models/` would silently drop it from every commit.
+/checkpoints/
+checkpoint-*/
+/adapters/
+/adapter/
+/lora/
+/peft/
+/merged/
+/models/
+/weights/
+/datasets/
 *.ckpt
 *.safetensors
 *.pth
 *.pt
 *.bin
-*.h5
-datasets/
+*.gguf
+*.onnx
+*.msgpack
+*.pkl
+*.pickle
+adapter_model.*
+# Hugging Face and other download caches, if ever pointed into the tree.
+/.cache/
+/.hf_cache/
+/huggingface/
+/hub/
 
 # =========================
-# 6. Secrets & IDEs
+# 6. Frontend Build & Modules
+# =========================
+frontend/node_modules/
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.eslintcache
+.eslintcache
+frontend/.vite/
+.vite/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+*.local
+# Fonts are synced from node_modules by `npm run fonts:sync`, but the copies
+# in public/fonts are small, self-hosted and preloaded by index.html — they
+# stay tracked deliberately.
+
+# =========================
+# 7. Secrets & IDEs
 # =========================
 .env
-.env.local
+.env.*
+!.env.example
+*.pem
+*.key
 .vscode/
 .idea/
+.claude/settings.local.json
+.claude/*.local.*
+
+# =========================
+# 8. OS Files
+# =========================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+*~

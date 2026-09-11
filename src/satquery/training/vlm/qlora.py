@@ -27,10 +27,11 @@ otherwise gets picked as device 0 and fails the run with an unhelpful error.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -136,6 +137,16 @@ class DataSpec(BaseModel):
     view_size_px: int = 448
     max_pixels: int = 448 * 448
     max_seq_len: int = 4096
+    eval_samples: int | None = 256
+    """How many validation samples an eval pass reads; None reads all of them.
+
+    Bounded, because an eval is not free and is not proportional to the training
+    it reports on. The full POC val split is 3,915 samples, which at ~9.5 s per
+    batch is 78 minutes — after a 10-step run that trained for six. Left
+    unbounded that cost lands again at every ``eval_steps`` boundary and once
+    more at the end, which is how a run that was supposed to fit in an evening
+    does not. A few hundred samples is enough to watch a loss curve; the honest
+    number for a checkpoint comes from the Phase 8 eval, not from here."""
 
 
 class TrainSpec(BaseModel):
@@ -155,7 +166,9 @@ class TrainSpec(BaseModel):
     bf16: bool = True
     seed: int = 42
     dataloader_num_workers: int = 8
+    save_strategy: str = "steps"
     save_steps: int = 250
+    save_total_limit: int = 3
     eval_steps: int = 250
     logging_steps: int = 10
     resume_from_checkpoint: str = "auto"
@@ -703,6 +716,57 @@ def load_corpus(
     ]
 
 
+def missing_images(records: Sequence[Mapping[str, Any]], limit: int | None = None) -> list[str]:
+    """Referenced image paths that are not on disk, from a chat-formatted corpus.
+
+    The ``images`` column decodes lazily — that is what keeps a 65 k-sample
+    corpus out of RAM — so a path that points at nothing is not an error until
+    the batch containing it is collated, which can be hours into a run. Checking
+    here costs one ``stat`` per view and turns that into a message before the
+    weights are loaded.
+
+    Args:
+        records: Chat records from :func:`load_corpus`.
+        limit: Stop after inspecting this many records; None checks all of them.
+
+    Returns:
+        The absent paths, in the order they were referenced.
+    """
+    absent: list[str] = []
+    for record in list(records)[:limit]:
+        for image in record.get("images", ()):
+            if isinstance(image, str | Path) and not Path(image).is_file():
+                absent.append(str(image))
+    return absent
+
+
+def guard_images_present(
+    records: Sequence[Mapping[str, Any]], label: str, sample_size: int = 200
+) -> None:
+    """Refuse to start a run whose corpus points at views nobody rendered.
+
+    Checks a prefix rather than the whole corpus: a corpus is built by one pass
+    over one render tree, so missing views are a property of the build, not of
+    scattered individual lines, and the first few hundred records answer the
+    question. A clean sample is not a proof — it is the cheap check that catches
+    the failure that actually happens.
+
+    Raises:
+        ProfileError: A referenced view file is absent.
+    """
+    absent = missing_images(records, limit=sample_size)
+    if not absent:
+        return
+    checked = min(len(records), sample_size)
+    raise ProfileError(
+        f"{label}: {len(absent)} referenced view file(s) are missing in the first "
+        f"{checked} samples, e.g. {absent[:3]}. The corpus was built over patches "
+        "the render pass has not covered. Rebuild it restricted to what exists:\n"
+        "  uv run python scripts/build_corpus.py --on-missing-views skip ...\n"
+        "or render the missing patches first (scripts/render_views.py)."
+    )
+
+
 def iter_corpus(path: Path) -> Iterator[CorpusSample]:
     """Stream a corpus file one validated sample at a time."""
     with path.open(encoding="utf-8") as handle:
@@ -883,14 +947,30 @@ def sft_config_kwargs(
         "bf16": profile.train.bf16,
         "seed": profile.train.seed,
         "dataloader_num_workers": profile.train.dataloader_num_workers,
+        # Checkpointing is stated in full rather than left to the defaults.
+        # A resumable run needs the optimiser, the scheduler and the RNG state,
+        # not just the adapter, and `save_strategy` is what decides whether
+        # `save_steps` is consulted at all — a default that has moved between
+        # transformers releases. `save_total_limit` bounds the run's disk
+        # without bounding the run: the trainer always keeps the newest, which
+        # is the one `--resume` comes back to.
+        "save_strategy": profile.train.save_strategy,
         "save_steps": profile.train.save_steps,
+        "save_total_limit": profile.train.save_total_limit,
+        # The field that actually decides whether a run is resumable. Left at
+        # its default it is already False, but "the optimiser and scheduler
+        # states are on disk" is the whole point of the checkpoint here, and a
+        # default is a weak place to keep a load-bearing fact: `save_only_model:
+        # True` writes an adapter that can be *served* and cannot be *resumed*,
+        # and the difference does not show up until the resume silently restarts
+        # Adam from zero moment estimates.
+        "save_only_model": False,
         "eval_steps": profile.train.eval_steps,
         "eval_strategy": "steps" if has_eval else "no",
         "logging_steps": profile.train.logging_steps,
         "max_length": profile.data.max_seq_len,
         "report_to": ["tensorboard"],
         "remove_unused_columns": False,
-        "save_total_limit": 3,
     }
 
 
@@ -914,6 +994,152 @@ def warmup_steps(profile: QLoraProfile, total_steps: int) -> int:
     return max(1, round(total_steps * profile.train.warmup_ratio))
 
 
+class InterruptRequest:
+    """A one-way flag shared by the signal handler and the trainer callback.
+
+    Deliberately not a ``threading.Event``: the only writer is a signal handler,
+    which must do the least possible work, and the only reader is the training
+    loop between steps.
+    """
+
+    def __init__(self) -> None:
+        """Start un-requested."""
+        self.requested = False
+        self.signal_name: str | None = None
+
+    def request(self, signal_name: str) -> None:
+        """Record that a stop was asked for, and by which signal."""
+        self.requested = True
+        self.signal_name = signal_name
+
+
+def install_interrupt_handler(
+    request: InterruptRequest, signals: Sequence[int] | None = None
+) -> Callable[[], None]:
+    """Turn Ctrl+C into "checkpoint at the next step, then stop cleanly".
+
+    Without this, SIGINT raises ``KeyboardInterrupt`` from wherever the loop
+    happens to be — mid-backward, mid-collate — and the process dies with
+    everything since the last periodic save thrown away, no adapter written and
+    no manifest. Which is the one thing an overnight run on a desktop cannot
+    afford, because the way that run *ends* is somebody pressing Ctrl+C.
+
+    The handler only sets a flag. The actual save happens in the callback from
+    :func:`graceful_stop_callback`, at a step boundary, where the optimiser and
+    scheduler states are consistent and the trainer's own checkpoint writer can
+    do its job.
+
+    The original handlers are restored on the *first* signal, so a second Ctrl+C
+    aborts immediately the old way. That matters: the graceful path still has to
+    finish the current optimiser step and write a checkpoint, and an operator
+    who has decided not to wait must always be able to leave.
+
+    Returns:
+        A callable that restores the previous handlers, for the caller's
+        ``finally``.
+    """
+    import signal as signal_module
+
+    watched = tuple(signals or (signal_module.SIGINT, signal_module.SIGTERM))
+    previous: dict[int, Any] = {}
+
+    def handle(number: int, frame: Any) -> None:
+        name = signal_module.Signals(number).name
+        request.request(name)
+        restore()
+        print(
+            f"\n{name} received — finishing the current optimiser step, writing a "
+            "checkpoint, then stopping. Press Ctrl+C again to abort now and lose "
+            "everything since the last checkpoint.",
+            flush=True,
+        )
+
+    def restore() -> None:
+        """Put the handlers that were there before back."""
+        for number, handler in previous.items():
+            # pragma: no cover - only fails off the main thread
+            with contextlib.suppress(OSError, ValueError):
+                signal_module.signal(number, handler)
+        previous.clear()
+
+    for number in watched:
+        try:
+            previous[number] = signal_module.signal(number, handle)
+        except (OSError, ValueError):  # pragma: no cover - non-main thread
+            continue
+    return restore
+
+
+def graceful_stop_callback(request: InterruptRequest) -> Any:
+    """A ``TrainerCallback`` that checkpoints and stops when *request* is set.
+
+    ``should_save`` before ``should_training_stop``, both on the same step: the
+    trainer writes the checkpoint on its way out, so the run that resumes starts
+    from where the interrupt landed rather than from the last periodic save.
+
+    Checked at ``on_step_end`` — an *optimiser* step, not a micro-batch. With
+    ``gradient_accumulation_steps: 16`` that is up to sixteen forward/backward
+    passes of latency between Ctrl+C and the process exiting. It is the earliest
+    point at which the accumulated gradients have been applied and the state on
+    disk would be one a resume can trust.
+    """
+    from transformers import TrainerCallback
+
+    base: Any = TrainerCallback
+
+    class _GracefulStop(base):  # type: ignore[misc]
+        """Turns the interrupt flag into the trainer's own stop-and-save controls."""
+
+        def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
+            """Ask for a checkpoint and an exit if a signal has arrived."""
+            if request.requested:
+                control.should_save = True
+                control.should_training_stop = True
+            return control
+
+    return _GracefulStop()
+
+
+def latest_checkpoint(output_dir: Path) -> Path | None:
+    """The newest ``checkpoint-N`` in *output_dir*, by step number.
+
+    By step, not by mtime: ``save_total_limit`` deletes older directories, and a
+    filesystem restored from a backup or copied between disks can carry mtimes
+    that no longer reflect the order the checkpoints were written in.
+    """
+    checkpoints = [
+        path
+        for path in output_dir.glob("checkpoint-*")
+        if path.is_dir() and path.name.removeprefix("checkpoint-").isdigit()
+    ]
+    if not checkpoints:
+        return None
+    return max(checkpoints, key=lambda path: int(path.name.removeprefix("checkpoint-")))
+
+
+def checkpoint_step(checkpoint: Path) -> int:
+    """The optimiser step a checkpoint directory holds."""
+    return int(checkpoint.name.removeprefix("checkpoint-"))
+
+
+def describe_resume(output_dir: Path, setting: str) -> str:
+    """One line saying what this invocation will do about an existing checkpoint."""
+    target = resume_target(output_dir, setting)
+    if target is None:
+        existing = latest_checkpoint(output_dir)
+        if existing is not None:
+            return (
+                f"starting from scratch, ignoring {existing.name} "
+                f"(resume={setting!r})"
+            )
+        return "starting from scratch (no checkpoint present)"
+    if target is True:
+        found = latest_checkpoint(output_dir)
+        assert found is not None  # resume_target only returns True when one exists
+        return f"resuming from {found.name} (step {checkpoint_step(found)})"
+    return f"resuming from {target}"
+
+
 def build_trainer(
     profile: QLoraProfile,
     model: Any,
@@ -923,6 +1149,7 @@ def build_trainer(
     output_dir: Path,
     max_steps: int | None = None,
     total_steps: int | None = None,
+    interrupt: InterruptRequest | None = None,
 ) -> Any:
     """Assemble the ``trl`` SFT trainer for this profile.
 
@@ -936,6 +1163,8 @@ def build_trainer(
         max_steps: Hard stop, for a sanity check or a truncated run.
         total_steps: The run's planned optimiser steps, used to place the warmup.
             Defaults to *max_steps* when that is the shorter of the two.
+        interrupt: Shared stop flag; when given, the trainer checkpoints and
+            exits cleanly on the next step boundary after a signal arrives.
     """
     from trl import SFTConfig, SFTTrainer
 
@@ -954,6 +1183,7 @@ def build_trainer(
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         processing_class=processor,
+        callbacks=[graceful_stop_callback(interrupt)] if interrupt else None,
     )
 
 
@@ -971,6 +1201,15 @@ def resume_target(output_dir: Path, setting: str) -> bool | str | None:
         return True if any(output_dir.glob("checkpoint-*")) else None
     if value in {"true", "yes"}:
         return True
+    # An explicit path, checked here rather than by the trainer: a typo in a
+    # checkpoint name otherwise surfaces after the weights are on the card.
+    path = Path(setting)
+    if not (path / "trainer_state.json").is_file():
+        raise ProfileError(
+            f"{setting} is not a resumable checkpoint (no trainer_state.json). "
+            f"Available in {output_dir}: "
+            f"{sorted(p.name for p in output_dir.glob('checkpoint-*')) or 'none'}"
+        )
     return setting
 
 
@@ -986,6 +1225,14 @@ def write_run_manifest(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 __all__ = [
+    "guard_images_present",
+    "missing_images",
+    "InterruptRequest",
+    "checkpoint_step",
+    "describe_resume",
+    "graceful_stop_callback",
+    "install_interrupt_handler",
+    "latest_checkpoint",
     "DEFAULT_PROFILE_PATH",
     "DEFAULT_VISION_BLOCKS",
     "FALLBACK_PROFILE_PATH",

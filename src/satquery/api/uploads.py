@@ -33,16 +33,23 @@ def parse_options(raw: str | None) -> AnalyzeOptions:
         return AnalyzeOptions()
 
 
-@contextmanager
-def spooled_uploads(uploads: list[UploadFile], max_bytes: int) -> Iterator[list[SourceImage]]:
-    """Write each upload to a temporary directory, cleaned up on exit.
+def persist_uploads(
+    uploads: list[UploadFile], max_bytes: int
+) -> tuple[Path, list[SourceImage]]:
+    """Write each upload to a fresh temporary directory the **caller** owns.
+
+    Split out of :func:`spooled_uploads` for ``POST /v1/jobs``, whose files have
+    to outlive the request that carried them: the response returns as soon as the
+    job is queued, but the background analysis reads the pixels long after. The
+    caller is responsible for removing the returned directory.
 
     Args:
         uploads: The multipart file parts, in request order.
         max_bytes: Per-file byte budget.
 
-    Yields:
-        One :class:`SourceImage` per upload, in the same order.
+    Returns:
+        The directory holding the files, and one :class:`SourceImage` per
+        upload in the same order.
 
     Raises:
         NoImagesError: The request carried no usable file parts.
@@ -73,6 +80,33 @@ def spooled_uploads(uploads: list[UploadFile], max_bytes: int) -> Iterator[list[
             if written == 0:
                 raise NoImagesError()
             images.append(SourceImage(path=target, filename=upload.filename or target.name))
+    except BaseException:
+        # A rejected upload must not leave bytes on disk.
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    return directory, images
+
+
+@contextmanager
+def spooled_uploads(uploads: list[UploadFile], max_bytes: int) -> Iterator[list[SourceImage]]:
+    """Write each upload to a temporary directory, cleaned up on exit.
+
+    The synchronous path (``/v1/analyze``, ``/v1/validate``): the files are
+    needed only for the life of the request.
+
+    Args:
+        uploads: The multipart file parts, in request order.
+        max_bytes: Per-file byte budget.
+
+    Yields:
+        One :class:`SourceImage` per upload, in the same order.
+
+    Raises:
+        NoImagesError: The request carried no usable file parts.
+        ImageTooLargeError: A file exceeded *max_bytes*.
+    """
+    directory, images = persist_uploads(uploads, max_bytes)
+    try:
         yield images
     finally:
         shutil.rmtree(directory, ignore_errors=True)

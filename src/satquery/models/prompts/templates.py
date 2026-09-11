@@ -26,7 +26,7 @@ adapter ships would silently move the model off its training distribution. Add
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from satquery.schemas.enums import TaskType
@@ -91,9 +91,30 @@ class PromptTemplate:
     default_instruction: str
     facts_header: str = _FACTS_HEADER
     empty_facts: str = _NO_FACTS
+    synthesiser_instructions: dict[str, str] = field(default_factory=dict)
+    """Instructions used only by a ``vlm_*`` synthesiser, keyed by policy ``mode``
+    and overriding :attr:`task_instructions` for that step alone.
 
-    def instruction_for(self, task: TaskType) -> str:
-        """The task-specific paragraph, falling back to the generic one."""
+    One task can need two different turns. GROUNDING is the case: ``text_grounding``
+    must emit machine-readable boxes, and its instruction is frozen against the
+    Phase 7 corpus — but the synthesiser that runs *after* it writes the sentence
+    the analyst reads, and giving it the box instruction made it emit a second,
+    unparsed copy of the boxes as the chat answer.
+
+    Adding an entry here cannot move a trained behaviour: it is read only where
+    ``mode`` is passed, which is the synthesis path, and every existing string is
+    untouched."""
+
+    def instruction_for(self, task: TaskType, mode: str | None = None) -> str:
+        """The task-specific paragraph, falling back to the generic one.
+
+        A synthesiser mode with its own entry wins over the task instruction; the
+        grounding tool passes no mode and so is unaffected.
+        """
+        if mode:
+            override = self.synthesiser_instructions.get(mode.strip().lower())
+            if override:
+                return override
         return self.task_instructions.get(task, self.default_instruction)
 
 
@@ -165,6 +186,23 @@ GROUNDED_V1: Final[PromptTemplate] = PromptTemplate(
         "TASK. Answer the analyst's request in one to four sentences, grounded in "
         "the measurements above."
     ),
+    synthesiser_instructions={
+        # The step-3 synthesiser on a GROUNDING plan. text_grounding has already
+        # found the boxes and the frontend is already drawing them, so repeating
+        # them as text gives the analyst a line of coordinates where a sentence
+        # should be — which is exactly what the UI was showing.
+        "grounding": (
+            "TASK. The boxes have already been located and are drawn on the image "
+            "for the analyst. Write one to three sentences naming what was found "
+            "and whereabouts in the frame it sits — which part of the image, and "
+            "what it is near. Describe the things themselves, not the boxes around "
+            "them, and place them relative to the frame (\"upper left\", \"along "
+            "the lower edge\") rather than by compass direction, which the view "
+            "does not establish. Answer in sentences: never a bare view label, a "
+            "heading, a list, coordinates or box markers. If nothing was located, "
+            "say so plainly."
+        ),
+    },
 )
 """The prompt the Phase 4 zero-shot baseline and the Phase 7 adapter both use.
 Frozen: an adapter trained against this text is served against this text."""

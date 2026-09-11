@@ -31,6 +31,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from satquery.agent.events import Emit, emit_to
 from satquery.agent.planner import ArtifactSelector, PlannedStep, PlanResult
 from satquery.evidence import fact_sheet as fact_sheet_module
 from satquery.registry.capability_match import CapabilityCheck, MatchStatus, match
@@ -51,6 +52,7 @@ from satquery.tools.base import (
     ToolContext,
     ToolResult,
 )
+from satquery.tools.catalog import CHECKPOINT_TOOLS, checkpoint_fingerprint
 
 MAX_PARALLEL_TOOLS: Final[int] = 3
 """CPU-bound tools. Three keeps the box responsive without leaving cores idle."""
@@ -61,6 +63,29 @@ models, concurrent GPU steps are the shortest path to VRAM exhaustion."""
 
 MIN_TIMEOUT_MS: Final[int] = 5_000
 TIMEOUT_FACTOR: Final[int] = 3
+
+COLD_START_TIMEOUT_MS: Final[int] = 90_000
+"""The budget a tool gets on its first call in this process.
+
+``est_ms`` in the registry describes steady-state work: a model already resident,
+an import already done. The first call pays neither of those. The detector reads a
+checkpoint and builds a ROCm context — tens of seconds on a cold card, against a
+``3 x 1800 ms`` budget — and it is not only the weight-loading tools that suffer,
+because a cold load holds the GIL. ``spectral_index_analyzer`` normally finishes
+in 270 ms; running beside a cold detector it overran 5 s and failed.
+
+So the allowance is per-tool and unconditional on the first call. The timeout is a
+backstop against a wedged tool, not a latency target, and it is paid once per tool
+per process. What it buys is the thing the first request after a restart could not
+otherwise have: the same answer the second request gets."""
+
+_WARMED: Final[set[str]] = set()
+"""Tools that have completed a run in this process.
+
+Process-wide because the costs it tracks are process-wide — module imports,
+``ModelCache`` and the VLM backend all live for the life of the interpreter, so
+the second request pays none of them no matter which executor instance serves
+it."""
 
 _MIME_FOR_TYPE: Final[dict[ArtifactType, str]] = {
     ArtifactType.SCALARS: "application/json",
@@ -231,12 +256,20 @@ class DagExecutor:
         cache: ExecutionCache | None = None,
         max_parallel: int = MAX_PARALLEL_TOOLS,
         max_parallel_gpu: int = MAX_PARALLEL_GPU_TOOLS,
+        emit: Emit | None = None,
     ) -> None:
-        """Wire the executor to a registry, an implementation table and a store."""
+        """Wire the executor to a registry, an implementation table and a store.
+
+        *emit*, when given, receives the ``step_started`` / ``artifact`` /
+        ``step_completed`` events of API_CONTRACT §5 as they happen. ``None`` —
+        the default, and what ``/v1/analyze`` passes — makes every emission a
+        single ``is None`` check.
+        """
         self.registry = registry
         self.tools = dict(tools)
         self.store = store
         self.cache = cache if cache is not None else DEFAULT_CACHE
+        self.emit = emit
         self._cpu = asyncio.Semaphore(max_parallel)
         self._gpu = asyncio.Semaphore(max_parallel_gpu)
 
@@ -276,11 +309,35 @@ class DagExecutor:
                 # Unreachable for a linted table, but a cycle must not hang the
                 # request: skip what is left and say so.
                 for step in sorted(pending.values(), key=lambda s: s.step):
-                    report.executions.append(
-                        self._skipped(step, "the step's dependencies form a cycle")
-                    )
+                    execution = self._skipped(step, "the step's dependencies form a cycle")
+                    report.executions.append(execution)
                     state[step.step] = _StepState(ToolStatus.SKIPPED)
+                    # Without this the client would leave these nodes PENDING
+                    # for ever, which reads as a hang rather than a skip.
+                    emit_to(
+                        self.emit,
+                        "step_completed",
+                        {
+                            "step": execution.step,
+                            "status": execution.status.value,
+                            "duration_ms": execution.duration_ms,
+                            "confidence": execution.confidence,
+                            "output_refs": [],
+                        },
+                    )
                 break
+
+            for step in ready:
+                spec = self.registry.get(step.tool)
+                emit_to(
+                    self.emit,
+                    "step_started",
+                    {
+                        "step": step.step,
+                        "tool": step.tool,
+                        "est_ms": spec.est_ms if spec is not None else 0,
+                    },
+                )
 
             outcomes = await asyncio.gather(
                 *(
@@ -346,6 +403,22 @@ class DagExecutor:
                     # declared float type rather than relying on coercion.
                     execution.scalars["views_rendered"] = float(len(artifacts))
                 report.executions.append(execution)
+
+                # Evidence streams: each artifact is announced the moment it is
+                # addressable, before the step that produced it is summarised.
+                for ref in artifacts:
+                    emit_to(self.emit, "artifact", ref.model_dump(mode="json"))
+                emit_to(
+                    self.emit,
+                    "step_completed",
+                    {
+                        "step": execution.step,
+                        "status": execution.status.value,
+                        "duration_ms": execution.duration_ms,
+                        "confidence": execution.confidence,
+                        "output_refs": list(execution.output_refs),
+                    },
+                )
                 state[step.step] = _StepState(execution.status, artifacts)
                 del pending[step.step]
 
@@ -370,10 +443,30 @@ class DagExecutor:
         question: str = "",
     ) -> tuple[Execution, ToolResult | None, CachedStep | None]:
         """Resolve, match, run and record one step."""
-        blocked = [
+        # A dependency that produced nothing only blocks this step when this step
+        # actually needs it, and there are exactly two ways it can: the policy
+        # entry declared that dependency non-optional — load-bearing for
+        # everything downstream — or this step selects an artifact out of it.
+        #
+        # Anything else is an ordering edge, and cascading it is what turned a
+        # good change run into a templated answer: on RGB-only imagery
+        # ``spectral_index_analyzer`` has no NIR to compute NDVI from and skips,
+        # which is the case ``optional`` exists to describe. The synthesiser
+        # depends on it only so the indices reach the FactSheet before the
+        # prompt is built; it reads ``@1`` and ``@2:CHANGE_MASK``, never ``@4``.
+        # Skipping it left a measured mask and a full statistics step unused.
+        upstream_steps = {candidate.step: candidate for candidate in plan.steps}
+        consumed = {selector.step for selector in step.selectors}
+        unproductive = [
             dependency
             for dependency in step.depends_on
             if state[dependency].status in {ToolStatus.FAILED, ToolStatus.SKIPPED}
+        ]
+        blocked = [
+            dependency
+            for dependency in unproductive
+            if dependency in consumed
+            or not upstream_steps[dependency].optional
         ]
         if blocked:
             names = ", ".join(f"step {d}" for d in blocked)
@@ -385,6 +478,19 @@ class DagExecutor:
                 )
             )
             return self._skipped(step, f"{names} did not produce output"), None, None
+
+        for dependency in unproductive:
+            # Recorded rather than silent: the step ran with less evidence than
+            # the entry describes, and the trace has to be able to say so.
+            report.warnings.append(
+                WarningItem(
+                    code="DEPENDENCY_INCOMPLETE",
+                    message=(
+                        f"{step.tool} ran without step {dependency} "
+                        f"({upstream_steps[dependency].tool}), which produced no output."
+                    ),
+                )
+            )
 
         images = [by_id[ref] for ref in step.image_refs if ref in by_id]
         upstream = self._resolve_artifacts(step.selectors, state)
@@ -577,6 +683,12 @@ class DagExecutor:
         "what changed?" and "how much water is there?" over the same pair would
         collide on one cached answer.
         """
+        if spec.name in CHECKPOINT_TOOLS:
+            # The weights are not in the key: the registry's version string is a
+            # constant in the YAML and does not move when a checkpoint is
+            # retrained or repointed. Without this, a rewritten bundle keeps
+            # serving the mask the old weights produced.
+            return checkpoint_fingerprint(spec.name)
         if spec.category is not ToolCategory.VLM:
             return ""
         return canonical_json(
@@ -593,13 +705,21 @@ class DagExecutor:
         Treating a timeout exactly like a failure is what the contract asks for.
         """
         default_ms = max(TIMEOUT_FACTOR * spec.est_ms, MIN_TIMEOUT_MS)
+        if spec.name not in _WARMED:
+            default_ms = max(default_ms, COLD_START_TIMEOUT_MS)
+        # An explicit timeout_ms in the policy table still wins: the allowance is
+        # a better default, not an override of a deliberate decision.
         timeout_ms = int(step.params.get("timeout_ms", default_ms))
         semaphore = self._gpu if spec.device is Device.ROCM_0 else self._cpu
         async with semaphore:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 asyncio.to_thread(implementation.run, context, step.params),
                 timeout=timeout_ms / 1000.0,
             )
+        # Only on success: a tool that failed may not have got as far as loading,
+        # and charging it the steady-state budget next time would hide that.
+        _WARMED.add(spec.name)
+        return result
 
     # ---------------------------------------------------------------- recording
 

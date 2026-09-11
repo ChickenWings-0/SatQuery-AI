@@ -15,7 +15,9 @@ that admits the gap.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Final
 
 from satquery.tools.base import Tool
@@ -75,6 +77,48 @@ CHECKPOINT_TOOLS: Final[frozenset[str]] = frozenset(
 Unlike the VLM tools, these have a declared ``fallback`` — ``image_diff_change``
 and ``spectral_index_analyzer`` — so an untrained checkout still answers change
 and segmentation questions, visibly DEGRADED."""
+
+def checkpoint_fingerprint(tool_name: str) -> str:
+    """Identify the weights *tool_name* would load right now, without loading them.
+
+    This exists for the execution cache. A cache key is built from the tool name,
+    the registry's declared version, the step params, the input hashes and the
+    grid — and the registry version is a *static string in the YAML*, so it does
+    not move when the weights underneath it do. Retrain a detector, or repoint
+    ``SATQUERY_CD_CHECKPOINT``, and every pair analysed before the change keeps
+    returning the mask the old weights produced, indefinitely and silently.
+
+    The fingerprint is a stat, not a read: path, mtime and size. That is enough to
+    notice a rewritten bundle, and cheap enough to take on every step.
+    """
+    try:
+        if tool_name == "siamese_change_detector":
+            from satquery.training.cd.checkpoint import find_checkpoint
+
+            found = find_checkpoint()
+            target = Path(found) if found else None
+        elif tool_name == "semantic_segmenter":
+            from satquery.tools.semantic_segmenter import CHECKPOINT_ENV, MODEL_ID
+
+            configured = os.environ.get(CHECKPOINT_ENV) or MODEL_ID
+            target = Path(configured)
+        else:
+            return ""
+
+        if target is None:
+            return f"{tool_name}:none"
+        if not target.exists():
+            # A Hugging Face model id rather than a path on disk: the string is
+            # the whole identity, and there is nothing to stat.
+            return f"{tool_name}:{target}"
+        stat = target.stat()
+        return f"{tool_name}:{target}:{stat.st_mtime_ns}:{stat.st_size}"
+    except (OSError, ImportError, ValueError):  # pragma: no cover - environment-dependent
+        # An unidentifiable checkpoint must not fail the step. Returning the tool
+        # name alone degrades to the previous behaviour: caching still works, it
+        # just cannot notice a weight swap.
+        return f"{tool_name}:unknown"
+
 
 DOFA_TOOLS: Final[frozenset[str]] = frozenset({"crossmodal_consistency"})
 """Tools needing the DOFA encoder, which arrives with torchgeo rather than with a
