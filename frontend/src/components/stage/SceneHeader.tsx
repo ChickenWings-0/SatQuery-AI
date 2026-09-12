@@ -22,7 +22,7 @@ import { DownloadIcon, FullscreenIcon, ShareIcon } from '@/components/ui/icons'
 import { sceneMeta } from '@/evidence/scene'
 import { primaryOf, type ViewGroup } from '@/evidence/views'
 import { countOf } from '@/format'
-import { useJobStore } from '@/state/job'
+import { isLive, useJobStore } from '@/state/job'
 import { useUiStore } from '@/state/ui'
 
 const TITLES: Partial<Record<TaskType, string>> = {
@@ -145,8 +145,10 @@ export function SceneHeader({
               started, changed stage or finished — the rest of the change is
               pixels. */}
           <span role="status" className="t-meta">
-            {phase === 'streaming'
-              ? `${stage ?? 'running'}…`
+            {phase === 'reconnecting'
+              ? 'reconnecting…'
+              : isLive(phase)
+                ? `${stage ?? 'running'}…`
               : phase === 'failed'
                 ? 'Run stopped'
                 : `${countOf(nodes.length, { one: 'step', other: 'steps' })} · ${countOf(artifacts.length, { one: 'artifact', other: 'artifacts' })}`}

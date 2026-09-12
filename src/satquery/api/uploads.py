@@ -7,16 +7,18 @@ so an oversized upload never fully materialises on disk.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import tempfile
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
 from fastapi import UploadFile
+from pydantic import ValidationError
 
-from satquery.ingest.errors import ImageTooLargeError, NoImagesError
+from satquery.ingest.errors import ImageTooLargeError, InvalidOptionsError, NoImagesError
 from satquery.ingest.pipeline import SourceImage
 from satquery.schemas.api import AnalyzeOptions
 
@@ -24,13 +26,42 @@ CHUNK_BYTES = 1 << 20
 
 
 def parse_options(raw: str | None) -> AnalyzeOptions:
-    """Parse the ``options`` multipart part, tolerating absence and malformed JSON."""
-    if not raw:
+    """Parse the ``options`` multipart part. Absent is fine; malformed is a 400.
+
+    This used to swallow both bad JSON and a failed validation and hand back the
+    defaults, so ``{"seed": "abc"}`` or a mistyped key produced a silently
+    different run with a 200. A client that sent options meant them.
+
+    Raises:
+        InvalidOptionsError: The part is not JSON, or not a valid AnalyzeOptions.
+    """
+    if not raw or not raw.strip():
         return AnalyzeOptions()
     try:
-        return AnalyzeOptions.model_validate(json.loads(raw))
-    except (json.JSONDecodeError, ValueError):
-        return AnalyzeOptions()
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise InvalidOptionsError(f"options is not valid JSON: {error.msg}") from error
+    try:
+        return AnalyzeOptions.model_validate(payload)
+    except ValidationError as error:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in item['loc']) or 'options'}: {item['msg']}"
+            for item in error.errors()
+        )
+        raise InvalidOptionsError(problems) from error
+
+
+async def persist_uploads_async(
+    uploads: list[UploadFile], max_bytes: int
+) -> tuple[Path, list[SourceImage]]:
+    """:func:`persist_uploads` off the event loop.
+
+    The copy is synchronous file IO over up to two 512 MB parts; done inline in
+    an ``async def`` handler it stalls every other request's SSE heartbeat for
+    its duration. The byte-budget check stays in the synchronous function,
+    which is the one that is tested.
+    """
+    return await asyncio.to_thread(persist_uploads, uploads, max_bytes)
 
 
 def persist_uploads(
@@ -106,6 +137,18 @@ def spooled_uploads(uploads: list[UploadFile], max_bytes: int) -> Iterator[list[
         ImageTooLargeError: A file exceeded *max_bytes*.
     """
     directory, images = persist_uploads(uploads, max_bytes)
+    try:
+        yield images
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+@asynccontextmanager
+async def spooled_uploads_async(
+    uploads: list[UploadFile], max_bytes: int
+) -> AsyncIterator[list[SourceImage]]:
+    """:func:`spooled_uploads` for the async handlers: the copy runs off the loop."""
+    directory, images = await persist_uploads_async(uploads, max_bytes)
     try:
         yield images
     finally:

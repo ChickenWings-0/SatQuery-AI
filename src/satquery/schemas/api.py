@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from satquery.schemas.compatibility import CompatibilityReport
-from satquery.schemas.enums import HealthStatus, TaskType
+from satquery.schemas.enums import HealthStatus, PairType, TaskType
 from satquery.schemas.manifest import InputManifest
 from satquery.schemas.tool import ToolSpec
 from satquery.schemas.trace import (
@@ -28,20 +28,70 @@ class AnalyzeOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pair_type_hint: str | None = Field(
-        default=None, description="Forces PairType; sets pair_type_source='user_declared'."
+        default=None,
+        description="Forces PairType; sets pair_type_source='user_declared'. "
+        "Must be one of the PairType values.",
     )
     roles: dict[str, str] | None = Field(
         default=None, description="filename -> ImageRole override."
     )
     include_trace: bool = True
     include_rendered_views: bool = True
-    artifact_format: str = Field(default="png+geotiff", description="'png' | 'png+geotiff'.")
-    vlm_backend: str = Field(default="auto", description="'auto' | 'hf' | 'llamacpp' | 'none'.")
-    adapter_version: str | None = Field(default=None, description="None = server default.")
+    artifact_format: str = Field(
+        default="png+geotiff",
+        description="'png' | 'png+geotiff'. Accepted for forward compatibility; the "
+        "server currently writes both and reports OPTION_IGNORED if this is changed.",
+    )
+    vlm_backend: str = Field(
+        default="auto",
+        description="'auto' | 'hf' | 'llamacpp' | 'none'. Accepted for forward "
+        "compatibility; the backend is chosen per process from SATQUERY_VLM_BACKEND "
+        "and a non-default value here reports OPTION_IGNORED.",
+    )
+    adapter_version: str | None = Field(
+        default=None,
+        description="None = server default. Accepted for forward compatibility; the "
+        "adapter is chosen per process and a value here reports OPTION_IGNORED.",
+    )
     enable_tools: list[str] | None = Field(default=None, description="Allow-list; None = all.")
     disable_tools: list[str] = Field(default_factory=list)
-    max_latency_ms: int = Field(default=30_000, gt=0)
+    max_latency_ms: int = Field(
+        default=30_000,
+        gt=0,
+        description="Soft budget for the tool DAG. Overrunning it does not cancel "
+        "anything; the response carries a LATENCY_BUDGET_EXCEEDED warning.",
+    )
     seed: int = Field(default=0, description="Determinism; 0 = server default.")
+
+    @field_validator("pair_type_hint")
+    @classmethod
+    def _known_pair_type(cls, value: str | None) -> str | None:
+        """Refuse a hint that is not a PairType, here, as a 400 — not as a 500 later."""
+        if value is None:
+            return None
+        try:
+            PairType(value)
+        except ValueError as error:
+            raise ValueError(
+                f"pair_type_hint must be one of {[member.value for member in PairType]}"
+            ) from error
+        return value
+
+    @property
+    def pair_type(self) -> PairType | None:
+        """The hint as the enum the pipeline consumes."""
+        return PairType(self.pair_type_hint) if self.pair_type_hint else None
+
+    def ignored(self) -> list[str]:
+        """The options this server accepts but does not act on, when set off-default."""
+        names: list[str] = []
+        if self.artifact_format != "png+geotiff":
+            names.append("artifact_format")
+        if self.vlm_backend != "auto":
+            names.append("vlm_backend")
+        if self.adapter_version is not None:
+            names.append("adapter_version")
+        return names
 
 
 class AnalyzeResponse(BaseModel):
@@ -167,6 +217,19 @@ class HealthResponse(BaseModel):
     models: list[ModelInfo] = Field(default_factory=list)
     tools_available: int = Field(ge=0)
     tools_total: int = Field(ge=0)
+    jobs_running: int = Field(
+        default=0, ge=0, description="Async jobs that have not reached a terminal event."
+    )
+    jobs_retained: int = Field(
+        default=0, ge=0, description="Jobs the in-memory store still holds, running or finished."
+    )
+    leaked_gpu_permits: int = Field(
+        default=0,
+        ge=0,
+        description="GPU tool threads that overran their timeout and are still running. "
+        "Non-zero means the card is busy with work nobody is waiting for; past the "
+        "process's limit, status is 'degraded'.",
+    )
 
 
 class ApiError(BaseModel):

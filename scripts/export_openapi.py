@@ -6,11 +6,12 @@ generate a typed client (``openapi-typescript``, ``orval``) without running the
 backend. ``DOCS/API_CONTRACT.md`` is the prose contract: if the two disagree,
 the prose wins and this file is regenerated.
 
-Usage:  uv run python scripts/export_openapi.py [output_path]
+Usage:  uv run python scripts/export_openapi.py [--out PATH]
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -32,10 +33,26 @@ def export(output_path: Path = DEFAULT_OUTPUT) -> Path:
     return output_path
 
 
-def main() -> int:
-    """Export the schema to the path given on argv, or the default."""
-    output = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else DEFAULT_OUTPUT
-    written = export(output)
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse the command line.
+
+    ``argparse`` rather than ``sys.argv[1]``: the old form treated *any* first
+    argument as the output path, so ``--help`` wrote a file named ``--help``.
+    """
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+        help=f"where to write the schema (default: {DEFAULT_OUTPUT})",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Export the schema to ``--out``, or the default."""
+    args = parse_args(argv)
+    written = export(args.out.resolve())
     paths = len(app.openapi().get("paths", {}))
     print(f"Wrote {written} ({paths} paths, {written.stat().st_size} bytes)")
     return 0

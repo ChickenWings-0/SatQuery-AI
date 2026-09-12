@@ -40,7 +40,7 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
@@ -338,12 +338,70 @@ def generate_from_factsheets(
     view labels and namespaced scalars.
     """
     rng = random.Random(seed)
-    samples: list[CorpusSample] = []
     with factsheets.open(encoding="utf-8") as handle:
         records = [json.loads(line) for line in handle if line.strip()]
     if not records:
         raise SystemExit(f"{factsheets} is empty; run scripts/render_views.py first")
 
+    # Stratified by split *before* drawing. The merged factsheets.jsonl lists
+    # every train record before the first validation record, and a sequential
+    # walk that stops at --count never reached one: 3 000 samples, all train,
+    # and an evidence_qa.val.jsonl with nothing in it.
+    by_split: dict[str, list[dict[str, Any]]] = {"train": [], "val": []}
+    for record in records:
+        by_split[_corpus_split(record)].append(record)
+    quotas = split_quotas(count, len(by_split["train"]), len(by_split["val"]))
+
+    samples: list[CorpusSample] = []
+    for split in ("train", "val"):
+        samples.extend(_generate_split(by_split[split], quotas[split], rng))
+
+    if by_split["val"] and not any(sample.meta.split == "val" for sample in samples):
+        raise SystemExit(
+            f"{factsheets} carries {len(by_split['val'])} validation records and the "
+            "requested count produced no validation samples; raise --count"
+        )
+    if not by_split["val"]:
+        print(
+            f"WARNING — {factsheets} carries no validation records; evidence_qa "
+            "will have no held-out split. Run scripts/render_views.py --split validation."
+        )
+    return samples
+
+
+def _corpus_split(record: dict[str, Any]) -> str:
+    """The corpus split a factsheet record feeds."""
+    return "val" if str(record.get("split", "train")).startswith("val") else "train"
+
+
+def split_quotas(count: int, n_train: int, n_val: int) -> dict[str, int]:
+    """Allocate *count* across the splits in proportion to the records available.
+
+    Any non-empty split gets at least one sample when ``count`` allows; a split
+    that cannot fill its share hands the remainder to the other, so the total
+    is still *count* whenever the records permit.
+    """
+    total = n_train + n_val
+    if count <= 0 or total == 0:
+        return {"train": 0, "val": 0}
+    val = round(count * n_val / total) if n_val else 0
+    train = count - val
+    if n_val and val == 0 and count > 1:
+        val, train = 1, count - 1
+    if n_train and train == 0 and count > 1:
+        train, val = 1, count - 1
+    # Whatever one split cannot fill within its passes goes to the other.
+    train = min(train, n_train * PASSES_OVER_RECORDS)
+    val = min(count - train, n_val * PASSES_OVER_RECORDS)
+    train = min(count - val, n_train * PASSES_OVER_RECORDS)
+    return {"train": train, "val": val}
+
+
+def _generate_split(
+    records: list[dict[str, Any]], count: int, rng: random.Random
+) -> list[CorpusSample]:
+    """Generate up to *count* samples over *records*, several passes if needed."""
+    samples: list[CorpusSample] = []
     index = 0
     while len(samples) < count and index < len(records) * PASSES_OVER_RECORDS:
         record = records[index % len(records)]
@@ -365,18 +423,18 @@ def generate_from_factsheets(
             sensor=f"{OPTICAL_SENSOR} + {SAR_SENSOR}" if record.get("s1_name") else OPTICAL_SENSOR,
             gsd_m=GSD_M,
             labels=list(record.get("labels") or []),
-            split="val" if str(record.get("split", "train")).startswith("val") else "train",
+            split="val" if _corpus_split(record) == "val" else "train",
             source_split=str(record.get("split", "train")),
         )
         samples.extend(
             build_evidence_qa(
                 # A second pass over the same patch draws different templates from
-            # the rng, so it is a distinct sample and needs a distinct id — two
-            # rows sharing one sample_id defeat every downstream dedup.
-            sample_id=(
-                f"evidence_qa:{record['patch_id']}"
-                + (f":p{pass_number}" if pass_number else "")
-            ),
+                # the rng, so it is a distinct sample and needs a distinct id — two
+                # rows sharing one sample_id defeat every downstream dedup.
+                sample_id=(
+                    f"evidence_qa:{record['patch_id']}"
+                    + (f":p{pass_number}" if pass_number else "")
+                ),
                 views=views,
                 fact_sheet=record["fact_sheet"],
                 pair_type=PairType(record.get("pair_type", "CROSS_MODAL")),
@@ -405,6 +463,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument(
+        "--allow-mock",
+        action="store_true",
+        help="Permit the mock FactSheet path when --factsheets is not given. Off by "
+        "default so a training corpus is never built from placeholder pixels by "
+        "accident; the mock exists for tests and for exercising the templates.",
+    )
+    parser.add_argument(
         "--append",
         action="store_true",
         help="Append into the corpus's train.jsonl / val.jsonl instead of writing "
@@ -420,6 +485,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         samples = generate_from_factsheets(args.factsheets, args.count, args.seed)
         provenance = f"measured FactSheets from {args.factsheets}"
     else:
+        if not args.allow_mock:
+            raise SystemExit(
+                "no --factsheets given. The mock path trains citation *format* over "
+                "placeholder pixels and is not a training corpus; pass --factsheets "
+                "from scripts/render_views.py, or --allow-mock to build the mock "
+                "deliberately."
+            )
         samples = generate(args.count, args.manifest, args.seed)
         provenance = "MOCK FactSheets over placeholder views"
     print(f"source          : {provenance}")

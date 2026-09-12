@@ -16,7 +16,8 @@ export interface paths {
          * @description Report service health.
          *
          *     ``device.igpu_masked`` asserts that ``HIP_VISIBLE_DEVICES=0`` took effect. A
-         *     ``false`` there is a red flag before any demo.
+         *     ``false`` there is a red flag before any demo. ``leaked_gpu_permits`` is the
+         *     other one: a timed-out GPU tool whose thread is still on the card.
          */
         get: operations["health_v1_health_get"];
         put?: never;
@@ -133,11 +134,25 @@ export interface paths {
         /**
          * Poll one job's progress
          * @description Return the job's current stage, progress and — once finished — its result.
+         *
+         *     A job the store no longer holds — evicted, or from before a restart — is
+         *     answered from its persisted trace when one exists: the trace store is the
+         *     durable half by design, and a client reconnecting after a server restart
+         *     should get its answer rather than a 404 it cannot tell from "never existed".
          */
         get: operations["get_job_v1_jobs__job_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Cancel a running job
+         * @description Ask a running job to stop. Best-effort, and honest about what that means.
+         *
+         *     The tool step in flight finishes — a worker thread cannot be killed — and no
+         *     further step starts. The job then ends with an ``error`` event carrying
+         *     ``JOB_CANCELLED``, so an open events stream closes the way it would for any
+         *     other failure. ``202`` because the stop is requested, not yet done.
+         */
+        delete: operations["cancel_job_v1_jobs__job_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -156,7 +171,8 @@ export interface paths {
          *
          *     A subscriber that connects late — the normal case, since the client needs the
          *     ``job_id`` from the 202 first — receives the buffered history before the live
-         *     tail, so the DAG can always be drawn from the ``plan`` event.
+         *     tail, so the DAG can always be drawn from the ``plan`` event. One that
+         *     *reconnects* sends the last ``id:`` it saw and receives only the rest.
          */
         get: operations["job_events_v1_jobs__job_id__events_get"];
         put?: never;
@@ -279,6 +295,13 @@ export interface components {
             ref?: string | null;
             /** Trace Id */
             trace_id?: string | null;
+        };
+        /**
+         * ApiErrorResponse
+         * @description Wire envelope for :class:`ApiError` — every non-2xx body has this shape.
+         */
+        ApiErrorResponse: {
+            error: components["schemas"]["ApiError"];
         };
         /**
          * ArtifactGeo
@@ -685,6 +708,24 @@ export interface components {
             tools_available: number;
             /** Tools Total */
             tools_total: number;
+            /**
+             * Jobs Running
+             * @description Async jobs that have not reached a terminal event.
+             * @default 0
+             */
+            jobs_running: number;
+            /**
+             * Jobs Retained
+             * @description Jobs the in-memory store still holds, running or finished.
+             * @default 0
+             */
+            jobs_retained: number;
+            /**
+             * Leaked Gpu Permits
+             * @description GPU tool threads that overran their timeout and are still running. Non-zero means the card is busy with work nobody is waiting for; past the process's limit, status is 'degraded'.
+             * @default 0
+             */
+            leaked_gpu_permits: number;
         };
         /**
          * HealthStatus
@@ -1338,10 +1379,62 @@ export interface operations {
             };
         };
     };
-    job_events_v1_jobs__job_id__events_get: {
+    cancel_job_v1_jobs__job_id__delete: {
         parameters: {
             query?: never;
             header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatusResponse"];
+                };
+            };
+            /** @description Unknown or evicted job. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The job has already finished. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_events_v1_jobs__job_id__events_get: {
+        parameters: {
+            query?: {
+                /** @description Resume after this event id; the query form of Last-Event-ID. */
+                after?: string | null;
+            };
+            header?: {
+                "Last-Event-ID"?: string | null;
+            };
             path: {
                 job_id: string;
             };

@@ -153,3 +153,14 @@ export function scalar(value: unknown): string {
     return ABSENT
   }
 }
+
+/** "Just now", "4 min ago", "2 hours ago", or the clock time past a day. */
+export function relativeTime(epochMs: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - epochMs) / 1000))
+  if (seconds < 45) return 'Just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`
+  return timeOfDay(epochMs)
+}

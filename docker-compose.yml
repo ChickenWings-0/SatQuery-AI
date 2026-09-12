@@ -1,0 +1,72 @@
+# SatQuery AI on one box.
+#
+#   docker compose up                       # ROCm serving path (7900 XTX)
+#   docker compose --profile cpu up         # no GPU: templated answers, no weights
+#
+# The GPU service maps /dev/kfd and /dev/dri, which is how ROCm reaches the
+# card from a container. Weights, data and the trace DB are bind mounts so the
+# image stays the code and nothing else.
+
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    image: satquery-api:latest
+    environment:
+      SATQUERY_ARTIFACT_ROOT: /app/data/artifacts
+      SATQUERY_TRACE_DB: /app/data/traces.sqlite3
+      SATQUERY_VLM_BACKEND: ${SATQUERY_VLM_BACKEND:-auto}
+      SATQUERY_VLM_ADAPTER_PATH: ${SATQUERY_VLM_ADAPTER_PATH:-}
+      SATQUERY_CD_CHECKPOINT: ${SATQUERY_CD_CHECKPOINT:-}
+      SATQUERY_SEG_CHECKPOINT: ${SATQUERY_SEG_CHECKPOINT:-}
+      HF_HOME: /app/data/hf
+    volumes:
+      - ./data:/app/data
+      - ./runs:/app/runs:ro
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    ports:
+      - "8000:8000"
+    profiles: ["", "gpu"]
+
+  api-cpu:
+    build:
+      context: .
+      target: deps
+    image: satquery-api:deps
+    environment:
+      SATQUERY_ARTIFACT_ROOT: /app/data/artifacts
+      SATQUERY_TRACE_DB: /app/data/traces.sqlite3
+      SATQUERY_VLM_BACKEND: none
+      SATQUERY_VLM_DISABLED: "true"
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+    profiles: ["cpu"]
+
+  web:
+    build: ./frontend
+    image: satquery-web:latest
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    profiles: ["", "gpu"]
+
+  web-cpu:
+    build: ./frontend
+    image: satquery-web:latest
+    ports:
+      - "5173:80"
+    depends_on:
+      - api-cpu
+    # nginx.conf proxies to the `api` host name; alias the CPU service to it.
+    links:
+      - "api-cpu:api"
+    profiles: ["cpu"]

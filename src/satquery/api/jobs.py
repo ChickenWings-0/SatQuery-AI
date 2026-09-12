@@ -13,8 +13,15 @@ right is the two things a judge will actually exercise.
   never left holding an open socket after the answer has landed.
 
 Jobs are evicted oldest-first past :data:`MAX_JOBS`, which bounds memory without
-a reaper task. The artifacts a job produced outlive it in the artifact store, and
-its trace outlives it in the trace store, so eviction costs only the live view.
+a reaper task — but only *finished* jobs are evicted. A running job that was
+evicted kept publishing into an orphaned record while its client got 404 mid-run;
+now, when every retained job is still running, the store refuses the new one
+with a 429 instead. The artifacts a job produced outlive it in the artifact
+store, and its trace outlives it in the trace store, so eviction costs only the
+live view.
+
+Every event carries a sequence number (``id:`` on the wire, §5). A subscriber
+that reconnects with ``Last-Event-ID`` is handed only what it has not seen.
 """
 
 from __future__ import annotations
@@ -30,19 +37,34 @@ from satquery.agent.events import STAGE_PCT
 from satquery.schemas.api import AnalyzeResponse, ApiError
 
 MAX_JOBS: Final[int] = 64
-"""Retained jobs. Past this the oldest is dropped, trace and artifacts intact."""
+"""Retained jobs. Past this the oldest *finished* job is dropped, trace and
+artifacts intact. If none has finished, a new submission is refused."""
+
+SUBSCRIBER_QUEUE_SIZE: Final[int] = 1024
+"""Events a subscriber may fall behind by before it is dropped. A client that
+never reads — a stuck proxy — must not grow without bound for the job's life; it
+can reconnect and replay from ``job.events``, which is bounded by the run."""
 
 TERMINAL_EVENTS: Final[frozenset[str]] = frozenset({"done", "error"})
 
 JobStatus = Literal["queued", "running", "succeeded", "failed"]
 
 
+class TooManyJobsError(Exception):
+    """Every retained job is still running; nothing can be evicted."""
+
+
 @dataclass
 class JobEvent:
-    """One SSE message: an event name and its JSON-serialisable payload."""
+    """One SSE message: an event name, its JSON-serialisable payload, and its position.
+
+    ``seq`` is the event's index in the job's history and the ``id:`` field on
+    the wire, so ``Last-Event-ID`` on a reconnect names exactly what was seen.
+    """
 
     event: str
     data: dict[str, Any]
+    seq: int = 0
 
 
 @dataclass
@@ -67,6 +89,15 @@ class Job:
     events: list[JobEvent] = field(default_factory=list)
     subscribers: list[asyncio.Queue[JobEvent]] = field(default_factory=list)
     done: asyncio.Event = field(default_factory=asyncio.Event)
+    task: asyncio.Task[None] | None = None
+    """The running analysis. Held so ``DELETE`` can reach it."""
+    cancel_requested: asyncio.Event = field(default_factory=asyncio.Event)
+    """Handed to the executor: set, it stops the DAG at the next step boundary."""
+
+    @property
+    def finished(self) -> bool:
+        """True once a terminal event has been published."""
+        return self.status in ("succeeded", "failed")
 
     def snapshot(self) -> dict[str, Any]:
         """The ``GET /v1/jobs/{job_id}`` body (§4.3)."""
@@ -95,12 +126,37 @@ class JobStore:
     # ------------------------------------------------------------- lifecycle
 
     def create(self, job_id: str) -> Job:
-        """Register a new queued job, evicting the oldest if the store is full."""
+        """Register a new queued job, evicting the oldest *finished* job if full.
+
+        Raises:
+            TooManyJobsError: The store is full and every job in it is running.
+        """
+        while len(self._jobs) >= self._max_jobs:
+            oldest_finished = next((jid for jid, job in self._jobs.items() if job.finished), None)
+            if oldest_finished is None:
+                raise TooManyJobsError(
+                    f"{len(self._jobs)} jobs are running and none has finished; try again later"
+                )
+            del self._jobs[oldest_finished]
         job = Job(job_id=job_id)
         self._jobs[job_id] = job
-        while len(self._jobs) > self._max_jobs:
-            self._jobs.popitem(last=False)
         return job
+
+    @property
+    def running(self) -> int:
+        """Jobs that have not reached a terminal event."""
+        return sum(1 for job in self._jobs.values() if not job.finished)
+
+    async def shutdown(self) -> None:
+        """Cancel every running job and wait for it, so nothing outlives the process."""
+        live = [job for job in self._jobs.values() if job.task is not None and not job.finished]
+        for job in live:
+            job.cancel_requested.set()
+            if job.task is not None:
+                job.task.cancel()
+        tasks = [job.task for job in live if job.task is not None]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def get(self, job_id: str) -> Job | None:
         """Return a job by id, or ``None`` if unknown or evicted."""
@@ -119,11 +175,17 @@ class JobStore:
         so this is safe to call from inside the executor's event loop, which is
         the contract :data:`satquery.agent.events.Emit` asks for.
         """
-        message = JobEvent(event=event, data=data)
+        message = JobEvent(event=event, data=data, seq=len(job.events))
         job.events.append(message)
         self._absorb(job, message)
-        for queue in job.subscribers:
-            queue.put_nowait(message)
+        for queue in list(job.subscribers):
+            try:
+                queue.put_nowait(message)
+            except asyncio.QueueFull:
+                # A subscriber that has not read 1 024 events is not reading.
+                # Dropping it here is what the bound is for; the history is
+                # intact and a reconnect replays from the last id it saw.
+                job.subscribers.remove(queue)
         if event in TERMINAL_EVENTS:
             job.done.set()
 
@@ -167,16 +229,21 @@ class JobStore:
         fraction = min(job.step, job.total_steps) / job.total_steps
         return floor + int((ceiling - floor) * fraction)
 
-    async def subscribe(self, job: Job) -> AsyncGenerator[JobEvent, None]:
+    async def subscribe(
+        self, job: Job, after: int | None = None
+    ) -> AsyncGenerator[JobEvent, None]:
         """Yield the job's buffered events, then every subsequent one.
 
         Snapshotting the buffer and registering the queue happen with no await
         between them, so no event can slip through the gap: anything published
         from here on lands in the queue and is delivered after the backlog, in
         order and exactly once. Iteration stops after the terminal event.
+
+        *after* is the last ``seq`` the subscriber already holds (``Last-Event-ID``);
+        the backlog starts just past it. ``None`` replays from the beginning.
         """
-        queue: asyncio.Queue[JobEvent] = asyncio.Queue()
-        backlog = list(job.events)
+        queue: asyncio.Queue[JobEvent] = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
+        backlog = list(job.events) if after is None else list(job.events[after + 1 :])
         job.subscribers.append(queue)
         try:
             for message in backlog:
@@ -203,10 +270,12 @@ def get_job_store() -> JobStore:
 
 __all__ = [
     "MAX_JOBS",
+    "SUBSCRIBER_QUEUE_SIZE",
     "TERMINAL_EVENTS",
     "Job",
     "JobEvent",
     "JobStatus",
     "JobStore",
+    "TooManyJobsError",
     "get_job_store",
 ]

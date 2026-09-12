@@ -9,10 +9,19 @@ import { SatQueryError, validate } from '@/api/client'
 import type { InputManifest, ValidateResponse } from '@/api/types'
 
 /** One question asked this session, and the trace it produced. */
+export type RunOutcome = 'running' | 'succeeded' | 'failed'
+
 export interface RecentRun {
   traceId: string
   query: string
   at: number
+  /**
+   * What this session knows became of the run. Entries used to be written on
+   * the 202 and never updated, so a run that failed, was cancelled or died
+   * with the server sat in History looking like every other and 404ed when
+   * opened. `running` is the entry's state until a terminal event lands.
+   */
+  outcome: RunOutcome
 }
 
 /** The rail's items, in the order the rail shows them. */
@@ -107,6 +116,8 @@ interface UiState {
   setValidation: (result: ValidateResponse) => void
   setValidationError: (message: string) => void
   rememberRun: (run: RecentRun) => void
+  /** Record how a remembered run ended. Unknown ids are ignored. */
+  settleRun: (traceId: string, outcome: RunOutcome) => void
   /** Jump to History with one run already open. */
   openRun: (traceId: string) => void
   setShortcutsEnabled: (enabled: boolean) => void
@@ -170,6 +181,13 @@ export const useUiStore = create<UiState>((set, get) => ({
       // Newest first, one entry per trace: re-running the same job id replaces
       // its entry rather than stacking duplicates.
       recentRuns: [run, ...state.recentRuns.filter((r) => r.traceId !== run.traceId)].slice(0, 20),
+    })),
+
+  settleRun: (traceId, outcome) =>
+    set((state) => ({
+      recentRuns: state.recentRuns.map((run) =>
+        run.traceId === traceId ? { ...run, outcome } : run,
+      ),
     })),
 
   // Navigating to History without saying *which* run left the user to re-find

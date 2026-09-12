@@ -58,16 +58,20 @@ cd = [
     "torchvision>=0.21.0",
 ]
 
-[project.scripts]
-satquery-ai = "satquery_ai:main"
-
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
 build-backend = "uv_build"
 
+# The distribution is `satquery-ai`; the importable package is `satquery`. The
+# `satquery_ai` scaffold that used to satisfy the default name was a leftover
+# "Hello from satquery-ai!" module and is gone.
+[tool.uv.build-backend]
+module-name = "satquery"
+
 [dependency-groups]
 dev = [
     "mypy>=2.3.1",
+    "pre-commit>=4.0.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.6",
@@ -78,6 +82,9 @@ minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --strict-markers"
+markers = [
+    "gpu: needs a ROCm/CUDA device and real weights; excluded in CI with -m 'not gpu'",
+]
 filterwarnings = [
     # Fixtures deliberately include a non-georeferenced PNG and an identity transform.
     "ignore::rasterio.errors.NotGeoreferencedWarning",
@@ -143,4 +150,13 @@ disallow_untyped_calls = false
 module = ["peft.*", "trl.*", "datasets.*", "bitsandbytes.*"]
 ignore_missing_imports = true
 implicit_reexport = true
+
+# The CD model subclasses torch.nn.Module. On a checkout without torch (CI, a
+# deployment box) the base class is Any, and --strict refuses to subclass Any;
+# with torch present the same code is fully typed. The two relaxations below
+# make the module type-check identically in both environments.
+[[tool.mypy.overrides]]
+module = ["satquery.training.cd.encoder", "satquery.training.cd.model"]
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
 

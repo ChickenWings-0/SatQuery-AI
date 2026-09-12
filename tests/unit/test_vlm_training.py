@@ -40,33 +40,9 @@ from satquery.schemas.enums import Modality, PairType, TaskType
 from satquery.training import corpus_builder as cb
 from satquery.training import local_sources
 from satquery.training.vlm import qlora
+from tests.conftest import BEN_FACTS, BEN_VIEW_IDS  # noqa: F401 - re-exported constants
 
 # ------------------------------------------------------------------- fixtures
-
-BEN_FACTS: dict[str, float | str] = {
-    "spectral_index_analyzer.ndvi_mean": 0.62,
-    "spectral_index_analyzer.ndbi_mean": -0.08,
-    "sar_backscatter_analyzer.sigma0_vv_db_mean": -8.4,
-    "sar_backscatter_analyzer.vv_vh_ratio_db_mean": 6.1,
-}
-
-BEN_VIEW_IDS = ("TC", "FCIR", "SWIR", "NDVI", "NDBI", "SARFC", "SARDB")
-
-
-@pytest.fixture
-def ben_row() -> dict[str, Any]:
-    """One reBEN metadata row, as the BigEarthNet-v2 loader yields it."""
-    return {
-        "patch_id": "S2A_MSIL2A_20180413T95029_37_58",
-        "labels": ["Broad-leaved forest", "Pastures"],
-        "split": "train",
-        "season": "spring",
-        "view_paths": {
-            view_id: f"views/ben2/S2A_37_58/{view_id}.png" for view_id in BEN_VIEW_IDS
-        },
-        "fact_sheet": dict(BEN_FACTS),
-    }
-
 
 @pytest.fixture
 def optical_views() -> list[cb.SourceView]:
@@ -743,6 +719,38 @@ def test_streaming_build_never_materialises_the_population(tmp_path: Path) -> No
     assert report.train + report.val == 40
     assert len(cb.read_jsonl(tmp_path / "train.jsonl")) == report.train
     assert len(cb.read_jsonl(tmp_path / "val.jsonl")) == report.val
+
+
+def test_streaming_build_never_drops_a_split_it_was_offered(tmp_path: Path) -> None:
+    """95 train + 5 val, target 20: every seed keeps at least one val sample.
+
+    One uniform reservoir per source made the validation count a dice roll
+    (expected ~1, zero a live outcome, nothing said). The split is now
+    allocated, not drawn.
+    """
+    for seed in range(10):
+
+        def stream() -> Any:
+            for index in range(100):
+                split = "val" if index >= 95 else "train"
+                yield cb.CorpusSource.VRSBENCH, _sample(index, cb.CorpusSource.VRSBENCH, split)
+
+        report = cb.build_corpus_streaming(
+            stream(), tmp_path, composition={cb.CorpusSource.VRSBENCH: 20}, seed=seed
+        )
+        row = next(r for r in report.sources if r.source is cb.CorpusSource.VRSBENCH)
+        assert row.val >= 1, f"seed {seed} lost the validation split"
+        assert row.train + row.val == 20
+
+
+def test_allocate_split_reserves_val_and_hands_back_what_a_split_cannot_fill() -> None:
+    assert cb.allocate_split(None, 7, 3) == (7, 3)
+    assert cb.allocate_split(0, 7, 3) == (0, 0)
+    assert cb.allocate_split(20, 95, 5) == (18, 2)
+    assert cb.allocate_split(20, 95, 1) == (19, 1), "at least one val when any is offered"
+    assert cb.allocate_split(6, 10, 0) == (6, 0), "a train-only source fills its target"
+    assert cb.allocate_split(4, 0, 4) == (0, 4), "a val-only source fills its target"
+    assert cb.allocate_split(1, 5, 5) == (1, 0)
 
 
 def test_streaming_build_still_refuses_a_leaked_image(tmp_path: Path) -> None:

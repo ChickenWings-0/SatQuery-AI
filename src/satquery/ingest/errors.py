@@ -80,6 +80,19 @@ class TooManyImagesError(IngestError):
         )
 
 
+class InvalidOptionsError(IngestError):
+    """The ``options`` part was not JSON, or not a valid ``AnalyzeOptions``."""
+
+    def __init__(self, detail: str) -> None:
+        """Build the error with the validator's own explanation as the hint."""
+        super().__init__(
+            code="INVALID_OPTIONS",
+            http_status=400,
+            message="The options part could not be parsed.",
+            hint=detail,
+        )
+
+
 class NoImagesError(IngestError):
     """The request carried no image parts at all."""
 

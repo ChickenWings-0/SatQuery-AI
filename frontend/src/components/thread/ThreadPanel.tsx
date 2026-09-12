@@ -24,14 +24,15 @@ import { GroundedAnswer, type CitationTarget } from '@/components/thread/Grounde
 import { PipelinePulse } from '@/components/thread/PipelinePulse'
 import { PreviousQueries } from '@/components/thread/PreviousQueries'
 import { QueryComposer } from '@/components/thread/QueryComposer'
-import { panelId, SidebarTabs, tabId, type Tab } from '@/components/thread/SidebarTabs'
+import { SidebarTabs } from '@/components/thread/SidebarTabs'
+import { panelId, tabId, type Tab } from '@/components/thread/tabs'
 import { SuggestionChips } from '@/components/thread/SuggestionChips'
 import { PipelineDialog } from '@/components/pipeline/PipelineDialog'
 import { BookmarkIcon, CopyIcon, SatelliteIcon, ShareIcon } from '@/components/ui/icons'
 import { countOf } from '@/format'
 import { groupForScalar, groupViews } from '@/evidence/views'
 import { cardMatchesScalar, confidenceCard, formatKpi, selectKpis } from '@/kpi/registry'
-import { completedCount, degradedCount, useJobStore } from '@/state/job'
+import { completedCount, degradedCount, isLive, useJobStore } from '@/state/job'
 import { useFocusStore } from '@/state/focus'
 import { useUiStore } from '@/state/ui'
 import { parseSource } from '@/thread/annotate'
@@ -140,7 +141,7 @@ function CardAction({
 }
 
 export function ThreadPanel() {
-  const { submit, retry, cancel, dismiss, failure } = useRun()
+  const { submit, retry, cancel, dismiss, failure, reattach } = useRun()
   const phase = useJobStore((state) => state.phase)
   const nodes = useJobStore((state) => state.nodes)
   const artifacts = useJobStore((state) => state.artifacts)
@@ -167,9 +168,13 @@ export function ThreadPanel() {
   }, [copied])
 
   // A new run is a new conversation turn: bring the reader back to it.
-  useEffect(() => {
+  // Adjusted during render (React's "state that follows a prop" pattern), so
+  // the tab switches in the same commit the phase changes in.
+  const [seenPhase, setSeenPhase] = useState(phase)
+  if (phase !== seenPhase) {
+    setSeenPhase(phase)
     if (phase === 'streaming') setTab('chat')
-  }, [phase])
+  }
 
   const groups = useMemo(() => groupViews(artifacts), [artifacts])
   const cards = useMemo(() => selectKpis(result?.trace?.fact_sheet), [result])
@@ -208,11 +213,31 @@ export function ThreadPanel() {
       <QueryComposer
         onSubmit={(query) => void submit(query)}
         onCancel={cancel}
-        busy={phase === 'streaming'}
+        busy={isLive(phase)}
       />
       <div className="mt-3">
         <SuggestionChips />
       </div>
+
+      {/* The stream dropped and the run is being reattached to. Distinct from a
+          failure: nothing has gone wrong with the run, only with our socket,
+          and the DAG on screen is still live. */}
+      {phase === 'reconnecting' && (
+        <div
+          role="status"
+          className="mt-3 rounded-lg border border-warn/40 bg-warn/8 px-3 py-2 text-[13px]"
+        >
+          <p>
+            Connection lost — reattaching to the run
+            {reattach ? ` (attempt ${reattach.attempt} of ${reattach.max})` : ''}…
+          </p>
+          <div className="mt-2 flex gap-3 text-[12px]">
+            <button type="button" onClick={cancel} className="text-text-lo underline">
+              Stop
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Client-side failures: the request never landed, or the stream died.
           `role="alert"` because a screen-reader user gets no other notice
@@ -281,7 +306,7 @@ export function ThreadPanel() {
            * Hidden below `md`, where the problem it solves does not exist: a
            * phone has no tall empty column.
            */}
-          {!result && phase !== 'streaming' && (
+          {!result && !isLive(phase) && (
             <Section title="What happens next" className="hidden md:block">
               <ol className="space-y-2.5 text-[13px] text-text-lo">
                 {[
@@ -310,7 +335,7 @@ export function ThreadPanel() {
             </Section>
           )}
 
-          {phase === 'streaming' && !result && (
+          {isLive(phase) && !result && (
             <Section title="Running">
               <p role="status" className="text-[13px] text-text-lo">
                 {nodes.length > 0

@@ -1,0 +1,18 @@
+# Everything that is downloaded, rendered, trained or generated — hundreds of
+# GB — stays out of the build context. It is mounted at runtime.
+data/
+runs/
+logs/
+*.log
+.venv/
+frontend/node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+.git/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+DOCS/
+repo documentation/

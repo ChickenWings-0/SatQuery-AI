@@ -42,9 +42,14 @@ smoke run.
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import sys
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
+from dataclasses import field as dc_field
+from datetime import UTC, datetime
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -295,6 +300,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "pass has actually covered.",
     )
     parser.add_argument(
+        "--composition",
+        nargs="*",
+        default=None,
+        metavar="SOURCE=N",
+        help="Override a source's §5 target for this build, e.g. bigearthnet_v2=4000 "
+        "evidence_qa=2500. Unnamed sources keep their COMPOSITION target. This is "
+        "how a run is budgeted against measured throughput without editing the "
+        "table that records the plan.",
+    )
+    parser.add_argument(
+        "--factsheets",
+        type=Path,
+        default=None,
+        help="factsheets.jsonl from scripts/render_views.py. Binds each BigEarthNet "
+        "patch's measured FactSheet and the views the render pass actually wrote, "
+        "which is what lets evidence_qa be generated in-band (§4.6). Defaults to "
+        "<views-root>/bigearthnet_v2/factsheets.jsonl when that file exists.",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="Build and report, but write nothing."
     )
     return parser.parse_args(argv)
@@ -329,7 +353,11 @@ def view_paths(source: CorpusSource, item_id: str, views_root: Path) -> dict[str
 
 
 def bind_view_paths(
-    source: CorpusSource, row: dict[str, Any], item_id: str, views_root: Path
+    source: CorpusSource,
+    row: dict[str, Any],
+    item_id: str,
+    views_root: Path,
+    facts: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Point one row's image fields at the files the render pass wrote (§7.2).
 
@@ -357,10 +385,59 @@ def bind_view_paths(
         row["pre_path"] = paths["TC_pre"]
         row["post_path"] = paths["TC_post"]
         return row
+    sheet = facts.get(item_id) if facts and source is CorpusSource.BIGEARTHNET_V2 else None
+    if sheet is not None:
+        # The render pass knows which views it actually wrote — a patch with no
+        # S1 scene gets no SAR views rather than a path to a file nobody made —
+        # and its FactSheet is the only measured supervision evidence_qa has.
+        row.setdefault("view_paths", dict(sheet.get("views") or {}))
+        row.setdefault("fact_sheet", dict(sheet.get("fact_sheet") or {}))
+        if sheet.get("labels") is not None:
+            row.setdefault("labels", list(sheet["labels"]))
     row.setdefault("view_paths", view_paths(source, item_id, views_root))
     if source is not CorpusSource.BIGEARTHNET_V2:
         row.setdefault("image_path", row["view_paths"]["TC"])
     return row
+
+
+def load_factsheet_index(path: Path) -> dict[str, dict[str, Any]]:
+    """Read ``factsheets.jsonl`` into ``patch_id -> record``.
+
+    A bounded side table, not a second stream: ~25 k records of a few hundred
+    bytes each. The *rows* still stream; this is what lets each of them pick up
+    the measurements the render pass took for its patch (§4.6), which the build
+    never did before — so ``evidence_qa`` was only ever produced by the
+    standalone builder, with its own split logic and no image hashes.
+
+    Raises:
+        CorpusError: The file is missing, or a line is not a record with a
+            ``patch_id``.
+    """
+    if not path.is_file():
+        raise CorpusError(f"--factsheets {path} does not exist; run scripts/render_views.py first")
+    index: dict[str, dict[str, Any]] = {}
+    with path.open(encoding="utf-8") as handle:
+        for number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise CorpusError(f"{path}:{number}: not JSON ({error})") from error
+            patch_id = record.get("patch_id") if isinstance(record, dict) else None
+            if not patch_id:
+                raise CorpusError(f"{path}:{number}: record carries no patch_id")
+            index[str(patch_id)] = record
+    return index
+
+
+def resolve_factsheets(args: argparse.Namespace) -> Path | None:
+    """The factsheet file to bind, explicit or by convention, or None."""
+    explicit: Path | None = getattr(args, "factsheets", None)
+    if explicit is not None:
+        return explicit
+    conventional = Path(args.views_root) / CorpusSource.BIGEARTHNET_V2.value / "factsheets.jsonl"
+    return conventional if conventional.is_file() else None
 
 
 def view_policy(args: argparse.Namespace) -> str:
@@ -548,14 +625,90 @@ def load_rows(
 
 @lru_cache(maxsize=HASH_CACHE_SIZE)
 def _hashes_of(path: str) -> tuple[str, str] | None:
-    """One image's ``(sha256, phash)``, or None when it is not on disk."""
+    """One image's ``(sha256, phash)``, or None when it is not on disk.
+
+    Raises:
+        CorpusError: The file exists but is not an image PIL can open. A corrupt
+            render is a render-pass bug and must not enter training under any
+            ``--on-missing-views`` policy — and it must be reported as the file
+            it is, not as a PIL traceback twenty hours into a build.
+    """
     if not Path(path).is_file():
         return None
-    return sha256_of(Path(path)), f"{phash(path):016x}"
+    try:
+        return sha256_of(Path(path)), f"{phash(path):016x}"
+    except (OSError, ValueError) as error:
+        raise CorpusError(f"{path}: cannot be hashed for dedup: {error}") from error
 
 
-def hashes_for(row: Mapping[str, Any]) -> dict[str, Any]:
-    """Image hashes for the dedup index, where the row carries a readable image.
+class HashState(StrEnum):
+    """Why a row did or did not get an image hash."""
+
+    HASHED = "hashed"
+    MISSING = "missing"
+    """The row names an image, and it is not on disk."""
+    UNHASHABLE = "unhashable"
+    """The row names no image at all."""
+
+
+@dataclass(frozen=True)
+class ImageHashes:
+    """The dedup identity of one row's image, and how it was (not) obtained."""
+
+    state: HashState
+    path: str | None
+    sha256: str | None = None
+    phash: str | None = None
+
+    def as_row_fields(self) -> dict[str, str]:
+        """The keys :func:`~satquery.training.corpus_builder._meta_for` reads."""
+        if self.state is not HashState.HASHED:
+            return {}
+        assert self.sha256 is not None and self.phash is not None
+        return {"image_sha256": self.sha256, "phash": self.phash}
+
+
+@dataclass
+class HashTally:
+    """How many rows of a build got a hash, per state. Reported at the end."""
+
+    counts: dict[HashState, int] = dc_field(default_factory=lambda: dict.fromkeys(HashState, 0))
+
+    def add(self, hashes: ImageHashes) -> None:
+        """Count one outcome."""
+        self.counts[hashes.state] += 1
+
+    @property
+    def unhashed(self) -> int:
+        """Rows that passed the dedup index without an identity."""
+        return self.counts[HashState.MISSING] + self.counts[HashState.UNHASHABLE]
+
+
+def dedup_image_path(source: CorpusSource, row: Mapping[str, Any]) -> str | None:
+    """The file whose bytes identify this row's image for §4.7 dedup.
+
+    Resolved from the same place the corpus line will point at, in this order:
+    ``image_path`` (single-image sources), ``pre_path`` (CDVQA — the pair shares
+    an id, so the pre image stands for both), then the first canonical view in
+    ``view_paths`` — ``TC`` for BigEarthNet. That last fallback is what was
+    missing: BigEarthNet carries its own band paths and never sets
+    ``image_path``, so every one of its rows hashed to nothing and the dedup ran
+    on an 18 k-line corpus without checking a single image. The ``TC`` path is
+    also what :func:`~satquery.training.corpus_builder.image_key_of` returns for
+    the built sample, so the index's owner key and its image key agree.
+    """
+    path = row.get("image_path") or row.get("pre_path")
+    if path:
+        return str(path)
+    views: Mapping[str, Any] = row.get("view_paths") or {}
+    for view_id in VIEW_IDS_BY_SOURCE.get(source, ("TC",)):
+        if views.get(view_id):
+            return str(views[view_id])
+    return None
+
+
+def hashes_for(source: CorpusSource, row: Mapping[str, Any]) -> ImageHashes:
+    """Image hashes for the dedup index, from the image the row will train on.
 
     Memoised by path, because the sources publish rows per *annotation* while
     the hashes are per *image*: RSVQA-HR asks around a hundred questions of each
@@ -563,18 +716,30 @@ def hashes_for(row: Mapping[str, Any]) -> dict[str, Any]:
     perceptually hashes the same JPEG a hundred times. On the §5 budget that is
     the difference between a minute and an hour, and it changes no result — the
     file does not move under us mid-build.
+
+    Returns an :class:`ImageHashes` rather than a bare dict so "no image named"
+    and "image named but absent" stay distinguishable: the first is a source
+    with no pixels, the second is a render gap, and only one of them should be
+    allowed to enter a corpus that claims strict image-level dedup.
+
+    Raises:
+        CorpusError: The image exists and cannot be read.
     """
-    path = row.get("image_path") or row.get("pre_path")
-    if not path:
-        return {}
-    hashes = _hashes_of(str(path))
+    path = dedup_image_path(source, row)
+    if path is None:
+        return ImageHashes(HashState.UNHASHABLE, None)
+    hashes = _hashes_of(path)
     if hashes is None:
-        return {}
-    return {"image_sha256": hashes[0], "phash": hashes[1]}
+        return ImageHashes(HashState.MISSING, path)
+    return ImageHashes(HashState.HASHED, path, sha256=hashes[0], phash=hashes[1])
 
 
 def iter_source_samples(
-    source: CorpusSource, args: argparse.Namespace, rng: random.Random
+    source: CorpusSource,
+    args: argparse.Namespace,
+    rng: random.Random,
+    tally: HashTally | None = None,
+    facts: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Iterator[tuple[CorpusSource, CorpusSample]]:
     """Convert one source's official train and val splits into a *stream*.
 
@@ -607,14 +772,19 @@ def iter_source_samples(
             f"HF_DATASETS[{source.value!r}] to a release you have vetted against the "
             "§4.7 quarantine, or drop it from --sources and accept the composition gap"
         )
-    return _iter_source_samples(source, args, rng)
+    return _iter_source_samples(source, args, rng, tally, facts)
 
 
 def _iter_source_samples(
-    source: CorpusSource, args: argparse.Namespace, rng: random.Random
+    source: CorpusSource,
+    args: argparse.Namespace,
+    rng: random.Random,
+    tally: HashTally | None = None,
+    facts: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Iterator[tuple[CorpusSource, CorpusSample]]:
     """The body of :func:`iter_source_samples`, once the source is known good."""
     mode = view_policy(args)
+    tally = tally if tally is not None else HashTally()
     derive_evidence = (
         source is CorpusSource.BIGEARTHNET_V2
         and CorpusSource.EVIDENCE_QA in {CorpusSource(name) for name in args.sources}
@@ -625,13 +795,19 @@ def _iter_source_samples(
             row.get("patch_id") or row.get("image_id") or row.get("pair_id") or seen
         )
         enriched = bind_view_paths(
-            source, dict(row, split=split), item_id, args.views_root
+            source, dict(row, split=split), item_id, args.views_root, facts
         )
         # Hashed *after* binding, so the sha256/pHash pair the dedup index sees
         # is the rendered view the corpus line actually points at, not whatever
         # raw file the source happened to name. §4.7 dedups across sources, and
         # two sources agreeing only after a render is the case it exists for.
-        enriched.update(hashes_for(enriched))
+        hashes = hashes_for(source, enriched)
+        tally.add(hashes)
+        if hashes.state is HashState.MISSING and mode == "fail":
+            # check_views() runs after conversion; the hash runs before it, so
+            # without this a --require-views build could index nothing and pass.
+            raise CorpusError(f"{source.value}:{item_id}: dedup image missing: {hashes.path}")
+        enriched.update(hashes.as_row_fields())
         for sample in convert(source, enriched, rng):
             if not keep_sample(sample, mode):
                 continue
@@ -715,11 +891,46 @@ def build_evidence_source(
     ]
 
 
+def composition_for(
+    requested: set[CorpusSource], overrides: Sequence[str] | None
+) -> dict[CorpusSource, int]:
+    """The per-source targets for this build: §5's table, with ``--composition`` applied.
+
+    Raises:
+        CorpusError: An override does not parse, or names a source not requested.
+    """
+    targets = {source: COMPOSITION[source] for source in requested}
+    for item in overrides or ():
+        name, sep, number = item.partition("=")
+        if not sep or not number.isdigit():
+            raise CorpusError(f"--composition expects SOURCE=N, got {item!r}")
+        try:
+            source = CorpusSource(name)
+        except ValueError as error:
+            raise CorpusError(f"--composition names an unknown source {name!r}") from error
+        if source not in requested:
+            raise CorpusError(f"--composition names {name}, which is not in --sources")
+        targets[source] = int(number)
+    return targets
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Build the corpus. Returns a process exit code."""
     args = parse_args(argv)
     rng = random.Random(args.seed)
     requested = {CorpusSource(name) for name in args.sources}
+    tally = HashTally()
+
+    facts: dict[str, dict[str, Any]] | None = None
+    factsheets = resolve_factsheets(args)
+    if factsheets is not None and CorpusSource.BIGEARTHNET_V2 in requested:
+        facts = load_factsheet_index(factsheets)
+        print(f"factsheets: {len(facts)} BigEarthNet patches bound from {factsheets}")
+    elif CorpusSource.EVIDENCE_QA in requested:
+        print(
+            "WARNING — no factsheets.jsonl found; evidence_qa cannot be generated "
+            "in-band. Pass --factsheets or run scripts/render_views.py first."
+        )
 
     excluded = [source for source in UNRESOLVED_SOURCES if source not in requested]
     if excluded:
@@ -742,7 +953,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         """Every source's samples, one at a time, nothing held in between."""
         for source in ordered:
             counted = 0
-            for tagged in iter_source_samples(source, args, rng):
+            for tagged in iter_source_samples(source, args, rng, tally, facts):
                 counted += tagged[0] is source
                 yield tagged
                 if counted % PROGRESS_EVERY == 0 and counted:
@@ -763,7 +974,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = build_corpus_streaming(
         stream(),
         args.out,
-        composition={source: COMPOSITION[source] for source in requested},
+        composition=composition_for(requested, args.composition),
         dedup=Deduplicator(),
         seed=args.seed,
     )
@@ -789,8 +1000,55 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"corpus: {report.train} train / {report.val} val "
         f"({report.dropped_exact} exact and {report.dropped_near} near duplicates dropped)"
     )
+    print(
+        f"dedup:  {tally.counts[HashState.HASHED]} rows hashed, "
+        f"{tally.counts[HashState.MISSING]} with a missing image, "
+        f"{tally.counts[HashState.UNHASHABLE]} naming no image"
+    )
+    if tally.unhashed:
+        # Said out loud, because the alternative was an 18 k-line corpus that
+        # claimed strict image-level dedup and had checked nothing.
+        print(
+            f"WARNING — {tally.unhashed} row(s) entered the corpus without an image "
+            "hash; the dedup index did not check them"
+        )
+    append_manifest(args, report, tally)
     print(f"written to {args.out}")
     return 0
+
+
+MANIFEST_NAME: str = "MANIFEST.md"
+"""Written beside the corpus files: which build produced which JSONL, and how."""
+
+
+def append_manifest(args: argparse.Namespace, report: Any, tally: HashTally) -> Path:
+    """Record this build in ``<out>/MANIFEST.md`` so the directory explains itself.
+
+    The corpus directory has accumulated several overlapping JSONL sets with no
+    record of which run consumed which. ``run_manifest.json`` says it per run;
+    this says it per corpus.
+    """
+    path = Path(args.out) / MANIFEST_NAME
+    header = (
+        "# Corpus manifest\n\n"
+        "One row per build, appended by `scripts/build_corpus.py`. "
+        "`hashed` is the number of rows the dedup index actually checked.\n\n"
+        "| built (UTC) | sources | seed | train | val | hashed | unhashed | dropped | command |\n"
+        "|---|---|---:|---:|---:|---:|---:|---:|---|\n"
+    )
+    command = "build_corpus.py " + " ".join(sys.argv[1:])
+    row = (
+        f"| {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')} "
+        f"| {','.join(args.sources)} | {args.seed} | {report.train} | {report.val} "
+        f"| {tally.counts[HashState.HASHED]} | {tally.unhashed} "
+        f"| {report.dropped_exact + report.dropped_near} | `{command}` |\n"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file():
+        path.write_text(header, encoding="utf-8")
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(row)
+    return path
 
 
 if __name__ == "__main__":  # pragma: no cover - process entry point

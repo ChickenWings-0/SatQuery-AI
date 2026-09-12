@@ -12,23 +12,8 @@
  */
 import type { KeyboardEvent } from 'react'
 
-export const TABS = ['chat', 'results', 'citations', 'history'] as const
-export type Tab = (typeof TABS)[number]
+import { LABELS, TABS, panelId, tabId, type Tab } from '@/components/thread/tabs'
 
-const LABELS: Record<Tab, string> = {
-  chat: 'Chat',
-  results: 'Results',
-  citations: 'Citations',
-  history: 'History',
-}
-
-export function tabId(tab: Tab): string {
-  return `thread-tab-${tab}`
-}
-
-export function panelId(tab: Tab): string {
-  return `thread-panel-${tab}`
-}
 
 export function SidebarTabs({
   value,

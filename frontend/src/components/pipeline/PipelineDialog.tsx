@@ -10,7 +10,7 @@
  * FactSheet and the raw AuditTrace — so the product has exactly one such
  * surface rather than several competing ones.
  */
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useMemo, useState } from 'react'
 
 import {
   Dialog,
@@ -120,9 +120,11 @@ export function PipelineDialog({
   // `useState` seeded once, on first render, and every later citation opened
   // the inspector on whichever node had been clicked first. Clearing on each
   // open hands the node choice back to `focusedStep`.
-  useEffect(() => {
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
     if (open) setSelected(null)
-  }, [open])
+  }
 
   const trace = result?.trace ?? null
   const executions = trace?.executions ?? []

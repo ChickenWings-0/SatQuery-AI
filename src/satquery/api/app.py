@@ -15,6 +15,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from satquery.agent.concurrency import DeviceGates
+from satquery.api.jobs import get_job_store
 from satquery.api.routers import analyze, artifacts, health, jobs, registry, traces, validate
 from satquery.core.config import Settings, get_settings, load_env_file
 from satquery.core.logging import configure_logging, get_logger
@@ -51,6 +53,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # The one set of device gates every request's executor shares. Created
+        # here, on the serving loop, rather than at import: see
+        # satquery.agent.concurrency for why a module global is wrong.
+        app.state.gates = DeviceGates()
         log.info(
             "app.startup",
             app_name=settings.app_name,
@@ -60,6 +66,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             env_file_applied=from_file,
         )
         yield
+        # A job still running at shutdown would otherwise keep its GPU thread
+        # and its upload directory: cancel, wait, and let _execute's finally
+        # clean up. Subscribers get a terminal error event, not a dropped socket.
+        await get_job_store().shutdown()
         log.info("app.shutdown")
 
     app = FastAPI(
@@ -76,7 +86,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_allow_origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        # DELETE is /v1/jobs/{id}: the Vite proxy hides its absence in dev, a
+        # cross-origin deploy (the nginx image) does not.
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=[TRACE_ID_HEADER],
     )

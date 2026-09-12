@@ -14,6 +14,7 @@ traces.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from typing import Final
 
 from satquery.agent import aggregator, planner, task_classifier
 from satquery.agent import events as events_module
+from satquery.agent.concurrency import DeviceGates
 from satquery.agent.events import Emit
 from satquery.agent.executor import DagExecutor, ExecutionCache, ToolFailedNoFallbackError
 from satquery.agent.query_parser import parse
@@ -57,6 +59,12 @@ class AnalysisRequest:
     allow_generic_fallback: bool = True
     enable_tools: Sequence[str] | None = None
     disable_tools: Sequence[str] = ()
+    cancelled: asyncio.Event | None = None
+    """Set by ``DELETE /v1/jobs/{id}``; the executor stops at the next step boundary."""
+    max_latency_ms: int | None = None
+    """``options.max_latency_ms``: a soft budget. Overrunning it is a warning, never a cut."""
+    ignored_options: Sequence[str] = ()
+    """Options the request set that this server accepts but does not act on."""
 
 
 @dataclass
@@ -147,6 +155,7 @@ async def analyze(
     cache: ExecutionCache | None = None,
     traces: TraceStore | None = None,
     emit: Emit | None = None,
+    gates: DeviceGates | None = None,
 ) -> AnalysisResult:
     """Run the whole pipeline and return the trace it produced.
 
@@ -160,6 +169,9 @@ async def analyze(
         emit: When given, receives the API_CONTRACT §5 progress events as the
             run proceeds. ``None`` — what ``/v1/analyze`` passes — makes the run
             byte-identical to one with no streaming at all.
+        gates: The process-wide device gates. The routers pass the application's;
+            leaving it ``None`` gives this run a private set, which is only
+            correct when nothing else in the process is using the GPU.
 
     Returns:
         An :class:`AnalysisResult` carrying the full :class:`AuditTrace`.
@@ -184,6 +196,15 @@ async def analyze(
     refuse_if_incompatible(ingest.compatibility)
     parsed = parse(request.query)
     warnings: list[WarningItem] = list(ingest.warnings)
+    for name in request.ignored_options:
+        # Said in the response rather than silently: a client that asked for a
+        # specific backend or adapter and got the process default should know.
+        warnings.append(
+            WarningItem(
+                code="OPTION_IGNORED",
+                message=f"options.{name} is accepted but not acted on by this server",
+            )
+        )
 
     classification = task_classifier.classify(
         query=request.query,
@@ -217,6 +238,7 @@ async def analyze(
         store=store,
         cache=cache,
         emit=emit,
+        gates=gates,
     )
     events_module.stage(emit, "executing")
     report = await executor.run(
@@ -227,8 +249,27 @@ async def analyze(
         slots=classification.slots,
         seed=request.seed,
         question=parsed.raw,
+        cancelled=request.cancelled,
     )
     warnings += report.warnings
+    executing_ms = int((time.perf_counter() - started) * 1000)
+    if request.max_latency_ms is not None and executing_ms > request.max_latency_ms:
+        warnings.append(
+            WarningItem(
+                code="LATENCY_BUDGET_EXCEEDED",
+                message=(
+                    f"the tool DAG took {executing_ms} ms against a "
+                    f"{request.max_latency_ms} ms budget; nothing was cut short"
+                ),
+            )
+        )
+    if report.cancelled:
+        warnings.append(
+            WarningItem(
+                code="RUN_CANCELLED",
+                message="The client cancelled the run; steps that had not started were skipped.",
+            )
+        )
 
     events_module.stage(emit, "aggregating")
     sheet = fact_sheet_module.build(report.executions, active_registry)
@@ -251,6 +292,7 @@ async def analyze(
         text=generated.text if generated else None,
         generator=generated.generator if generated else None,
         policy=request.citation_policy,
+        markers=generated.markers if generated else None,
     )
     if aggregation.has_uncited:
         warnings.append(
@@ -305,7 +347,10 @@ async def analyze(
         created_at=created_at,
     )
     if traces is not None:
-        traces.put(trace)
+        # A synchronous SQLite write; off the loop so an SSE heartbeat elsewhere
+        # in the process is not held behind it. The store opens its connections
+        # with check_same_thread=False for exactly this.
+        await asyncio.to_thread(traces.put, trace)
     return AnalysisResult(trace=trace, warnings=warnings)
 
 

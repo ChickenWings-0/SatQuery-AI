@@ -20,6 +20,7 @@ import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 os.environ.setdefault("SATQUERY_VLM_DISABLED", "true")
 
@@ -65,3 +66,34 @@ def upload_files(scene_paths: dict[str, Path]) -> Iterator[object]:
         ]
 
     yield build
+
+
+# ------------------------------------------------------------ corpus fixtures
+#
+# Shared by the corpus-builder tests and the corpus-*script* tests. They live
+# here rather than in test_vlm_training.py so the script tests never import a
+# module that gates part of itself on torch, and so they always run in CI.
+
+BEN_FACTS: dict[str, float | str] = {
+    "spectral_index_analyzer.ndvi_mean": 0.62,
+    "spectral_index_analyzer.ndbi_mean": -0.08,
+    "sar_backscatter_analyzer.sigma0_vv_db_mean": -8.4,
+    "sar_backscatter_analyzer.vv_vh_ratio_db_mean": 6.1,
+}
+
+BEN_VIEW_IDS = ("TC", "FCIR", "SWIR", "NDVI", "NDBI", "SARFC", "SARDB")
+
+
+@pytest.fixture
+def ben_row() -> dict[str, Any]:
+    """One reBEN metadata row, as the BigEarthNet-v2 loader yields it."""
+    return {
+        "patch_id": "S2A_MSIL2A_20180413T95029_37_58",
+        "labels": ["Broad-leaved forest", "Pastures"],
+        "split": "train",
+        "season": "spring",
+        "view_paths": {
+            view_id: f"views/ben2/S2A_37_58/{view_id}.png" for view_id in BEN_VIEW_IDS
+        },
+        "fact_sheet": dict(BEN_FACTS),
+    }

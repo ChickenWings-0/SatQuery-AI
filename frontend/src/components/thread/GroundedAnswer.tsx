@@ -23,7 +23,9 @@ import { Fragment, useId, useMemo } from 'react'
 
 import { countOf } from '@/format'
 import { annotate, parseSource } from '@/thread/annotate'
-import { parseBboxTokens, stripBboxTokens } from '@/thread/bbox'
+import { useJobStore } from '@/state/job'
+import { stripBboxTokens } from '@/thread/bbox'
+import { boxesForAnswer } from '@/thread/boxes'
 import type { Answer, Citation } from '@/api/types'
 
 export interface CitationTarget {
@@ -87,12 +89,15 @@ export function GroundedAnswer({
   onCitation: (target: CitationTarget) => void
 }) {
   const uncited = answer.uncited_numeric_spans ?? []
+  const artifacts = useJobStore((state) => state.artifacts)
+  // The count comes from the same resolver the map draws from, so the two can
+  // never disagree; the prose is still cleaned of any tokens it carries.
   const { text, boxCount } = useMemo(
     () => ({
       text: stripBboxTokens(answer.text),
-      boxCount: parseBboxTokens(answer.text).length,
+      boxCount: boxesForAnswer(answer.text, artifacts).boxes.length,
     }),
-    [answer.text],
+    [answer.text, artifacts],
   )
   const segments = annotate(text, answer.citations ?? [], uncited)
 

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from satquery.agent.concurrency import DeviceGates
+from satquery.api.dependencies import get_device_gates
 from satquery.api.fixtures import mock_registry
+from satquery.api.jobs import JobStore, get_job_store
 from satquery.core.config import Settings, get_settings
 from satquery.models.loader import (
     BackendKind,
@@ -82,19 +86,32 @@ def _models(settings: Settings) -> list[ModelInfo]:
 
 
 @router.get("/health", response_model=HealthResponse, summary="Service, device and model health")
-async def health(settings: Annotated[Settings, Depends(get_settings)]) -> HealthResponse:
+async def health(
+    settings: Annotated[Settings, Depends(get_settings)],
+    jobs: Annotated[JobStore, Depends(get_job_store)],
+    gates: Annotated[DeviceGates, Depends(get_device_gates)],
+) -> HealthResponse:
     """Report service health.
 
     ``device.igpu_masked`` asserts that ``HIP_VISIBLE_DEVICES=0`` took effect. A
-    ``false`` there is a red flag before any demo.
+    ``false`` there is a red flag before any demo. ``leaked_gpu_permits`` is the
+    other one: a timed-out GPU tool whose thread is still on the card.
     """
     registry = mock_registry()
+    # The device probe is torch on first call — ~10 s of ROCm initialisation —
+    # and the frontend polls this every 15 s. Off the loop, so the first poll
+    # after a restart does not freeze every job's SSE stream for its duration.
+    device = await asyncio.to_thread(_device_info, settings)
+    models = await asyncio.to_thread(_models, settings)
     return HealthResponse(
-        status=HealthStatus.OK,
+        status=HealthStatus.DEGRADED if gates.degraded else HealthStatus.OK,
         version=settings.version,
         schema_version=settings.schema_version,
-        device=_device_info(settings),
-        models=_models(settings),
+        device=device,
+        models=models,
         tools_available=sum(1 for tool in registry.tools if tool.available),
         tools_total=len(registry.tools),
+        jobs_running=jobs.running,
+        jobs_retained=len(jobs),
+        leaked_gpu_permits=gates.leaked_gpu_permits,
     )
