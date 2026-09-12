@@ -15,7 +15,7 @@
  */
 import type { RecordedEvent } from '@/mocks/fixtures'
 
-export const SCENARIOS = ['canonical', 'ungrounded'] as const
+export const SCENARIOS = ['canonical', 'ungrounded', 'grounded'] as const
 export type Scenario = (typeof SCENARIOS)[number]
 
 export function activeScenario(): Scenario {
@@ -46,12 +46,90 @@ const UNGROUNDED_ANSWER = {
   template_fallback: false,
 }
 
+/**
+ * The `grounded` scenario: a run that produced boxes, on a 2:1 image.
+ *
+ * Exists for the browser test of the overlay geometry — the one visual code
+ * path nothing else exercises in a real layout engine. The pre-change true
+ * colour view is swapped for a 896x448 render so `object-fit: contain` has to
+ * letterbox, and a `BBOX_SET` artifact carries one box at a known position.
+ */
+export const GROUNDED_BOX = { xMin: 250, yMin: 250, xMax: 750, yMax: 750 } as const
+
+const GROUNDED_BBOX_SET = {
+  id: 'art_99',
+  type: 'BBOX_SET',
+  mime: 'application/json',
+  label: 'Grounded boxes',
+  url: null,
+  geotiff_url: null,
+  geojson_url: null,
+  geo: null,
+  width: null,
+  height: null,
+  stats: null,
+  inline: {
+    boxes: [
+      {
+        id: 'box_0',
+        label: 'compound',
+        score: 0.91,
+        bbox_px: [224, 112, 672, 336],
+        bbox_normalised: [GROUNDED_BOX.xMin, GROUNDED_BOX.yMin, GROUNDED_BOX.xMax, GROUNDED_BOX.yMax],
+        bbox_wgs84: null,
+      },
+    ],
+    frame: { width: 896, height: 448 },
+    source_image: 'img_0',
+  },
+  produced_by_step: 5,
+}
+
+function groundedEvents(events: RecordedEvent[]): RecordedEvent[] {
+  const out: RecordedEvent[] = []
+  for (const event of events) {
+    if (event.event === 'artifact') {
+      const artifact = event.data as { id: string; url?: string | null; width?: number | null }
+      if (artifact.id === 'art_0') {
+        out.push({
+          event: 'artifact',
+          data: { ...artifact, url: '/v1/artifacts/grounded/wide.jpg', width: 896 },
+        })
+        continue
+      }
+    }
+    if (event.event === 'done') {
+      const done = event.data as { artifacts?: unknown[] }
+      out.push({ event: 'artifact', data: GROUNDED_BBOX_SET })
+      out.push({
+        event: 'done',
+        data: {
+          ...done,
+          artifacts: [
+            ...(done.artifacts ?? []).map((artifact) => {
+              const ref = artifact as { id: string }
+              return ref.id === 'art_0'
+                ? { ...ref, url: '/v1/artifacts/grounded/wide.jpg', width: 896 }
+                : artifact
+            }),
+            GROUNDED_BBOX_SET,
+          ],
+        },
+      })
+      continue
+    }
+    out.push(event)
+  }
+  return out
+}
+
 /** Rewrite the recording's terminal payload for the requested scenario. */
 export function eventsForScenario(
   events: RecordedEvent[],
   scenario: Scenario,
 ): RecordedEvent[] {
   if (scenario === 'canonical') return events
+  if (scenario === 'grounded') return groundedEvents(events)
 
   return events.map((event) => {
     if (event.event !== 'done') return event

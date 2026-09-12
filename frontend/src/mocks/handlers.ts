@@ -51,9 +51,39 @@ function paceOf(event: RecordedEvent): number {
   }
 }
 
-function frame(event: RecordedEvent): string {
-  return `event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
+function frame(event: RecordedEvent, seq: number): string {
+  return `id: ${seq}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
 }
+
+/** The last event id a reconnecting client already holds, if it sent one (§5). */
+function lastSeen(request: Request): number {
+  const header = request.headers.get('Last-Event-ID')
+  const query = new URL(request.url).searchParams.get('after')
+  const raw = header ?? query
+  return raw !== null && /^\d+$/.test(raw) ? Number(raw) : -1
+}
+
+/** The poll snapshot for the recorded run, as the real server would shape it. */
+function snapshot(status: 'running' | 'succeeded', stage: string) {
+  const stream = events()
+  const done = stream.find((event) => event.event === 'done')
+  const plan = stream.find((event) => event.event === 'plan')
+  const steps = (plan?.data as { steps?: unknown[] } | undefined)?.steps?.length ?? 0
+  return {
+    job_id: MOCK_TRACE_ID,
+    status,
+    stage,
+    step: status === 'succeeded' ? steps : 0,
+    total_steps: steps,
+    pct: status === 'succeeded' ? 100 : 45,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    result: status === 'succeeded' ? (done?.data ?? null) : null,
+    error: null,
+  }
+}
+
+export { snapshot }
 
 export const handlers = [
   http.get('*/v1/health', () => HttpResponse.json(healthFixture)),
@@ -89,13 +119,15 @@ export const handlers = [
     )
   }),
 
-  http.get('*/v1/jobs/:jobId/events', () => {
+  http.get('*/v1/jobs/:jobId/events', ({ request }) => {
     const encoder = new TextEncoder()
+    const after = lastSeen(request)
     const stream = new ReadableStream({
       async start(controller) {
-        for (const event of events()) {
+        for (const [seq, event] of events().entries()) {
+          if (seq <= after) continue
           await delay(paceOf(event))
-          controller.enqueue(encoder.encode(frame(event)))
+          controller.enqueue(encoder.encode(frame(event, seq)))
         }
         controller.close()
       },
@@ -109,24 +141,13 @@ export const handlers = [
     })
   }),
 
-  http.get('*/v1/jobs/:jobId', () => {
-    const stream = events()
-    const done = stream.find((event) => event.event === 'done')
-    const plan = stream.find((event) => event.event === 'plan')
-    const steps = (plan?.data as { steps?: unknown[] } | undefined)?.steps?.length ?? 0
-    return HttpResponse.json({
-      job_id: MOCK_TRACE_ID,
-      status: 'succeeded',
-      stage: 'done',
-      step: steps,
-      total_steps: steps,
-      pct: 100,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      result: done?.data ?? null,
-      error: null,
-    })
-  }),
+  http.get('*/v1/jobs/:jobId', () => HttpResponse.json(snapshot('succeeded', 'done'))),
+
+  // Cancel (§4.10). The mock has no run to stop, so it answers the way the
+  // server does for a job it is about to stop: 202 with the snapshot.
+  http.delete('*/v1/jobs/:jobId', () =>
+    HttpResponse.json(snapshot('running', 'executing'), { status: 202 }),
+  ),
 
   http.get('*/v1/traces/:traceId', () => {
     const done = events().find((event) => event.event === 'done')

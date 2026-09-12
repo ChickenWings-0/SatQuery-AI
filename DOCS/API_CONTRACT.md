@@ -437,11 +437,23 @@ Drives the frontend "capabilities" panel. `available: false` entries must be sho
 
 `igpu_masked` asserts `HIP_VISIBLE_DEVICES=0` took effect (Master.md §9, risk row 2). A `false` here is a red flag before any demo.
 
+Added (additive, 2026-09-12): `jobs_running`, `jobs_retained` and `leaked_gpu_permits` (all integers, default 0). `leaked_gpu_permits` counts GPU tool threads that overran their timeout and are still running; past the process limit `status` is `"degraded"`.
+
+### 4.10 `DELETE /v1/jobs/{job_id}` — cancel (added 2026-09-12, additive)
+
+Asks a running job to stop. Returns `202` with the `JobStatusResponse` snapshot; `404` for an unknown or evicted job; `409` (`JOB_ALREADY_FINISHED`, §6 envelope in `detail`) once the job is terminal.
+
+Best-effort by construction: the tool step in flight finishes (a worker thread cannot be killed), no further step starts, every unstarted step is recorded `SKIPPED` with `error: "cancelled by the client"`, and the job ends with an `error` event carrying `JOB_CANCELLED`. An open events stream therefore closes the way it would for any failure; the trace, if one was persisted, records what did run. The response also carries a `RUN_CANCELLED` warning.
+
+Also added to `GET /v1/jobs/{job_id}`: a job the in-memory store no longer holds (evicted, or from before a restart) is answered from its persisted trace as `status: "succeeded"` when one exists; `404` otherwise, with a hint pointing at `/v1/traces/{id}`.
+
 ---
 
 ## 5. SSE Event Protocol
 
-Each message: `event: <type>` + `data: <json>`. Heartbeat comment `: ping` every 15 s.
+Each message: `id: <seq>` + `event: <type>` + `data: <json>`. Heartbeat comment `: ping` every 15 s.
+
+`id` (added 2026-09-12, additive) is the event's index in the job's history, dense from 0. A client that reconnects sends the last one it saw as the standard `Last-Event-ID` request header — or `?after=<seq>` where a header cannot be set — and receives only the events past it. Without either, the full history is replayed, which is always safe: `queued` resets client state and artifacts are de-duplicated by id.
 
 | `event` | `data` |
 |---|---|
@@ -485,6 +497,12 @@ Ordering guarantee: `queued` → `stage(ingesting…planning)` → `plan` → in
 | `TOOL_FAILED_NO_FALLBACK` | 500 | required tool failed with no `fallback` declared |
 | `VRAM_EXHAUSTED` | 503 | HIP OOM; retryable |
 | `MODEL_UNAVAILABLE` | 503 | weights or backend missing |
+| `INVALID_OPTIONS` | 400 | the `options` part is not JSON or not a valid `AnalyzeOptions` (unknown field, wrong type, unknown `pair_type_hint`); `hint` carries the validator's explanation. Added 2026-09-12 — previously such input was silently replaced by the defaults |
+| `JOB_ALREADY_FINISHED` | 409 | `DELETE /v1/jobs/{id}` on a terminal job |
+| `JOB_CANCELLED` | 499 | terminal `error` event of a cancelled job (never an HTTP response status) |
+| `TOO_MANY_JOBS` | 429 | every retained job is still running; nothing can be evicted (`POST /v1/jobs`) |
+
+Warning codes added 2026-09-12 (in `warnings[]`, never errors): `OPTION_IGNORED` (an accepted option this server does not act on was set off-default: `vlm_backend`, `adapter_version`, `artifact_format`), `LATENCY_BUDGET_EXCEEDED` (`options.max_latency_ms` overrun; nothing was cut short), `RUN_CANCELLED`, `TOOL_TIMEOUT_LEAKED_PERMIT`. `query` on `/v1/analyze` and `/v1/jobs` is now validated to 1-1000 characters (422 outside that range).
 
 `message` is user-facing and safe to display verbatim. `hint` is an actionable next step. Never leak file paths or stack traces into either.
 

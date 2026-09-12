@@ -51,7 +51,8 @@ import { FIXED_DOMAIN, primaryOf, type ViewGroup } from '@/evidence/views'
 import { useFocusStore } from '@/state/focus'
 import { useJobStore } from '@/state/job'
 import { useUiStore } from '@/state/ui'
-import { parseBboxTokens } from '@/thread/bbox'
+import { boxesForResult } from '@/thread/boxes'
+import { changeLegend } from '@/thread/legend'
 
 /**
  * Index and SAR views are rendered on a fixed domain by the server, so the
@@ -200,12 +201,11 @@ export function ImageViewer({ group }: { group: ViewGroup }) {
   const task = result?.resolved_task.primary
   const isChange = task?.startsWith('CHANGE_') ?? false
 
-  // The boxes the answer named, once per answer. An answer with none is the
-  // common case and costs one regex pass.
-  const boxes = useMemo(
-    () => (result ? parseBboxTokens(result.answer.text) : []),
-    [result],
-  )
+  // The boxes to draw: the grounding tool's BBOX_SET artifact when one ran,
+  // the answer text only as a fallback (see @/thread/boxes). Once per answer.
+  const artifacts = useJobStore((state) => state.artifacts)
+  const resolved = useMemo(() => boxesForResult(result, artifacts), [result, artifacts])
+  const boxes = resolved.boxes
 
   // The raster's rendered rectangle inside its cell, for the box layer.
   const cellRef = useRef<HTMLDivElement>(null)
@@ -332,6 +332,17 @@ export function ImageViewer({ group }: { group: ViewGroup }) {
                   <BboxOverlay boxes={boxes} />
                 </div>
               )}
+              {/* Drawn from prose rather than from the grounding artifact:
+                  worth saying, because it is the one case where the map and
+                  the trace can disagree. */}
+              {fit && resolved.source === 'text' && (
+                <span
+                  data-testid="bbox-source-hint"
+                  className={`${PILL} absolute top-3 left-3 z-20 px-2 py-0.5 text-[10px] text-warn`}
+                >
+                  boxes read from the answer text
+                </span>
+              )}
             </div>
           </TransformComponent>
 
@@ -368,7 +379,7 @@ export function ImageViewer({ group }: { group: ViewGroup }) {
             className={`${PILL} absolute right-3 bottom-3 z-20 flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-text-hi`}
           >
             <DotIcon className="text-accent-warm" />
-            <span>New built-up area</span>
+            <span>{changeLegend(result?.resolved_task)}</span>
           </div>
         )}
       </div>

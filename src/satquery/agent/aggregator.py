@@ -20,7 +20,7 @@ The templates are deliberately plain. They are evidence read aloud, not prose.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from satquery.evidence.citation_validator import (
@@ -262,6 +262,9 @@ class VlmAnswer:
     step: int
     tool: str
     status: ToolStatus
+    markers: list[tuple[int, str]] = field(default_factory=list)
+    """``(offset, key)`` pairs the synthesiser recorded when it stripped the
+    ``[key]`` markers, so the final validation can bind numbers to keys."""
 
     @property
     def degraded(self) -> bool:
@@ -303,8 +306,25 @@ def vlm_answer(
                 step=execution.step,
                 tool=execution.tool,
                 status=execution.status,
+                markers=_markers_of(inline.get("citation_markers")),
             )
     return found
+
+
+def _markers_of(raw: object) -> list[tuple[int, str]]:
+    """Read the ``citation_markers`` an answer artifact carries, tolerating none."""
+    markers: list[tuple[int, str]] = []
+    if not isinstance(raw, list):
+        return markers
+    for item in raw:
+        if (
+            isinstance(item, list | tuple)
+            and len(item) == 2
+            and isinstance(item[0], int)
+            and isinstance(item[1], str)
+        ):
+            markers.append((item[0], item[1]))
+    return markers
 
 
 def vlm_unavailable(executions: Sequence[Execution]) -> list[str]:
@@ -325,6 +345,7 @@ def aggregate(
     text: str | None = None,
     generator: str | None = None,
     policy: CitationPolicy = CitationPolicy.FLAG,
+    markers: Sequence[tuple[int, str]] | None = None,
 ) -> Aggregation:
     """Produce the final :class:`Answer`, cited against the FactSheet.
 
@@ -337,6 +358,8 @@ def aggregate(
             None — every Phase 3 path — the template writes it.
         generator: Overrides the recorded generator string.
         policy: Citation policy; ``flag`` by default.
+        markers: The ``[key]`` positions the synthesiser recorded, so a number
+            the model attributed to a key is checked against that key.
 
     Returns:
         An :class:`Aggregation` carrying the answer and the citation outcome.
@@ -355,7 +378,12 @@ def aggregate(
     # Boxes are removed before the claim check, never from the answer itself:
     # the coordinates are the grounding answer, and they are not citable claims.
     claims = strip_boxes(body) if task is TaskType.GROUNDING else body
-    result = validate(claims, sheet, policy=policy)
+    result = validate(
+        claims,
+        sheet,
+        policy=policy,
+        markers=None if task is TaskType.GROUNDING or templated else markers,
+    )
     answer = Answer(
         text=body if task is TaskType.GROUNDING else result.text,
         citations=result.citations,

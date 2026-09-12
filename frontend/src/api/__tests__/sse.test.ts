@@ -28,6 +28,15 @@ describe('parseFrame', () => {
     expect(parseFrame('event: stage\ndata: {"pct":45}')).toEqual({
       event: 'stage',
       data: '{"pct":45}',
+      id: null,
+    })
+  })
+
+  it('keeps the id field, which the job stream uses as its sequence number', () => {
+    expect(parseFrame('id: 7\nevent: stage\ndata: {"pct":45}')).toEqual({
+      event: 'stage',
+      data: '{"pct":45}',
+      id: '7',
     })
   })
 
@@ -55,7 +64,7 @@ describe('readFrames', () => {
   it('reassembles a frame split across chunk boundaries', async () => {
     // The failure this guards: a naive reader parses "event: sta" as a frame.
     const frames = await collect(streamOf('event: sta', 'ge\ndata: {"pct"', ':45}\n\n'))
-    expect(frames).toEqual([{ event: 'stage', data: '{"pct":45}' }])
+    expect(frames).toEqual([{ event: 'stage', data: '{"pct":45}', id: null }])
   })
 
   it('skips interleaved heartbeats without losing the frames around them', async () => {
@@ -72,7 +81,7 @@ describe('readFrames', () => {
 
   it('handles CRLF line endings', async () => {
     const frames = await collect(streamOf('event: a\r\ndata: 1\r\n\r\n'))
-    expect(frames).toEqual([{ event: 'a', data: '1' }])
+    expect(frames).toEqual([{ event: 'a', data: '1', id: null }])
   })
 
   it('throws when the response carried no body', async () => {

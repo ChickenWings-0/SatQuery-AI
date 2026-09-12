@@ -1,0 +1,52 @@
+# Runs the same gates CI runs, on the files being committed, before they are.
+#
+#   uv run pre-commit install        # once per clone
+#   uv run pre-commit run --all-files
+#
+# ruff and mypy are the two that the audit found already broken in HEAD (one
+# error each) — a commit hook is what would have caught both. The frontend
+# hooks fire only when something under frontend/src changes.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy --strict (satquery)
+        entry: uv run mypy
+        language: system
+        pass_filenames: false
+        files: ^(src/|pyproject\.toml)
+        types: [python]
+
+      - id: openapi-in-sync
+        name: openapi.json matches create_app()
+        entry: make backend-contract
+        language: system
+        pass_filenames: false
+        files: ^(src/satquery/(api|schemas)/|openapi\.json)
+
+      - id: oxlint
+        name: oxlint (frontend)
+        entry: bash -c 'cd frontend && npm run lint'
+        language: system
+        pass_filenames: false
+        files: ^frontend/src/.*\.(ts|tsx)$
+
+      - id: tsc
+        name: tsc -b --noEmit (frontend)
+        entry: bash -c 'cd frontend && npm run typecheck'
+        language: system
+        pass_filenames: false
+        files: ^frontend/(src/.*\.(ts|tsx)|tsconfig.*\.json)$
+
+      - id: schema-in-sync
+        name: schema.d.ts matches openapi.json
+        entry: make frontend-contract
+        language: system
+        pass_filenames: false
+        files: ^(openapi\.json|frontend/src/api/schema\.d\.ts)$

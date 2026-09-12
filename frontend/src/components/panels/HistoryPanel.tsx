@@ -6,7 +6,7 @@
  * not exist — and each entry is still the real, persisted audit trace.
  */
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import { SatQueryError, trace as fetchTrace } from '@/api/client'
 import { decimal, duration, timestamp } from '@/format'
@@ -73,9 +73,14 @@ export function HistoryPanel() {
   const [selected, setSelected] = useState<string | null>(selectedTraceId)
 
   // Arriving from a sidebar entry opens that run rather than a bare list.
-  useEffect(() => {
+  // Adjusted during render rather than in an effect, which is React's own
+  // pattern for "state that follows a prop": no extra commit, no flash of the
+  // previous selection.
+  const [seenTraceId, setSeenTraceId] = useState(selectedTraceId)
+  if (selectedTraceId !== seenTraceId) {
+    setSeenTraceId(selectedTraceId)
     if (selectedTraceId) setSelected(selectedTraceId)
-  }, [selectedTraceId])
+  }
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -101,11 +106,25 @@ export function HistoryPanel() {
                 <p className="text-[13px] font-medium [overflow-wrap:anywhere]">{run.query}</p>
                 <p className="tabular mt-1 font-mono text-[11px] text-text-lo [overflow-wrap:anywhere]">
                   {run.traceId} · {timestamp(run.at)}
+                  {run.outcome !== 'succeeded' && (
+                    <span className={run.outcome === 'failed' ? 'text-fail' : 'text-accent-warm'}>
+                      {' '}
+                      · {run.outcome}
+                    </span>
+                  )}
                 </p>
               </button>
               {selected === run.traceId && (
                 <div className="mt-3 border-t border-line pt-3">
-                  <TraceDetail traceId={run.traceId} />
+                  {run.outcome === 'succeeded' ? (
+                    <TraceDetail traceId={run.traceId} />
+                  ) : (
+                    <p className="text-[13px] text-text-lo">
+                      {run.outcome === 'running'
+                        ? 'This run has not finished; its trace is written when it does.'
+                        : 'This run did not produce an answer, so there is no trace to show.'}
+                    </p>
+                  )}
                 </div>
               )}
             </li>

@@ -37,6 +37,7 @@ from satquery.registry.capability_match import MatchStatus, match
 from satquery.registry.registry import ToolRegistry, default_registry
 from satquery.render.artifact_store import ArtifactStore
 from satquery.schemas.enums import (
+    ArtifactType,
     Overall,
     PairType,
     TaskType,
@@ -690,3 +691,128 @@ def test_the_cache_key_moves_when_the_checkpoint_does(tmp_path: Path) -> None:
     assert checkpoint_fingerprint("raster_statistics") == "", (
         "a tool with no weights must not pay for a stat on every step"
     )
+
+
+# ---------------------------------------------- process-wide gates + cancel
+
+
+def test_two_executors_share_one_gpu_permit(
+    scene_paths: dict[str, Path], tmp_path: Path, registry: Any
+) -> None:
+    """One ``DeviceGates`` across two requests: their GPU steps never overlap."""
+    import threading
+    import time
+
+    from satquery.agent.concurrency import DeviceGates
+
+    peak = {"current": 0, "max": 0}
+    lock = threading.Lock()
+
+    class CountingDetector:
+        """A ROCm-declared tool that records how many of it run at once."""
+
+        name = "siamese_change_detector"
+
+        def run(self, ctx: ToolContext, params: Mapping[str, Any]) -> ToolResult:
+            with lock:
+                peak["current"] += 1
+                peak["max"] = max(peak["max"], peak["current"])
+            time.sleep(0.2)
+            with lock:
+                peak["current"] -= 1
+            raise ToolError("counted; let the fallback answer")
+
+    available = registry.with_availability({"siamese_change_detector": True})
+    gates = DeviceGates(max_parallel_gpu=1)
+    sources, result = _ingest(scene_paths, "s2_pre", "s2_post")
+
+    async def both() -> None:
+        def one(name: str) -> Any:
+            return analyze(
+                AnalysisRequest(
+                    query="what changed between these two images", sources=sources, ingest=result
+                ),
+                store=ArtifactStore(tmp_path / name),
+                registry=available,
+                tools={"siamese_change_detector": CountingDetector()},
+                cache=ExecutionCache(),
+                gates=gates,
+            )
+
+        await asyncio.gather(one("a"), one("b"))
+
+    asyncio.run(both())
+    assert peak["max"] == 1, "two requests each held their own GPU permit"
+
+
+def test_a_cancelled_run_skips_what_has_not_started(
+    scene_paths: dict[str, Path], store: ArtifactStore
+) -> None:
+    """The executor's half of DELETE: stop at the next boundary, record the rest SKIPPED."""
+    cancelled = asyncio.Event()
+
+    class CancelAfterRender:
+        """Wraps the renderer; sets the flag once the first wave is done."""
+
+        name = "spectral_renderer"
+
+        def __init__(self) -> None:
+            from satquery.tools.catalog import BUILTIN_TOOLS
+
+            self.inner = BUILTIN_TOOLS["spectral_renderer"]
+
+        def run(self, ctx: ToolContext, params: Mapping[str, Any]) -> ToolResult:
+            out = self.inner.run(ctx, params)
+            cancelled.set()
+            return out
+
+    sources, result = _ingest(scene_paths, "s2_pre", "s2_post")
+    trace = asyncio.run(
+        analyze(
+            AnalysisRequest(
+                query="what changed between these two images",
+                sources=sources,
+                ingest=result,
+                cancelled=cancelled,
+            ),
+            store=store,
+            tools={"spectral_renderer": CancelAfterRender()},
+            cache=ExecutionCache(),
+        )
+    ).trace
+
+    statuses = {e.step: e.status for e in trace.executions}
+    assert statuses[1] is ToolStatus.OK, "the wave in flight finishes"
+    assert all(s is ToolStatus.SKIPPED for step, s in statuses.items() if step > 1)
+    assert all("cancelled" in (e.error or "") for e in trace.executions if e.step > 1)
+    assert any(w.code == "RUN_CANCELLED" for w in trace.warnings)
+
+
+def test_the_execution_cache_is_bounded_by_bytes_not_only_entries() -> None:
+    from satquery.agent.executor import CachedStep, CapturedArtifact
+    from satquery.schemas.trace import ArtifactRef
+
+    def entry(size: int) -> CachedStep:
+        ref = ArtifactRef(
+            id="a",
+            type=ArtifactType.RENDERED_VIEW,
+            label="x",
+            url=None,
+            mime="image/png",
+            produced_by_step=1,
+        )
+        return CachedStep(
+            result=ToolResult(), artifacts=(CapturedArtifact(ref, {"png": b"x" * size}),)
+        )
+
+    cache = ExecutionCache(max_entries=100, max_bytes=1_000)
+    cache.put("one", entry(400))
+    cache.put("two", entry(400))
+    assert len(cache) == 2 and cache.resident_bytes == 800
+    cache.put("three", entry(400))  # evicts "one"
+    assert cache.get("one") is None and cache.get("three") is not None
+    assert cache.resident_bytes == 800
+    cache.put("huge", entry(5_000))  # larger than the whole budget: not cached
+    assert cache.get("huge") is None
+    cache.clear()
+    assert cache.resident_bytes == 0

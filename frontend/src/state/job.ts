@@ -44,7 +44,13 @@ export interface StepNode {
   outputRefs: string[]
 }
 
-export type JobPhase = 'idle' | 'streaming' | 'succeeded' | 'failed'
+/**
+ * `reconnecting` is client-only, like `PENDING`/`RUNNING` on nodes: the run is
+ * live on the server as far as we know, and we have lost the stream to it. The
+ * first event that arrives on the new stream moves the phase back to
+ * `streaming` through the reducer; nothing else needs to know.
+ */
+export type JobPhase = 'idle' | 'streaming' | 'reconnecting' | 'succeeded' | 'failed'
 
 export interface JobState {
   phase: JobPhase
@@ -232,13 +238,27 @@ export interface JobStore extends JobState {
    * `done` is being applied must not turn a good run red.
    */
   markFailed: () => void
+  /**
+   * The stream dropped but the job may still be running: hold the DAG as it
+   * is and say so, while `@/thread/resume` tries to reattach. A run that has
+   * already finished is left alone, for the same reason as `markFailed`.
+   */
+  markReconnecting: () => void
   reset: () => void
+}
+
+const LIVE: ReadonlySet<JobPhase> = new Set(['streaming', 'reconnecting'])
+
+/** True while a run is in progress as far as this client knows. */
+export function isLive(phase: JobPhase): boolean {
+  return LIVE.has(phase)
 }
 
 export const useJobStore = create<JobStore>((set) => ({
   ...initialJobState,
   apply: (event) => set((state) => reduce(state, event)),
-  markFailed: () =>
-    set((state) => (state.phase === 'streaming' ? { ...state, phase: 'failed' } : state)),
+  markFailed: () => set((state) => (LIVE.has(state.phase) ? { ...state, phase: 'failed' } : state)),
+  markReconnecting: () =>
+    set((state) => (state.phase === 'streaming' ? { ...state, phase: 'reconnecting' } : state)),
   reset: () => set({ ...initialJobState }),
 }))

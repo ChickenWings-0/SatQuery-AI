@@ -51,8 +51,10 @@ from satquery.evidence.fact_sheet import Fact, FactSheet  # noqa: E402
 from satquery.models.prompts.box_format import (  # noqa: E402
     BOX_SCALE,
     NormalisedBox,
-    parse as parse_boxes,
     strip_boxes,
+)
+from satquery.models.prompts.box_format import (
+    parse as parse_boxes,
 )
 from satquery.models.prompts.builder import (  # noqa: E402
     ViewInput,

@@ -26,11 +26,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from satquery.agent.concurrency import (
+    MAX_PARALLEL_GPU_TOOLS,
+    MAX_PARALLEL_TOOLS,
+    DeviceGates,
+    ToolTimeoutError,
+)
 from satquery.agent.events import Emit, emit_to
 from satquery.agent.planner import ArtifactSelector, PlannedStep, PlanResult
 from satquery.evidence import fact_sheet as fact_sheet_module
@@ -53,13 +60,6 @@ from satquery.tools.base import (
     ToolResult,
 )
 from satquery.tools.catalog import CHECKPOINT_TOOLS, checkpoint_fingerprint
-
-MAX_PARALLEL_TOOLS: Final[int] = 3
-"""CPU-bound tools. Three keeps the box responsive without leaving cores idle."""
-
-MAX_PARALLEL_GPU_TOOLS: Final[int] = 1
-"""A single global semaphore. With 24 GB shared between an 8B VLM and the CV
-models, concurrent GPU steps are the shortest path to VRAM exhaustion."""
 
 MIN_TIMEOUT_MS: Final[int] = 5_000
 TIMEOUT_FACTOR: Final[int] = 3
@@ -182,6 +182,28 @@ class CachedStep:
     artifacts: tuple[CapturedArtifact, ...]
 
 
+DEFAULT_CACHE_BYTES: Final[int] = 512 << 20
+"""The default byte budget for cached artifact blobs.
+
+The cache used to be bounded by entry count alone. Each entry holds every
+*encoded* artifact of one step — a rendered view set is several PNGs and a
+GeoTIFF — so 256 entries could be gigabytes of resident bytes on a long demo.
+Overridable with ``SATQUERY_CACHE_MB``."""
+
+
+def _cache_budget_bytes() -> int:
+    """Read ``SATQUERY_CACHE_MB``, falling back to the default on anything odd."""
+    raw = os.environ.get("SATQUERY_CACHE_MB", "").strip()
+    return int(raw) << 20 if raw.isdigit() else DEFAULT_CACHE_BYTES
+
+
+def _entry_bytes(entry: CachedStep) -> int:
+    """The bytes an entry keeps resident: its encoded artifact blobs."""
+    return sum(
+        len(blob) for artifact in entry.artifacts for blob in artifact.blobs.values()
+    )
+
+
 class ExecutionCache:
     """An in-process cache of deterministic tool results.
 
@@ -189,28 +211,53 @@ class ExecutionCache:
     bytes is what makes a cache hit actually cheap: without them a replay would
     re-read the rasters and re-encode every PNG, and the only thing saved would
     be the arithmetic, which was never the expensive part.
+
+    Bounded twice: by entry count and by resident bytes. Eviction is oldest
+    first on either limit.
     """
 
-    def __init__(self, max_entries: int = 256) -> None:
-        """Create a cache holding at most *max_entries* results."""
+    def __init__(self, max_entries: int = 256, max_bytes: int | None = None) -> None:
+        """Create a cache holding at most *max_entries* results and *max_bytes* of blobs."""
         self.max_entries = max_entries
+        self.max_bytes = max_bytes if max_bytes is not None else _cache_budget_bytes()
         self._entries: dict[str, CachedStep] = {}
+        self._sizes: dict[str, int] = {}
+        self.resident_bytes = 0
 
     def get(self, key: str) -> CachedStep | None:
         """Return a cached step, or None."""
         return self._entries.get(key)
 
     def put(self, key: str, entry: CachedStep) -> None:
-        """Store a step, evicting the oldest entry when full."""
+        """Store a step, evicting the oldest entries until both limits hold.
+
+        An entry larger than the whole budget is not cached at all: caching it
+        would evict everything else to hold one result.
+        """
         if key in self._entries:
             return
-        if len(self._entries) >= self.max_entries:
-            self._entries.pop(next(iter(self._entries)))
+        size = _entry_bytes(entry)
+        if size > self.max_bytes:
+            return
+        while self._entries and (
+            len(self._entries) >= self.max_entries
+            or self.resident_bytes + size > self.max_bytes
+        ):
+            self._evict_oldest()
         self._entries[key] = entry
+        self._sizes[key] = size
+        self.resident_bytes += size
+
+    def _evict_oldest(self) -> None:
+        oldest = next(iter(self._entries))
+        del self._entries[oldest]
+        self.resident_bytes -= self._sizes.pop(oldest)
 
     def clear(self) -> None:
         """Drop every entry."""
         self._entries.clear()
+        self._sizes.clear()
+        self.resident_bytes = 0
 
     def __len__(self) -> int:
         """Number of cached results."""
@@ -231,6 +278,7 @@ class ExecutionReport:
     errors: list[ErrorItem] = field(default_factory=list)
     data: dict[str, Any] = field(default_factory=dict)
     gsd_out_of_range: bool = False
+    cancelled: bool = False
 
     def by_step(self, step: int) -> Execution | None:
         """Return the execution record for one step."""
@@ -257,6 +305,7 @@ class DagExecutor:
         max_parallel: int = MAX_PARALLEL_TOOLS,
         max_parallel_gpu: int = MAX_PARALLEL_GPU_TOOLS,
         emit: Emit | None = None,
+        gates: DeviceGates | None = None,
     ) -> None:
         """Wire the executor to a registry, an implementation table and a store.
 
@@ -264,14 +313,18 @@ class DagExecutor:
         ``step_completed`` events of API_CONTRACT §5 as they happen. ``None`` —
         the default, and what ``/v1/analyze`` passes — makes every emission a
         single ``is None`` check.
+
+        *gates* is the process-wide :class:`DeviceGates` the application owns.
+        Every executor serving a request must share one, or two requests each
+        hold their own GPU permit. Left ``None`` — tests, scripts — the executor
+        gets a private set sized from *max_parallel* / *max_parallel_gpu*.
         """
         self.registry = registry
         self.tools = dict(tools)
         self.store = store
         self.cache = cache if cache is not None else DEFAULT_CACHE
         self.emit = emit
-        self._cpu = asyncio.Semaphore(max_parallel)
-        self._gpu = asyncio.Semaphore(max_parallel_gpu)
+        self.gates = gates if gates is not None else DeviceGates(max_parallel, max_parallel_gpu)
 
     async def run(
         self,
@@ -282,8 +335,15 @@ class DagExecutor:
         slots: Mapping[str, Any] | None = None,
         seed: int = 0,
         question: str = "",
+        cancelled: asyncio.Event | None = None,
     ) -> ExecutionReport:
         """Execute every step of the plan in dependency order.
+
+        *cancelled*, when set between waves, stops the DAG at the next step
+        boundary: the wave in flight finishes (a worker thread cannot be killed),
+        every step not yet started is recorded ``SKIPPED`` with the reason, and
+        the partial report is returned. This is the deterministic half of
+        ``DELETE /v1/jobs/{id}``; the request-level half is the task cancel.
 
         Raises:
             ToolFailedNoFallbackError: A non-optional step could not be recovered.
@@ -297,6 +357,10 @@ class DagExecutor:
 
         pending = {step.step: step for step in plan.steps}
         while pending:
+            if cancelled is not None and cancelled.is_set():
+                self._skip_all(pending, state, report, "cancelled by the client")
+                report.cancelled = True
+                break
             ready = sorted(
                 (
                     step
@@ -308,23 +372,7 @@ class DagExecutor:
             if not ready:
                 # Unreachable for a linted table, but a cycle must not hang the
                 # request: skip what is left and say so.
-                for step in sorted(pending.values(), key=lambda s: s.step):
-                    execution = self._skipped(step, "the step's dependencies form a cycle")
-                    report.executions.append(execution)
-                    state[step.step] = _StepState(ToolStatus.SKIPPED)
-                    # Without this the client would leave these nodes PENDING
-                    # for ever, which reads as a hang rather than a skip.
-                    emit_to(
-                        self.emit,
-                        "step_completed",
-                        {
-                            "step": execution.step,
-                            "status": execution.status.value,
-                            "duration_ms": execution.duration_ms,
-                            "confidence": execution.confidence,
-                            "output_refs": [],
-                        },
-                    )
+                self._skip_all(pending, state, report, "the step's dependencies form a cycle")
                 break
 
             for step in ready:
@@ -339,6 +387,14 @@ class DagExecutor:
                     },
                 )
 
+            # The cold-start allowance is a property of the *wave*, not of the
+            # cold tool alone: a first-time checkpoint load holds the GIL, and a
+            # warmed CPU tool running beside it inherits the stall. Budgeting it
+            # at steady state failed spectral_index_analyzer (270 ms warm) next
+            # to a cold detector, and that ran a good change scene into a
+            # templated answer — on whether some earlier request had happened
+            # to warm the detector first.
+            wave_cold = any(step.tool not in _WARMED for step in ready)
             outcomes = await asyncio.gather(
                 *(
                     self._run_step(
@@ -354,6 +410,7 @@ class DagExecutor:
                         slots=dict(slots or {}),
                         seed=seed,
                         question=question,
+                        wave_cold=wave_cold,
                     )
                     for step in ready
                 )
@@ -441,6 +498,7 @@ class DagExecutor:
         slots: dict[str, Any],
         seed: int,
         question: str = "",
+        wave_cold: bool = False,
     ) -> tuple[Execution, ToolResult | None, CachedStep | None]:
         """Resolve, match, run and record one step."""
         # A dependency that produced nothing only blocks this step when this step
@@ -556,6 +614,7 @@ class DagExecutor:
             grid=grid,
             fallback_of=decision.fallback_of,
             report=report,
+            wave_cold=wave_cold,
         )
 
         degraded = any(state[d].status is ToolStatus.DEGRADED for d in step.depends_on)
@@ -574,6 +633,7 @@ class DagExecutor:
         grid: str,
         fallback_of: str | None,
         report: ExecutionReport,
+        wave_cold: bool = False,
     ) -> tuple[Execution, ToolResult | None, CachedStep | None]:
         """Run one tool, falling back once on failure."""
         attempts: list[tuple[ToolSpec, str | None]] = [(spec, fallback_of)]
@@ -624,7 +684,9 @@ class DagExecutor:
 
             started = time.perf_counter()
             try:
-                result = await self._guarded(implementation, candidate, context, step)
+                result = await self._guarded(
+                    implementation, candidate, context, step, report, wave_cold=wave_cold
+                )
             except Exception as error:  # noqa: BLE001 - a tool failure is data, not a crash
                 last_error = f"{type(error).__name__}: {error}"
                 report.errors.append(
@@ -696,26 +758,49 @@ class DagExecutor:
         )
 
     async def _guarded(
-        self, implementation: Tool, spec: ToolSpec, context: ToolContext, step: PlannedStep
+        self,
+        implementation: Tool,
+        spec: ToolSpec,
+        context: ToolContext,
+        step: PlannedStep,
+        report: ExecutionReport,
+        *,
+        wave_cold: bool = False,
     ) -> ToolResult:
-        """Run a tool under the right semaphore and its per-step timeout.
+        """Run a tool under the right device gate and its per-step timeout.
 
-        The timeout unblocks the request; it cannot kill the worker thread, so a
-        genuinely wedged tool leaks one thread rather than the whole analysis.
-        Treating a timeout exactly like a failure is what the contract asks for.
+        The timeout unblocks the request; it cannot kill the worker thread. The
+        gate keeps the device permit with the *thread* until it ends (see
+        :mod:`satquery.agent.concurrency`), and a timeout that leaves a GPU
+        thread running is recorded on the report so the trace says the box is
+        carrying work nobody is waiting for. Treating a timeout exactly like a
+        failure is what the contract asks for.
         """
         default_ms = max(TIMEOUT_FACTOR * spec.est_ms, MIN_TIMEOUT_MS)
-        if spec.name not in _WARMED:
+        if wave_cold or spec.name not in _WARMED:
             default_ms = max(default_ms, COLD_START_TIMEOUT_MS)
         # An explicit timeout_ms in the policy table still wins: the allowance is
         # a better default, not an override of a deliberate decision.
         timeout_ms = int(step.params.get("timeout_ms", default_ms))
-        semaphore = self._gpu if spec.device is Device.ROCM_0 else self._cpu
-        async with semaphore:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(implementation.run, context, step.params),
-                timeout=timeout_ms / 1000.0,
+        try:
+            result = await self.gates.run(
+                spec.device,
+                spec.name,
+                lambda: asyncio.to_thread(implementation.run, context, step.params),
+                timeout_ms=timeout_ms,
             )
+        except ToolTimeoutError as error:
+            if error.leaked and spec.device is Device.ROCM_0:
+                report.warnings.append(
+                    WarningItem(
+                        code="TOOL_TIMEOUT_LEAKED_PERMIT",
+                        message=(
+                            f"{spec.name} exceeded its {timeout_ms} ms budget and its "
+                            "thread is still holding the GPU; later GPU steps wait for it"
+                        ),
+                    )
+                )
+            raise
         # Only on success: a tool that failed may not have got as far as loading,
         # and charging it the steady-state budget next time would hide that.
         _WARMED.add(spec.name)
@@ -751,6 +836,34 @@ class DagExecutor:
             fallback_of=fallback_of,
             error=result.error,
         )
+
+    def _skip_all(
+        self,
+        pending: Mapping[int, PlannedStep],
+        state: dict[int, _StepState],
+        report: ExecutionReport,
+        reason: str,
+    ) -> None:
+        """Record every step still pending as ``SKIPPED`` and tell the client.
+
+        Without the ``step_completed`` events the client would leave these
+        nodes PENDING for ever, which reads as a hang rather than a skip.
+        """
+        for step in sorted(pending.values(), key=lambda s: s.step):
+            execution = self._skipped(step, reason)
+            report.executions.append(execution)
+            state[step.step] = _StepState(ToolStatus.SKIPPED)
+            emit_to(
+                self.emit,
+                "step_completed",
+                {
+                    "step": execution.step,
+                    "status": execution.status.value,
+                    "duration_ms": execution.duration_ms,
+                    "confidence": execution.confidence,
+                    "output_refs": [],
+                },
+            )
 
     def _skipped(self, step: PlannedStep, reason: str) -> Execution:
         """Record a step that never ran."""

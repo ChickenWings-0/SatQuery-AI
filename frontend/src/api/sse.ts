@@ -22,6 +22,8 @@
 export interface SseFrame {
   event: string
   data: string
+  /** The frame's `id:` field — the job's event sequence number — when sent. */
+  id: string | null
 }
 
 const FRAME_BOUNDARY = /\r\n\r\n|\n\n|\r\r/
@@ -29,6 +31,7 @@ const FRAME_BOUNDARY = /\r\n\r\n|\n\n|\r\r/
 /** Parse one complete frame's raw text. Returns null for comment-only frames. */
 export function parseFrame(raw: string): SseFrame | null {
   let event = 'message'
+  let id: string | null = null
   const data: string[] = []
 
   for (const line of raw.split(/\r\n|\n|\r/)) {
@@ -41,10 +44,11 @@ export function parseFrame(raw: string): SseFrame | null {
 
     if (field === 'event') event = value
     else if (field === 'data') data.push(value)
-    // `id` and `retry` are unused: this stream never reconnects.
+    else if (field === 'id') id = value
+    // `retry` is unused: reconnection is the caller's decision, not the stream's.
   }
 
-  return data.length === 0 ? null : { event, data: data.join('\n') }
+  return data.length === 0 ? null : { event, data: data.join('\n'), id }
 }
 
 /**

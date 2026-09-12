@@ -37,7 +37,7 @@ import json
 import random
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from satquery.training.corpus_builder import CorpusError, CorpusSource
 
@@ -129,7 +129,12 @@ def _rsvqa_payload(base: Path, suffix: str, kind: str) -> list[dict[str, Any]]:
             "  uv run python scripts/fetch_sources.py --source rsvqa_hr"
         )
     payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload[next(iter(payload))]
+    if not isinstance(payload, dict) or not payload:
+        raise CorpusError(f"{path}: expected a one-key JSON object wrapping the table")
+    table = payload[next(iter(payload))]
+    if not isinstance(table, list):
+        raise CorpusError(f"{path}: expected the wrapped table to be a JSON array")
+    return cast(list[dict[str, Any]], table)
 
 
 def iter_rsvqa_hr(

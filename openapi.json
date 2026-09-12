@@ -12,7 +12,7 @@
           "health"
         ],
         "summary": "Service, device and model health",
-        "description": "Report service health.\n\n``device.igpu_masked`` asserts that ``HIP_VISIBLE_DEVICES=0`` took effect. A\n``false`` there is a red flag before any demo.",
+        "description": "Report service health.\n\n``device.igpu_masked`` asserts that ``HIP_VISIBLE_DEVICES=0`` took effect. A\n``false`` there is a red flag before any demo. ``leaked_gpu_permits`` is the\nother one: a timed-out GPU tool whose thread is still on the card.",
         "operationId": "health_v1_health_get",
         "responses": {
           "200": {
@@ -182,7 +182,7 @@
           "jobs"
         ],
         "summary": "Poll one job's progress",
-        "description": "Return the job's current stage, progress and \u2014 once finished \u2014 its result.",
+        "description": "Return the job's current stage, progress and \u2014 once finished \u2014 its result.\n\nA job the store no longer holds \u2014 evicted, or from before a restart \u2014 is\nanswered from its persisted trace when one exists: the trace store is the\ndurable half by design, and a client reconnecting after a server restart\nshould get its answer rather than a 404 it cannot tell from \"never existed\".",
         "operationId": "get_job_v1_jobs__job_id__get",
         "parameters": [
           {
@@ -217,6 +217,60 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Cancel a running job",
+        "description": "Ask a running job to stop. Best-effort, and honest about what that means.\n\nThe tool step in flight finishes \u2014 a worker thread cannot be killed \u2014 and no\nfurther step starts. The job then ends with an ``error`` event carrying\n``JOB_CANCELLED``, so an open events stream closes the way it would for any\nother failure. ``202`` because the stop is requested, not yet done.",
+        "operationId": "cancel_job_v1_jobs__job_id__delete",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or evicted job."
+          },
+          "409": {
+            "description": "The job has already finished.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/jobs/{job_id}/events": {
@@ -225,7 +279,7 @@
           "jobs"
         ],
         "summary": "Server-sent progress events for one job",
-        "description": "Stream the job's events, replaying everything that already happened.\n\nA subscriber that connects late \u2014 the normal case, since the client needs the\n``job_id`` from the 202 first \u2014 receives the buffered history before the live\ntail, so the DAG can always be drawn from the ``plan`` event.",
+        "description": "Stream the job's events, replaying everything that already happened.\n\nA subscriber that connects late \u2014 the normal case, since the client needs the\n``job_id`` from the 202 first \u2014 receives the buffered history before the live\ntail, so the DAG can always be drawn from the ``plan`` event. One that\n*reconnects* sends the last ``id:`` it saw and receives only the rest.",
         "operationId": "job_events_v1_jobs__job_id__events_get",
         "parameters": [
           {
@@ -235,6 +289,40 @@
             "schema": {
               "type": "string",
               "title": "Job Id"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Resume after this event id; the query form of Last-Event-ID.",
+              "title": "After"
+            },
+            "description": "Resume after this event id; the query form of Last-Event-ID."
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
             }
           }
         ],
@@ -539,6 +627,20 @@
         "title": "ApiError",
         "description": "The error payload (API_CONTRACT \u00a76).\n\n``message`` and ``hint`` are user-facing and safe to display verbatim: never\nleak file paths or stack traces into either."
       },
+      "ApiErrorResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ApiError"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ApiErrorResponse",
+        "description": "Wire envelope for :class:`ApiError` \u2014 every non-2xx body has this shape."
+      },
       "ArtifactGeo": {
         "properties": {
           "crs": {
@@ -838,6 +940,8 @@
           },
           "query": {
             "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
             "title": "Query",
             "description": "1-1000 chars, UTF-8."
           },
@@ -874,6 +978,8 @@
           },
           "query": {
             "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
             "title": "Query",
             "description": "1-1000 chars, UTF-8."
           },
@@ -1438,6 +1544,27 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Tools Total"
+          },
+          "jobs_running": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Jobs Running",
+            "description": "Async jobs that have not reached a terminal event.",
+            "default": 0
+          },
+          "jobs_retained": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Jobs Retained",
+            "description": "Jobs the in-memory store still holds, running or finished.",
+            "default": 0
+          },
+          "leaked_gpu_permits": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Leaked Gpu Permits",
+            "description": "GPU tool threads that overran their timeout and are still running. Non-zero means the card is busy with work nobody is waiting for; past the process's limit, status is 'degraded'.",
+            "default": 0
           }
         },
         "additionalProperties": false,

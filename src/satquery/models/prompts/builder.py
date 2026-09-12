@@ -115,6 +115,13 @@ class MarkedAnswer:
     key has invented the measurement behind it, which is worth surfacing even
     when the number itself happens to land within tolerance of a real fact."""
 
+    markers: list[tuple[int, str]] = field(default_factory=list)
+    """``(offset, key)`` for every marker, where *offset* is the position in
+    :attr:`text` the marker was removed from. This is what lets the validator
+    bind a number to the key the model attached to it rather than to whichever
+    fact happens to be within tolerance — the stronger signal, which used to be
+    thrown away here before validation ever ran."""
+
 
 def unit_hint(scalar: str) -> str | None:
     """Name the unit a scalar carries, read off its own name segments."""
@@ -265,10 +272,12 @@ def build_prompt(
 
 
 def strip_citation_markers(text: str, sheet: FactSheet | None = None) -> MarkedAnswer:
-    """Split ``[key]`` markers off the generated text.
+    """Split ``[key]`` markers off the generated text, remembering where they were.
 
     The markers are how the prompt makes citation mechanically checkable, but
-    they are not prose. The reader gets the sentence; the trace gets the keys.
+    they are not prose. The reader gets the sentence; the trace gets the keys —
+    and the validator gets the position each key sat at, so it can bind the key
+    to the number immediately before it.
 
     Args:
         text: The raw generation.
@@ -279,17 +288,54 @@ def strip_citation_markers(text: str, sheet: FactSheet | None = None) -> MarkedA
     """
     cited: list[str] = []
     unknown: list[str] = []
-
-    def _take(match: re.Match[str]) -> str:
+    pieces: list[str] = []
+    raw_markers: list[tuple[int, str]] = []
+    cursor = 0
+    length = 0
+    for match in CITATION_MARKER.finditer(text):
+        piece = text[cursor : match.start()]
+        pieces.append(piece)
+        length += len(piece)
         key = match.group("key")
         cited.append(key)
         if sheet is not None and key not in sheet:
             unknown.append(key)
-        return ""
+        raw_markers.append((length, key))
+        cursor = match.end()
+    pieces.append(text[cursor:])
+    cleaned, markers = _collapse_whitespace("".join(pieces), raw_markers)
+    return MarkedAnswer(text=cleaned, cited_keys=cited, unknown_keys=unknown, markers=markers)
 
-    cleaned = CITATION_MARKER.sub(_take, text)
-    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
-    return MarkedAnswer(text=cleaned, cited_keys=cited, unknown_keys=unknown)
+
+def _collapse_whitespace(
+    text: str, markers: list[tuple[int, str]]
+) -> tuple[str, list[tuple[int, str]]]:
+    """Collapse runs of blanks and strip the ends, carrying marker offsets along.
+
+    The old ``re.sub("[ <tab>]{2,}", " ", cleaned).strip()`` did the same to the
+    text but would have left every offset after the first collapsed run wrong.
+    Done by hand so each marker lands on the character it preceded.
+    """
+    out: list[str] = []
+    mapping: list[int] = []  # old index -> new index (for indexes 0..len(text))
+    previous_blank = False
+    for char in text:
+        mapping.append(len(out))
+        if char in " \t":
+            if previous_blank:
+                continue
+            previous_blank = True
+        else:
+            previous_blank = False
+        out.append(char)
+    mapping.append(len(out))
+    collapsed = "".join(out)
+    stripped = collapsed.strip()
+    lead = len(collapsed) - len(collapsed.lstrip())
+    moved = [
+        (min(max(mapping[offset] - lead, 0), len(stripped)), key) for offset, key in markers
+    ]
+    return stripped, moved
 
 
 __all__ = [

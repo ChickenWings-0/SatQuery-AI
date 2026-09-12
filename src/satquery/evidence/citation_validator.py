@@ -20,8 +20,8 @@ Two decisions are deliberate and worth defending:
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
 
@@ -42,6 +42,13 @@ which would sneak a year past the year exclusion."""
 RELATIVE_TOLERANCE: Final[float] = 0.01
 ABSOLUTE_TOLERANCE: Final[float] = 0.05
 TOLERANCE_PIVOT: Final[float] = 10.0
+
+MAX_MARKER_GAP: Final[int] = 3
+"""How far past a numeric span a ``[key]`` marker may sit and still be *its*
+marker: a closing paren or a comma, not a clause. Measured in characters of the
+cleaned text between the span's end and the marker's position."""
+
+_MARKER_GAP: Final[re.Pattern[str]] = re.compile(r"^[\s).,;:]*$")
 
 UNIT_TOKENS: Final[dict[str, frozenset[str]]] = {
     "%": frozenset({"pct", "percent"}),
@@ -99,6 +106,12 @@ class ValidationResult:
     text: str
     citations: list[Citation]
     uncited_numeric_spans: list[str]
+    uncited_reasons: list[str] = field(default_factory=list)
+    """Why each entry of :attr:`uncited_numeric_spans` failed, in the same order:
+    ``NO_MATCH`` (value search found nothing), ``UNKNOWN_KEY`` (the model cited
+    a key the sheet does not have) or ``KEY_VALUE_MISMATCH`` (the key exists and
+    its value is not the number the model wrote next to it). The wire field is
+    frozen as a list of strings; this rides beside it for the trace notes."""
 
     @property
     def has_uncited(self) -> bool:
@@ -206,31 +219,84 @@ def resolve(span: NumericSpan, facts: Iterable[Fact]) -> Fact | None:
     return min(matches, key=lambda fact: (abs(float(fact.value) - span.value), fact.key))
 
 
+def bind_marker(
+    span: NumericSpan,
+    text: str,
+    markers: Sequence[tuple[int, str]],
+    claimed: set[int],
+) -> tuple[int, str] | None:
+    """The ``[key]`` marker that belongs to *span*, if the model attached one.
+
+    The first unclaimed marker within :data:`MAX_MARKER_GAP` characters after the
+    span, with nothing but punctuation between. Each marker binds to one span.
+    """
+    for index, (offset, key) in enumerate(markers):
+        if index in claimed:
+            continue
+        gap = offset - span.end
+        if gap < 0 or gap > MAX_MARKER_GAP:
+            continue
+        if _MARKER_GAP.match(text[span.end : offset]):
+            claimed.add(index)
+            return offset, key
+    return None
+
+
 def validate(
-    text: str, sheet: FactSheet, policy: CitationPolicy = CitationPolicy.FLAG
+    text: str,
+    sheet: FactSheet,
+    policy: CitationPolicy = CitationPolicy.FLAG,
+    markers: Sequence[tuple[int, str]] | None = None,
 ) -> ValidationResult:
     """Bind every numeric claim in *text* to a measurement, or flag it.
 
     Args:
-        text: The synthesised answer.
+        text: The synthesised answer, with any ``[key]`` markers already removed.
         sheet: The measurements the plan actually produced.
         policy: ``FLAG`` keeps the sentence and lists the span; ``STRIP`` removes
             the containing sentence.
+        markers: ``(offset, key)`` pairs from
+            :func:`~satquery.models.prompts.builder.strip_citation_markers`. When a
+            number has a marker attached, the citation must resolve to **that**
+            key — the right number under the wrong key is a fabricated
+            attribution, not a citation. Numbers without a marker fall back to
+            the value search. ``None`` (templated answers) is the value search
+            for everything.
 
     Returns:
         A :class:`ValidationResult` carrying the (possibly rewritten) text, the
         citations that resolved, and the spans that did not.
     """
     facts = sheet.numeric_facts()
+    by_key = {fact.key: fact for fact in facts}
     citations: list[Citation] = []
     uncited: list[NumericSpan] = []
+    reasons: list[str] = []
     seen: set[tuple[str, str]] = set()
+    claimed: set[int] = set()
 
     for span in extract_spans(text):
-        fact = resolve(span, facts)
-        if fact is None:
-            uncited.append(span)
-            continue
+        bound = bind_marker(span, text, markers or (), claimed)
+        if bound is not None:
+            _, key = bound
+            fact = by_key.get(key)
+            if fact is None:
+                uncited.append(span)
+                reasons.append("UNKNOWN_KEY")
+                continue
+            if not (
+                unit_compatible(fact.scalar, span.unit)
+                and within_tolerance(span.value, float(fact.value))
+            ):
+                uncited.append(span)
+                reasons.append("KEY_VALUE_MISMATCH")
+                continue
+        else:
+            fact = resolve(span, facts)
+            if fact is None:
+                uncited.append(span)
+                reasons.append("NO_MATCH")
+                continue
         identity = (span.text, fact.source)
         if identity in seen:
             continue
@@ -245,6 +311,7 @@ def validate(
         text=text,
         citations=citations,
         uncited_numeric_spans=[span.text for span in uncited],
+        uncited_reasons=reasons,
     )
 
 

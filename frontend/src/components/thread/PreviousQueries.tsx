@@ -12,20 +12,9 @@
  * itself, with its real status, is one click away.
  */
 import { DotIcon } from '@/components/ui/icons'
-import { timeOfDay } from '@/format'
-import { useJobStore } from '@/state/job'
+import { relativeTime } from '@/format'
+import { isLive, useJobStore } from '@/state/job'
 import { useUiStore } from '@/state/ui'
-
-/** "Just now", "4 min ago", "2 hours ago", or the clock time past a day. */
-export function relativeTime(epochMs: number, now = Date.now()): string {
-  const seconds = Math.max(0, Math.round((now - epochMs) / 1000))
-  if (seconds < 45) return 'Just now'
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes} min ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`
-  return timeOfDay(epochMs)
-}
 
 export function PreviousQueries() {
   const recentRuns = useUiStore((state) => state.recentRuns)
@@ -56,22 +45,18 @@ export function PreviousQueries() {
       ) : (
         <ul className="mt-3 divide-y divide-line-soft rounded-xl border border-line bg-bg-main/40">
           {recentRuns.map((run) => {
-            const tone =
-              run.traceId === jobId
-                ? phase === 'failed'
-                  ? 'text-fail'
-                  : phase === 'streaming'
-                    ? 'text-accent-warm'
-                    : 'text-ok'
-                : 'text-ok'
+            // The live job's phase is the freshest word on its own entry; every
+            // other entry shows the outcome recorded when it settled.
             const state =
-              run.traceId === jobId
-                ? phase === 'failed'
+              run.traceId === jobId && isLive(phase)
+                ? 'running'
+                : run.traceId === jobId && phase === 'failed'
                   ? 'failed'
-                  : phase === 'streaming'
-                    ? 'running'
-                    : 'done'
-                : 'done'
+                  : run.outcome === 'succeeded'
+                    ? 'done'
+                    : run.outcome
+            const tone =
+              state === 'failed' ? 'text-fail' : state === 'running' ? 'text-accent-warm' : 'text-ok'
             return (
               <li key={run.traceId}>
                 <button

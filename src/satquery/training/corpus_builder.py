@@ -80,7 +80,16 @@ COMPOSITION: Final[dict[CorpusSource, int]] = {
     CorpusSource.DIOR_RSVG: 6_000,
     CorpusSource.EVIDENCE_QA: 3_000,
 }
-"""Target sample count per source (§5). Totals 65,000."""
+"""Target sample count per source (§5). Totals 65,000.
+
+**This total is the plan's, not the budget's.** The 200-step throughput probe
+measured 0.265 samples/s on the 7900 XTX (``runs/throughput-probe``), so one
+pass over 65 000 samples is ~68 h — roughly ten times the "one overnight run"
+the plan assumed. A 12 h epoch is ~11 500 samples. The mix for the next run is
+an owner's decision (proposed: BEN-txt 4 000 · BEN-labels 1 500 · evidence_qa
+2 500 · VRSBench 2 500 · CDVQA 1 000; DIOR-RSVG and RSVQA-HR 0 until resolved)
+and should be applied through ``--composition`` on the build rather than by
+editing this table, so the §5 targets stay on record as the goal."""
 
 TRACK: Final[dict[CorpusSource, str]] = {
     CorpusSource.BIGEARTHNET_V2: "A",
@@ -1902,6 +1911,37 @@ def take(samples: Sequence[CorpusSample], target: int, rng: random.Random) -> li
     return [sample for index, sample in enumerate(samples) if index in chosen]
 
 
+VAL_SHARE: Final[float] = 0.10
+"""The share of each source's §5 target reserved for its validation split.
+
+Subsampling used to draw one uniform reservoir per *source* and split it
+afterwards, so a source's validation count was whatever the draw happened to
+contain: with BigEarthNet's few-percent validation share and a 200-sample probe
+target, the expected count was a handful and zero was a live outcome — and
+nothing said so. The split is now decided when the target is allocated, so
+every source that offers validation samples keeps at least one."""
+
+
+def allocate_split(
+    target: int | None, offered_train: int, offered_val: int, val_share: float = VAL_SHARE
+) -> tuple[int, int]:
+    """How many ``(train, val)`` samples one source keeps from what it was offered.
+
+    Validation gets its reserved share first — at least one sample whenever any
+    was offered and the target allows — and whatever a split cannot fill goes to
+    the other, so a source that publishes only one split still fills its whole
+    target. ``None`` keeps everything.
+    """
+    if target is None:
+        return offered_train, offered_val
+    if target <= 0:
+        return 0, 0
+    reserved_val = min(max(1, round(target * val_share)), target - 1) if target > 1 else 0
+    val = min(offered_val, max(reserved_val, target - offered_train))
+    train = min(offered_train, target - val)
+    return train, val
+
+
 class Reservoir:
     """A bounded uniform random sample of a stream (Vitter's Algorithm R).
 
@@ -1940,6 +1980,23 @@ class Reservoir:
     def collect(self) -> list[CorpusSample]:
         """The retained samples, back in the order they arrived."""
         return [sample for _, sample in sorted(self._items, key=lambda pair: pair[0])]
+
+
+def _refuse_empty_split(
+    source: CorpusSource, offered_val: int, kept_val: int, target: int | None
+) -> None:
+    """Fail a build that was offered validation samples and wrote none.
+
+    Raises:
+        CorpusError: *source* had validation candidates, a non-zero target, and
+            still contributes nothing to ``val.jsonl``.
+    """
+    if offered_val and not kept_val and target != 0:
+        raise CorpusError(
+            f"{source.value}: {offered_val} validation sample(s) were offered and none "
+            f"were kept (target {target}); the corpus would have no held-out data for "
+            "this source"
+        )
 
 
 def build_corpus_streaming(
@@ -1981,8 +2038,15 @@ def build_corpus_streaming(
 
     built: dict[CorpusSource, int] = dict.fromkeys(CorpusSource, 0)
     kept: dict[CorpusSource, int] = dict.fromkeys(CorpusSource, 0)
-    reservoirs: dict[CorpusSource, Reservoir] = {
-        source: Reservoir(targets.get(source), rng) for source in CorpusSource
+    # One reservoir per (source, split), each able to hold the whole target, so
+    # a source's validation share is decided by :func:`allocate_split` rather
+    # than by the dice. Worst-case memory is two targets per source instead of
+    # one; in practice the validation stream is a small fraction of the train
+    # stream and its reservoir never fills.
+    reservoirs: dict[tuple[CorpusSource, str], Reservoir] = {
+        (source, split): Reservoir(targets.get(source), rng)
+        for source in CorpusSource
+        for split in ("train", "val")
     }
 
     for source, sample in samples:
@@ -1997,16 +2061,22 @@ def build_corpus_streaming(
         if not verdict.accepted:
             continue
         kept[source] += 1
-        reservoirs[source].offer(sample)
+        reservoirs[source, sample.meta.split].offer(sample)
 
     # Only now is anything held: at most one §5 budget's worth of samples.
     reports: list[SourceReport] = []
     train: list[CorpusSample] = []
     val: list[CorpusSample] = []
     for source in CorpusSource:
-        selected = reservoirs[source].collect()
-        source_train = [s for s in selected if s.meta.split == "train"]
-        source_val = [s for s in selected if s.meta.split == "val"]
+        train_pool = reservoirs[source, "train"].collect()
+        val_pool = reservoirs[source, "val"].collect()
+        train_n, val_n = allocate_split(targets.get(source), len(train_pool), len(val_pool))
+        # A uniform subset of a uniform reservoir is still uniform.
+        source_train = take(train_pool, train_n, rng)
+        source_val = take(val_pool, val_n, rng)
+        _refuse_empty_split(
+            source, reservoirs[source, "val"].seen, len(source_val), targets.get(source)
+        )
         train.extend(source_train)
         val.extend(source_val)
         reports.append(
@@ -2069,9 +2139,12 @@ def build_corpus(
     for source in CorpusSource:
         built = list(sources.get(source, ()))
         kept, index = deduplicate(built, index)
-        selected = take(kept, targets.get(source, len(kept)), rng)
-        source_train = [s for s in selected if s.meta.split == "train"]
-        source_val = [s for s in selected if s.meta.split == "val"]
+        train_pool = [s for s in kept if s.meta.split == "train"]
+        val_pool = [s for s in kept if s.meta.split == "val"]
+        train_n, val_n = allocate_split(targets.get(source), len(train_pool), len(val_pool))
+        source_train = take(train_pool, train_n, rng)
+        source_val = take(val_pool, val_n, rng)
+        _refuse_empty_split(source, len(val_pool), len(source_val), targets.get(source))
         train.extend(source_train)
         val.extend(source_val)
         reports.append(
@@ -2126,6 +2199,7 @@ __all__ = [
     "LeakageError",
     "Message",
     "Reservoir",
+    "VAL_SHARE",
     "SampleMeta",
     "SourceReport",
     "SourceView",
@@ -2158,6 +2232,7 @@ __all__ = [
     "plan_augmentations",
     "read_jsonl",
     "sha256_of",
+    "allocate_split",
     "take",
     "unit_suffix",
     "write_jsonl",

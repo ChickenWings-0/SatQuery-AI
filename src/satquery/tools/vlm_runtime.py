@@ -251,7 +251,12 @@ def synthesise(
     # A grounding answer is boxes by contract, so its coordinates are validated
     # as what they are — positions, not measurements. See box_format.strip_boxes.
     claims = strip_boxes(marked.text) if task is TaskType.GROUNDING else marked.text
-    checked = validate(claims, ctx.facts)
+    # Key-aware: a number the model attached a [key] to must resolve to *that*
+    # key. Grounding answers are boxes, whose removal shifts every offset, so
+    # they keep the value search (they carry no citations by contract anyway).
+    checked = validate(
+        claims, ctx.facts, markers=None if task is TaskType.GROUNDING else marked.markers
+    )
 
     notes: list[str] = []
     if not views:
@@ -261,7 +266,12 @@ def synthesise(
     if checked.uncited_numeric_spans:
         notes.append(
             "the answer states numbers with no measurement behind them: "
-            + ", ".join(checked.uncited_numeric_spans)
+            + ", ".join(
+                f"{span} ({reason})"
+                for span, reason in zip(
+                    checked.uncited_numeric_spans, checked.uncited_reasons, strict=False
+                )
+            )
         )
     if marked.unknown_keys:
         notes.append(
@@ -293,7 +303,11 @@ def synthesise(
                     "fact_keys": list(prompt.fact_keys),
                     "cited_keys": marked.cited_keys,
                     "unknown_keys": marked.unknown_keys,
+                    # Carried so the aggregator's pass over the final answer
+                    # can be key-aware too; the two validations then agree.
+                    "citation_markers": [[offset, key] for offset, key in marked.markers],
                     "uncited_numeric_spans": checked.uncited_numeric_spans,
+                    "uncited_reasons": checked.uncited_reasons,
                     "truncated": generated.truncated,
                 },
             )

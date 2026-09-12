@@ -260,6 +260,30 @@ export const createJob = (
   signal?: AbortSignal,
 ) => postForm<JobAccepted>('/v1/jobs', submission(files, query, options), signal)
 
+/**
+ * Ask the server to stop a running job (`DELETE /v1/jobs/{id}`, §4.10).
+ *
+ * Best-effort on both sides: the server lets the tool step in flight finish
+ * and skips the rest, then ends the job with an `error{JOB_CANCELLED}` event
+ * that closes any open stream. A 409 means the job had already finished — not
+ * a failure worth showing, so it resolves rather than throws.
+ */
+export async function cancelJob(jobId: string, signal?: AbortSignal): Promise<JobStatusResponse | null> {
+  const response = await send(
+    `/v1/jobs/${jobId}`,
+    { method: 'DELETE', headers: { accept: 'application/json' } },
+    signal,
+    TIMEOUT.json,
+  )
+  if (response.status === 409) return null
+  if (!response.ok) throw await toError(response)
+  try {
+    return (await response.json()) as JobStatusResponse
+  } catch {
+    return null
+  }
+}
+
 /** The URL of one artifact. Immutable and cacheable for ever (§4.6). */
 export function artifactUrl(ref: ArtifactRef): string | null {
   return ref.url ? `${BASE}${ref.url}` : null
@@ -268,9 +292,19 @@ export function artifactUrl(ref: ArtifactRef): string | null {
 // ----------------------------------------------------------------------- SSE
 
 export interface StreamHandlers {
-  onEvent: (event: JobEvent) => void
+  /** `id` is the frame's sequence number (§5), or null on a stream without ids. */
+  onEvent: (event: JobEvent, id: string | null) => void
   /** Transport failures and contract violations both land here. */
   onError?: (error: unknown) => void
+}
+
+export interface StreamOptions {
+  /**
+   * The last event id this client has already applied. Sent as
+   * `Last-Event-ID`, so the server replays only what follows it (§5). Omit
+   * for a fresh subscription, which replays the whole history.
+   */
+  lastEventId?: string | null
 }
 
 /**
@@ -292,15 +326,16 @@ export interface StreamHandlers {
  *     reads as an infinitely slow GPU step. The heartbeat is what distinguishes
  *     them, so silence past {@link STREAM_STALL_MS} aborts the read.
  *
- * The stream is deliberately *not* reconnected. Every event is replayed to a
- * late subscriber, so a resubscribe would be safe — but a run that lost its
- * server mid-flight is a fact the operator needs to see, and silently
- * re-succeeding hides it. The caller offers a retry instead.
+ * The stream does not reconnect *itself*: the decision belongs to the caller,
+ * who knows whether the job is worth reattaching to (see `@/thread/resume`).
+ * What it does provide is the means — every frame's `id` reaches the handler,
+ * and `options.lastEventId` asks the server for only what follows it.
  */
 export async function streamJob(
   jobId: string,
   handlers: StreamHandlers,
   signal?: AbortSignal,
+  options: StreamOptions = {},
 ): Promise<void> {
   const controller = new AbortController()
   const abort = () => controller.abort()
@@ -319,8 +354,10 @@ export async function streamJob(
   let terminated = false
   try {
     touch()
+    const headers: Record<string, string> = { accept: 'text/event-stream' }
+    if (options.lastEventId) headers['Last-Event-ID'] = options.lastEventId
     const response = await fetch(`${BASE}/v1/jobs/${jobId}/events`, {
-      headers: { accept: 'text/event-stream' },
+      headers,
       signal: controller.signal,
     })
     if (!response.ok) throw await toError(response)
@@ -329,7 +366,7 @@ export async function streamJob(
       // A contract violation is surfaced, not swallowed: §2 is explicit that an
       // unknown value must be reported rather than silently coerced.
       const event = parseJobEvent(frame.event, frame.data)
-      handlers.onEvent(event)
+      handlers.onEvent(event, frame.id)
       if (event.type === 'done' || event.type === 'error') {
         terminated = true
         break

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
-from satquery.api.uploads import parse_options, spooled_uploads
+from satquery.api.uploads import parse_options, spooled_uploads_async
 from satquery.core.config import Settings, get_settings
 from satquery.ingest.pipeline import ingest
 from satquery.schemas.api import ValidateResponse
-from satquery.schemas.enums import PairType
 
 router = APIRouter(tags=["validate"])
 
@@ -33,12 +33,12 @@ async def validate(
     UI which questions to offer.
     """
     parsed = parse_options(options)
-    hint = PairType(parsed.pair_type_hint) if parsed.pair_type_hint else None
 
-    with spooled_uploads(images, max_bytes=settings.max_upload_mb << 20) as sources:
-        result = ingest(
+    async with spooled_uploads_async(images, max_bytes=settings.max_upload_mb << 20) as sources:
+        result = await asyncio.to_thread(
+            ingest,
             sources,
-            pair_type_hint=hint,
+            pair_type_hint=parsed.pair_type,
             roles=parsed.roles,
             max_images=settings.max_images,
         )
