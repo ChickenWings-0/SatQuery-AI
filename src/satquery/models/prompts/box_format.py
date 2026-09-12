@@ -52,6 +52,24 @@ _TAGGED = re.compile(
 _BODY = re.compile(_BOX_BODY)
 _JSON_BLOCK = re.compile(r"\[\s*\{.*?\}\s*\]", re.DOTALL)
 
+NONE_ANSWER: Final[str] = "NONE"
+"""The one non-box grounding answer the system prompt allows."""
+
+_CANONICAL_BOX: Final[str] = (
+    rf"{re.escape(REF_START)}[^<>]+{re.escape(REF_END)}"
+    rf"{re.escape(BOX_START)}\(\d{{1,4}},\d{{1,4}}\),\(\d{{1,4}},\d{{1,4}}\){re.escape(BOX_END)}"
+)
+CANONICAL_ANSWER: Final[re.Pattern[str]] = re.compile(
+    rf"(?:{_CANONICAL_BOX})+|{NONE_ANSWER}"
+)
+"""What a GROUNDING assistant turn must match in full: one or more *tagged*
+boxes — name and coordinates, no separators — or exactly ``NONE``. This is the
+format the system prompt's TASK block dictates (``templates.GROUNDED_V1``), and
+the corpus builder refuses any grounding answer that does not match it. Half
+of the previous corpus's grounding targets were bare ``<|box_start|>…`` with no
+object reference, contradicting the instruction they were trained under
+(ML_PIPELINE_RECOVERY_PLAN fact 13)."""
+
 _SENTENCE_BREAK: Final[re.Pattern[str]] = re.compile(r"[\n\r.;!?]")
 """A label does not span a sentence. Only the text after the last break is
 considered, so prose before a box cannot be swallowed whole."""
@@ -180,6 +198,36 @@ def serialise(boxes: Iterable[NormalisedBox]) -> str:
         + f"{BOX_START}({box.x_min},{box.y_min}),({box.x_max},{box.y_max}){BOX_END}"
         for box in boxes
     )
+
+
+def serialise_answer(boxes: Iterable[NormalisedBox]) -> str:
+    """Render a *grounding answer*: every box tagged with its name, or ``NONE``.
+
+    The strict form of :func:`serialise` for the corpus. A box without a label
+    cannot be written in the format the system prompt dictates, so it is an
+    error here rather than a bare box in the training data.
+
+    Raises:
+        BoxFormatError: A box carries no label.
+    """
+    listed = list(boxes)
+    if not listed:
+        return NONE_ANSWER
+    for box in listed:
+        if not box.label or not box.label.strip():
+            raise BoxFormatError(
+                f"box ({box.x_min},{box.y_min}),({box.x_max},{box.y_max}) has no label; a "
+                "grounding answer names every box or the prompt's format is violated"
+            )
+    text = serialise(listed)
+    if not is_canonical_answer(text):  # pragma: no cover - serialise() guarantees it
+        raise BoxFormatError(f"serialised answer is not canonical: {text!r}")
+    return text
+
+
+def is_canonical_answer(text: str) -> bool:
+    """True when *text* is exactly what the GROUNDING instruction asks for."""
+    return CANONICAL_ANSWER.fullmatch(text) is not None
 
 
 def strip_boxes(text: str) -> str:
@@ -389,13 +437,17 @@ __all__ = [
     "BOX_END",
     "BOX_SCALE",
     "BOX_START",
+    "CANONICAL_ANSWER",
+    "NONE_ANSWER",
     "REF_END",
     "REF_START",
     "BoxFormatError",
     "NormalisedBox",
     "from_pixels",
+    "is_canonical_answer",
     "parse",
     "parse_boxes",
     "serialise",
+    "serialise_answer",
     "serialise_boxes",
 ]

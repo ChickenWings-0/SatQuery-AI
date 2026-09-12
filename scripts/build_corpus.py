@@ -72,7 +72,9 @@ from satquery.training.corpus_builder import (  # noqa: E402
     from_dior_rsvg,
     from_rsvqa,
     from_vrsbench,
+    noncanonical_grounding,
     phash,
+    read_jsonl,
     sha256_of,
 )
 from satquery.training.local_sources import READERS as LOCAL_READERS  # noqa: E402
@@ -317,6 +319,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "patch's measured FactSheet and the views the render pass actually wrote, "
         "which is what lets evidence_qa be generated in-band (§4.6). Defaults to "
         "<views-root>/bigearthnet_v2/factsheets.jsonl when that file exists.",
+    )
+    parser.add_argument(
+        "--require-sources",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="After the build, refuse (exit 5) if any requested source contributed "
+        "no train samples, or fewer than half of min(target, built) — the way a "
+        "source quietly loses 90 %% of itself (ML_PIPELINE_RECOVERY_PLAN §5.3). "
+        "--no-require-sources only for a deliberate partial build.",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Build and report, but write nothing."
@@ -790,6 +801,11 @@ def _iter_source_samples(
         and CorpusSource.EVIDENCE_QA in {CorpusSource(name) for name in args.sources}
     )
     rows = load_rows_by_split(source, ("train", "validation"), args.limit, args.download)
+    # BigEarthNet patches whose label-table samples have been emitted. The text
+    # export publishes ~20 annotation rows per patch; the patch's own labels and
+    # FactSheet (bound from factsheets.jsonl) support one set of label-table
+    # samples and one evidence_qa derivation, not twenty.
+    labelled_patches: set[str] = set()
     for seen, (split, row) in enumerate(rows):
         item_id = str(
             row.get("patch_id") or row.get("image_id") or row.get("pair_id") or seen
@@ -815,6 +831,34 @@ def _iter_source_samples(
             if derive_evidence:
                 for evidence in iter_evidence_qa(sample, rng):
                     yield CorpusSource.EVIDENCE_QA, evidence
+        if (
+            source is CorpusSource.BIGEARTHNET_V2
+            and is_ben_txt_row(enriched)
+            and enriched.get("labels") is not None
+            and item_id not in labelled_patches
+        ):
+            # The text row went to the text builder above. The patch it sits
+            # on also carries a label vector and a FactSheet, which the
+            # label-table builder turns into SCENE_CLASSIFY, presence and
+            # cross-modal samples — and which is the only measured supervision
+            # evidence_qa has (§4.6). Once per patch.
+            labelled_patches.add(item_id)
+            for sample in from_bigearthnet(enriched, rng=rng):
+                if not keep_sample(sample, mode):
+                    continue
+                yield source, sample
+                if derive_evidence:
+                    for evidence in iter_evidence_qa(sample, rng):
+                        yield CorpusSource.EVIDENCE_QA, evidence
+
+
+BEN_TXT_COLUMNS: tuple[str, ...] = ("input", "output", "type")
+"""What makes a BigEarthNet row a text-export annotation rather than a label row."""
+
+
+def is_ben_txt_row(row: Mapping[str, Any]) -> bool:
+    """True for a BigEarthNet.txt annotation row, whatever else was bound onto it."""
+    return all(row.get(column) is not None for column in BEN_TXT_COLUMNS)
 
 
 def convert(
@@ -822,13 +866,17 @@ def convert(
 ) -> list[CorpusSample]:
     """Dispatch one row to its adapter."""
     if source is CorpusSource.BIGEARTHNET_V2:
-        # Two reBEN exports, dispatched on the row's shape. The label table
-        # carries a 19-class vector and builds SCENE_CLASSIFY and presence
-        # questions from it; the text export carries one question/answer pair per
-        # row and no labels at all. Neither builder can read the other's rows.
-        if row.get("labels") is not None:
-            return from_bigearthnet(row, rng=rng)
-        return from_bigearthnet_txt(row, rng=rng)
+        # Two reBEN exports, dispatched on the row's *annotation* shape. The
+        # text export carries one question/answer pair per row (`input`,
+        # `output`, `type`); the label table carries a 19-class vector and no
+        # questions. Dispatching on `labels` — as this used to — sent every
+        # text row to the label-table builder once factsheet binding started
+        # attaching the patch's labels to it, and the corpus silently lost all
+        # of BEN-txt's VQA and GROUNDING supervision. The bound labels stay on
+        # the row: the text builder uses them to name a grounding box.
+        if is_ben_txt_row(row):
+            return from_bigearthnet_txt(row, rng=rng)
+        return from_bigearthnet(row, rng=rng)
     if source is CorpusSource.VRSBENCH:
         return from_vrsbench(row, rng=rng)
     if source is CorpusSource.RSVQA_HR:
@@ -996,6 +1044,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{row.source.value:16s} track {row.track}  built {row.built:>6d}  "
             f"kept {row.kept:>6d}  train {row.train:>6d}  val {row.val:>5d}"
         )
+    composition_path = write_composition(args.out, report, requested)
+    print(f"composition: {composition_path}")
     print(
         f"corpus: {report.train} train / {report.val} val "
         f"({report.dropped_exact} exact and {report.dropped_near} near duplicates dropped)"
@@ -1014,7 +1064,96 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     append_manifest(args, report, tally)
     print(f"written to {args.out}")
+
+    # Two post-build assertions, both exit 5 (plan §5.3, §2.5). The files are
+    # already written — a failed build is inspectable — but a non-zero exit is
+    # what stops run_overnight.sh from training on it.
+    short = composition_shortfalls(report, requested)
+    if short and args.require_sources:
+        print("\nREFUSED — sources below their floor:", file=sys.stderr)
+        for line in short:
+            print(f"  {line}", file=sys.stderr)
+        return EXIT_COMPOSITION
+    if short:
+        print("\nWARNING — sources below their floor (--no-require-sources):")
+        for line in short:
+            print(f"  {line}")
+    bare = [
+        (split, sample_id, answer)
+        for split in ("train", "val")
+        for sample_id, answer in noncanonical_grounding(read_jsonl(args.out / f"{split}.jsonl"))
+    ]
+    if bare:
+        print(
+            f"\nREFUSED — {len(bare)} GROUNDING answer(s) are not in the canonical tagged "
+            f"form, e.g. {bare[0]}",
+            file=sys.stderr,
+        )
+        return EXIT_COMPOSITION
+    print("grounding: every GROUNDING answer is canonical (tagged boxes or NONE)")
     return 0
+
+
+EXIT_COMPOSITION: int = 5
+"""The build wrote its files but the corpus must not be trained on."""
+
+COMPOSITION_NAME: str = "composition.json"
+"""Per-source counts of what was written, beside the JSONL. What
+``train_vlm.py`` counts from the lines must agree with this."""
+
+
+def composition_shortfalls(report: Any, requested: set[CorpusSource]) -> list[str]:
+    """Every requested source that contributed nothing, or under half its floor.
+
+    The floor is ``0.5 × min(target, built)``: a source with fewer candidates
+    than its target is allowed to be small, but not to lose more than half of
+    what it *did* build to dedup and view gaps without someone noticing.
+    """
+    lines: list[str] = []
+    for row in report.sources:
+        if row.source not in requested:
+            continue
+        floor = 0.5 * min(row.target, row.built) if row.target else 0
+        if row.train == 0:
+            lines.append(
+                f"{row.source.value}: 0 train samples (built {row.built}, target {row.target})"
+            )
+        elif row.train < floor:
+            lines.append(
+                f"{row.source.value}: {row.train} train samples < floor {floor:.0f} "
+                f"(built {row.built}, target {row.target})"
+            )
+    return lines
+
+
+def write_composition(out: Path, report: Any, requested: set[CorpusSource]) -> Path:
+    """Write ``composition.json``: per-source counts and the build's totals."""
+    payload = {
+        "built_at": datetime.now(UTC).isoformat(),
+        "seed": report.seed,
+        "prompt_version": report.prompt_version,
+        "requested": sorted(source.value for source in requested),
+        "train": report.train,
+        "val": report.val,
+        "dropped_exact": report.dropped_exact,
+        "dropped_near": report.dropped_near,
+        "sources": {
+            row.source.value: {
+                "track": row.track,
+                "target": row.target,
+                "built": row.built,
+                "kept": row.kept,
+                "train": row.train,
+                "val": row.val,
+            }
+            for row in report.sources
+            if row.built or row.source in requested
+        },
+    }
+    path = Path(out) / COMPOSITION_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
 
 
 MANIFEST_NAME: str = "MANIFEST.md"

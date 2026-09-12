@@ -8,10 +8,13 @@ silent, total failure. One import path makes that harder to get wrong.
 
 from satquery.models.prompts.box_format import (
     BOX_SCALE,
+    NONE_ANSWER,
     BoxFormatError,
     NormalisedBox,
     from_pixels,
+    is_canonical_answer,
     parse_boxes,
+    serialise_answer,
     serialise_boxes,
 )
 from satquery.models.prompts.builder import (
@@ -41,6 +44,7 @@ __all__ = [
     "DEFAULT_VERSION",
     "GROUNDED_V1",
     "MAX_VIEWS",
+    "NONE_ANSWER",
     "TEMPLATES",
     "BoxFormatError",
     "BuiltPrompt",
@@ -53,9 +57,11 @@ __all__ = [
     "build_user_prompt",
     "from_pixels",
     "get_template",
+    "is_canonical_answer",
     "parse_boxes",
     "render_fact_sheet",
     "render_view_index",
+    "serialise_answer",
     "serialise_boxes",
     "strip_citation_markers",
 ]

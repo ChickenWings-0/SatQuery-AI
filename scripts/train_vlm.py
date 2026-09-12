@@ -37,31 +37,46 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from satquery.models.loader import VRAM_BUDGET_BYTES, VramGuardError  # noqa: E402
 from satquery.training.vlm.qlora import (  # noqa: E402
     DEFAULT_PROFILE_PATH,
+    MASK_AUDIT_SAMPLES,
     SANITY_SAMPLES,
     InterruptRequest,
     ProfileError,
     QLoraProfile,
     RunPlan,
     VramEstimate,
+    audit_masks,
     build_peft_model,
     build_trainer,
     checkpoint_step,
     describe_resume,
     estimate_footprint,
     guard_budget,
+    guard_composition,
     guard_images_present,
+    guard_masks,
+    guard_token_budget,
+    image_tokens_per_view,
     install_interrupt_handler,
     latest_checkpoint,
+    layout_record,
     load_corpus,
-    load_model_and_processor,
+    load_model,
+    load_processor,
     load_profile,
     plan_run,
     resolve_target_modules,
     resume_target,
     split_targets,
     trainable_parameter_report,
+    write_layout_record,
+    write_mask_audit,
     write_run_manifest,
 )
+
+EXIT_REFUSED_CORPUS: int = 4
+EXIT_REFUSED_MASKS: int = 5
+"""Exit codes for the pre-flight refusals, so run_overnight.sh can tell "the
+corpus is wrong" from "the collator would not mask" without parsing stderr."""
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -108,6 +123,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=None,
         help="How many checkpoints to keep on disk. The newest is always kept.",
+    )
+    parser.add_argument(
+        "--eval-first",
+        action="store_true",
+        help="Run trainer.evaluate() before the first optimiser step and record it "
+        "in run_manifest.json as zero_shot_eval — the masked baseline every "
+        "later eval is compared against (ML_PIPELINE_RECOVERY_PLAN §3.4).",
+    )
+    parser.add_argument(
+        "--mask-audit-samples",
+        type=int,
+        default=MASK_AUDIT_SAMPLES,
+        help="How many records the pre-flight mask audit collates with the real "
+        "collator before the weights load (0 disables it — for a dry run on a box "
+        "without the views, never for a real run).",
     )
     parser.add_argument(
         "--dry-run",
@@ -203,12 +233,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     profile.apply_env()  # Must precede the first torch import.
     interrupt = InterruptRequest()
 
+    # The trainer verifies its own diet before reading it: every source the
+    # profile expects must be present above its floor (plan §5.3).
+    try:
+        composition = (
+            guard_composition(profile.data.corpus, profile.data.expected_sources)
+            if profile.data.corpus.is_file()
+            else {}
+        )
+    except ProfileError as error:
+        print(f"refusing to start: {error}", file=sys.stderr)
+        return EXIT_REFUSED_CORPUS
+
     limit = SANITY_SAMPLES if args.sanity_check else None
     train_records = load_corpus(
         profile.data.corpus,
         limit=limit,
         max_views=profile.data.max_views_per_sample,
         image_root=args.image_root,
+        # Stratified over (source, task) rather than the file's first 100 lines,
+        # which in a source-ordered corpus is one source and one task (plan §7.6).
+        stratify_seed=profile.train.seed if args.sanity_check else None,
     )
     eval_records = (
         load_corpus(
@@ -230,7 +275,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # A refusal, not a crash: the operator has a corpus to rebuild, and a
         # traceback through PIL is the least useful way to be told so.
         print(f"refusing to start: {error}", file=sys.stderr)
-        return 4
+        return EXIT_REFUSED_CORPUS
 
     plan = plan_run(profile, len(train_records), sanity_check=args.sanity_check)
     estimate = estimate_footprint(profile)
@@ -255,6 +300,71 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("dry run: no weights loaded.")
         return 0
 
+    output_dir = output_dir_for(args, profile)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # The processor first — a 2 MB config — so every check that only needs the
+    # tokenizer and the collator runs before the 16 GB checkpoint is touched.
+    processor = load_processor(profile)
+    tokens_per_view = image_tokens_per_view(profile.data.max_pixels)
+
+    # G3: no sample may overrun the context, or it silently trains on nothing.
+    try:
+        budget = guard_token_budget(
+            train_records + eval_records,
+            getattr(processor, "tokenizer", processor),
+            profile.data.max_seq_len,
+            tokens_per_view,
+            label=str(profile.data.corpus),
+        )
+    except ProfileError as error:
+        print(f"refusing to start: {error}", file=sys.stderr)
+        return EXIT_REFUSED_CORPUS
+    print(
+        f"token budget : {budget.checked} samples · prompt {budget.prompt_min}–"
+        f"{budget.prompt_max} tok · completion {budget.completion_min}–"
+        f"{budget.completion_max} tok · max_seq_len {budget.max_seq_len} · 0 over"
+    )
+
+    # G2: the real collator, on real records, must train on exactly the
+    # completion. The check that would have caught the 19-hour run in 30 s.
+    if args.mask_audit_samples > 0:
+        try:
+            audit = audit_masks(
+                train_records,
+                processor,
+                max_length=profile.data.max_seq_len,
+                tokens_per_view=tokens_per_view,
+                n=args.mask_audit_samples,
+                seed=profile.train.seed,
+            )
+        except ProfileError as error:
+            print(f"refusing to start: {error}", file=sys.stderr)
+            return EXIT_REFUSED_MASKS
+        write_mask_audit(output_dir / "mask_audit.json", audit)
+        print(audit.summary())
+        try:
+            guard_masks(audit)
+        except ProfileError as error:
+            print(f"refusing to start: {error}", file=sys.stderr)
+            return EXIT_REFUSED_MASKS
+    else:
+        print("mask audit   : SKIPPED (--mask-audit-samples 0)")
+
+    layout = layout_record(processor, profile.data.corpus, profile.base_model)
+    if layout["image_tokens_per_view"] != tokens_per_view:
+        print(
+            f"refusing to start: the processor expands a {layout['fixture_view_px']} px "
+            f"view into {layout['image_tokens_per_view']} tokens but the profile's "
+            f"max_pixels={profile.data.max_pixels} implies {tokens_per_view}",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED_MASKS
+    print(
+        f"layout       : {layout['layout_version']} · fingerprint "
+        f"{layout['layout_fingerprint'][:12]} · {tokens_per_view} tok/view"
+    )
+
     from datasets import Dataset, Image
 
     def as_dataset(records: list[dict[str, Any]]) -> Dataset:
@@ -272,7 +382,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     train_dataset = as_dataset(train_records)
     eval_dataset = as_dataset(eval_records) if eval_records else None
 
-    model, processor = load_model_and_processor(profile)
+    model = load_model(profile)
     targets = resolve_target_modules(model, profile.lora)
     llm_targets, vision_targets = split_targets(targets)
     print(f"lora targets : {len(llm_targets)} llm, {len(vision_targets)} vision")
@@ -292,8 +402,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "the vision tower)"
     )
 
-    output_dir = output_dir_for(args, profile)
-    output_dir.mkdir(parents=True, exist_ok=True)
     trainer = build_trainer(
         profile=profile,
         model=model,
@@ -312,6 +420,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "interrupt    : Ctrl+C once checkpoints at the next optimiser step and "
         "stops cleanly; twice aborts immediately."
     )
+    zero_shot_eval: dict[str, Any] | None = None
+    if args.eval_first and eval_dataset is not None:
+        # The number the old run never had: the masked eval loss and token
+        # accuracy *before* any optimiser step, by the same code that reports
+        # every later eval. Without it "the loss went down" has no reference.
+        zero_shot_eval = dict(trainer.evaluate(metric_key_prefix="eval"))
+        print(f"zero-shot    : {json.dumps(zero_shot_eval, default=str)}")
+    elif args.eval_first:
+        print("zero-shot    : SKIPPED (no validation set)")
+
     restore_handlers = install_interrupt_handler(interrupt)
     try:
         result = trainer.train(
@@ -330,6 +448,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     adapter_dir = output_dir / "adapter"
     trainer.model.save_pretrained(adapter_dir)
     processor.save_pretrained(adapter_dir)
+    # The layout the adapter was trained under, beside it: hf_backend refuses
+    # to serve an adapter whose fingerprint its own processor cannot reproduce.
+    write_layout_record(adapter_dir, layout)
     write_run_manifest(
         output_dir / "run_manifest.json",
         {
@@ -342,6 +463,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             "targets": {"llm": llm_targets, "vision": vision_targets},
             "trainable_parameters": counts,
             "metrics": getattr(result, "metrics", {}),
+            "zero_shot_eval": zero_shot_eval,
+            "layout": layout,
+            "composition": composition,
+            "token_budget": budget.model_dump(mode="json", exclude={"offenders"}),
+            "mask_audit": str(output_dir / "mask_audit.json")
+            if args.mask_audit_samples > 0
+            else None,
             "adapter": str(adapter_dir),
             "interrupted": stopped_early,
             "interrupted_by": interrupt.signal_name,
@@ -389,6 +517,10 @@ def resume_command(args: argparse.Namespace, output_dir: Path) -> str:
         parts += ["--save-steps", str(args.save_steps)]
     if args.sanity_check:
         parts.append("--sanity-check")
+    if args.eval_first:
+        # A resumed run has already recorded its zero-shot eval; the flag is
+        # kept so the manifest the resume rewrites carries it again.
+        parts.append("--eval-first")
     parts += ["--resume", "auto"]
     return " ".join(parts)
 

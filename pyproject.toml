@@ -37,15 +37,27 @@ vlm = [
 # function body that needs it, so a checkout without them still type-checks and
 # still runs 400+ tests. Install on the training box with
 # `uv sync --extra vlm-train`.
+#
+# trl, transformers and peft are pinned exactly, not floored. The completion-only
+# masking in satquery.training.vlm.qlora relies on trl's prompt-completion vision
+# collator (`DataCollatorForVisionLanguageModeling._collate_prompt_completion`)
+# and asserts against private trainer attributes (`_is_vision_dataset`,
+# `completion_only_loss`) after construction; the layout fingerprint in
+# satquery.models.prompts.layout depends on the processor's chat template and
+# pixel budget. Every one of those has moved between minor releases
+# (`DataCollatorForCompletionOnlyLM` was removed in trl 0.20; `assistant_only_loss`
+# raises for vision datasets in 1.12). DOCS/ML_PIPELINE_RECOVERY_PLAN.md was
+# verified line by line against exactly these versions; bump them together, and
+# re-run scripts/preflight_train_serve_parity.py when you do.
 vlm-train = [
     "accelerate>=1.11.0",
     "bitsandbytes>=0.48.0",
     "datasets>=4.0.0",
-    "peft>=0.17.0",
+    "peft==0.20.0",
     "tensorboard>=2.19.0",
     "torch>=2.6.0",
-    "transformers>=4.57.0",
-    "trl>=0.24.0",
+    "transformers==5.16.1",
+    "trl==1.12.0",
 ]
 
 # The change-detection training stack. Serving a trained checkpoint needs only
@@ -84,6 +96,7 @@ pythonpath = ["src"]
 addopts = "-q --strict-markers"
 markers = [
     "gpu: needs a ROCm/CUDA device and real weights; excluded in CI with -m 'not gpu'",
+    "integration: needs the Qwen3-VL processor in the local HF cache (no weights, no GPU); skips itself elsewhere",
 ]
 filterwarnings = [
     # Fixtures deliberately include a non-georeferenced PNG and an identity transform.

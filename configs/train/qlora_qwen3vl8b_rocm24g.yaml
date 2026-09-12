@@ -37,6 +37,19 @@ data:
   # 416 lands at 19.05 GiB, which is the line rather than a margin.
   max_pixels: 147456
   max_seq_len: 4096
+  # Minimum train samples per source, verified against the JSONL the run is
+  # about to read (ML_PIPELINE_RECOVERY_PLAN §5.3). The previous corpus lost
+  # three of five sources and the run started anyway. Floors are 0.8x the
+  # "sprint" preset of plan §5.4 (BEN 8000 · VRSBench 6000 · RSVQA-HR 2500 ·
+  # CDVQA 1500 · evidence_qa 2000): the builder reserves 10 % of each target
+  # for validation and dedup takes a little more, so the target itself is not
+  # a reachable floor. Any source below its floor is exit code 4 at start-up.
+  expected_sources:
+    bigearthnet_v2: 6400
+    vrsbench: 4800
+    rsvqa_hr: 2000
+    cdvqa: 1200
+    evidence_qa: 1600
 
 train:
   # Already at the floor: a per-device batch of 1 cannot be halved, so the

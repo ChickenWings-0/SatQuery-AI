@@ -405,22 +405,20 @@ class AdaptedModel:
         """
         from PIL import Image
 
-        content: list[dict[str, Any]] = []
-        for image in prompt.images:
-            content.append({"type": "text", "text": image.label})
-            content.append(
-                {
-                    "type": "image",
-                    "image": Image.fromarray(
-                        np.ascontiguousarray(image.rgb, dtype=np.uint8), mode="RGB"
-                    ),
-                }
-            )
-        content.append({"type": "text", "text": prompt.user})
-        messages = [
-            {"role": "system", "content": [{"type": "text", "text": prompt.system}]},
-            {"role": "user", "content": content},
-        ]
+        from satquery.models.prompts.layout import chat_prompt
+
+        # The same layout function the training records and the serving
+        # backend use, so this probe measures the adapter under the token
+        # stream it was trained on rather than a third hand-built variant.
+        messages = chat_prompt(
+            prompt.system,
+            [image.label for image in prompt.images],
+            prompt.user,
+            images=[
+                Image.fromarray(np.ascontiguousarray(image.rgb, dtype=np.uint8), mode="RGB")
+                for image in prompt.images
+            ],
+        )
 
         inputs = self.processor.apply_chat_template(
             messages,

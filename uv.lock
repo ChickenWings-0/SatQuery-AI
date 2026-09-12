@@ -4171,7 +4171,7 @@ requires-dist = [
     { name = "geopandas", specifier = ">=1.1.4" },
     { name = "lightning", marker = "extra == 'cd'", specifier = ">=2.5.0" },
     { name = "opencv-python-headless", specifier = ">=5.0.0.93" },
-    { name = "peft", marker = "extra == 'vlm-train'", specifier = ">=0.17.0" },
+    { name = "peft", marker = "extra == 'vlm-train'", specifier = "==0.20.0" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
@@ -4190,8 +4190,8 @@ requires-dist = [
     { name = "torchgeo", marker = "extra == 'cd'", specifier = ">=0.7.0" },
     { name = "torchvision", marker = "extra == 'cd'", specifier = ">=0.21.0" },
     { name = "transformers", marker = "extra == 'vlm'", specifier = ">=4.57.0" },
-    { name = "transformers", marker = "extra == 'vlm-train'", specifier = ">=4.57.0" },
-    { name = "trl", marker = "extra == 'vlm-train'", specifier = ">=0.24.0" },
+    { name = "transformers", marker = "extra == 'vlm-train'", specifier = "==5.16.1" },
+    { name = "trl", marker = "extra == 'vlm-train'", specifier = "==1.12.0" },
 ]
 provides-extras = ["vlm", "vlm-train", "cd"]
 
