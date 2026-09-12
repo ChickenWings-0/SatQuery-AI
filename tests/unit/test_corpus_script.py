@@ -294,9 +294,19 @@ def test_evidence_qa_is_generated_in_band_when_factsheets_are_bound(
                     "patch_id": "p1",
                     "input": "What is in this scene?",
                     "output": "Pastures.",
-                    "type": "caption",
+                    "type": "captioning",
                 },
-            )
+            ),
+            (
+                "train",
+                {
+                    "ID": "2",
+                    "patch_id": "p1",
+                    "input": "Does the image depict pastures?",
+                    "output": "yes",
+                    "type": "binary",
+                },
+            ),
         ],
     )
     args = _args(tmp_path, sources=["bigearthnet_v2", "evidence_qa"])
@@ -307,6 +317,17 @@ def test_evidence_qa_is_generated_in_band_when_factsheets_are_bound(
         )
     )
 
+    ben = [s for source, s in samples if source is cb.CorpusSource.BIGEARTHNET_V2]
+    # Both text rows reach the text builder (bound labels no longer hijack the
+    # dispatch), and the patch's label table is built exactly once on top.
+    assert [s.id for s in ben if s.id.startswith("ben2_txt:")] == [
+        "ben2_txt:p1:1", "ben2_txt:p1:2"
+    ]
+    label_table = cb.from_bigearthnet(
+        dict(_factsheet_record("p1", views), view_paths={k: str(v) for k, v in views.items()}),
+        augment=False,
+    )
+    assert sum(1 for s in ben if s.id.startswith("ben2:")) == len(label_table) > 0
     evidence = [s for source, s in samples if source is cb.CorpusSource.EVIDENCE_QA]
     assert evidence, "the bound FactSheet must produce evidence_qa in-band"
     assert all(s.meta.image_sha256 is not None for s in evidence)
@@ -351,3 +372,56 @@ def test_the_manifest_records_every_build(tmp_path: Path) -> None:
     assert lines[0].startswith("# Corpus manifest")
     assert sum(line.startswith("| 20") for line in lines) == 2, "one row per build, appended"
     assert "vrsbench" in lines[-1]
+
+
+# ------------------------------------------------- composition assertion (§5.3)
+
+
+def _report(**rows: tuple[int, int, int]) -> cb.CorpusReport:
+    """``source=(target, built, train)`` → a CorpusReport with val = 0."""
+    return cb.CorpusReport(
+        sources=[
+            cb.SourceReport(
+                source=cb.CorpusSource(name), track=cb.TRACK[cb.CorpusSource(name)],
+                target=target, built=built, kept=built, train=train, val=0,
+            )
+            for name, (target, built, train) in rows.items()
+        ],
+        train=sum(train for _, _, train in rows.values()),
+        val=0, dropped_exact=0, dropped_near=0, seed=1,
+    )
+
+
+def test_a_source_that_silently_vanished_fails_the_build() -> None:
+    """VRSBench rendered 29,615 views and contributed 0 lines; nothing said so."""
+    requested = {cb.CorpusSource.BIGEARTHNET_V2, cb.CorpusSource.VRSBENCH, cb.CorpusSource.CDVQA}
+    report = _report(
+        bigearthnet_v2=(8000, 50_000, 7200),  # healthy
+        vrsbench=(6000, 29_615, 0),  # the failure that happened
+        cdvqa=(1500, 271, 100),  # small source, lost > half of what it built
+        rsvqa_hr=(2500, 0, 0),  # not requested: ignored
+    )
+    short = build_corpus.composition_shortfalls(report, requested)
+    assert short == [
+        "vrsbench: 0 train samples (built 29615, target 6000)",
+        "cdvqa: 100 train samples < floor 136 (built 271, target 1500)",
+    ]
+    healthy = _report(bigearthnet_v2=(8000, 50_000, 7200), cdvqa=(1500, 271, 240))
+    without_vrs = requested - {cb.CorpusSource.VRSBENCH}
+    assert build_corpus.composition_shortfalls(healthy, without_vrs) == []
+
+
+def test_composition_json_records_every_requested_source(tmp_path: Path) -> None:
+    requested = {cb.CorpusSource.BIGEARTHNET_V2, cb.CorpusSource.EVIDENCE_QA}
+    report = _report(bigearthnet_v2=(8000, 9000, 7200), evidence_qa=(2000, 0, 0))
+    path = build_corpus.write_composition(tmp_path, report, requested)
+    written = json.loads(path.read_text())
+    assert path.name == build_corpus.COMPOSITION_NAME
+    assert written["sources"]["bigearthnet_v2"]["train"] == 7200
+    assert written["sources"]["evidence_qa"] == {
+        "track": "A", "target": 2000, "built": 0, "kept": 0, "train": 0, "val": 0
+    }
+    assert "vrsbench" not in written["sources"]
+    assert written["requested"] == ["bigearthnet_v2", "evidence_qa"]
+    assert build_corpus.parse_args([]).require_sources is True
+    assert build_corpus.parse_args(["--no-require-sources"]).require_sources is False

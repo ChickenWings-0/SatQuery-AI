@@ -33,7 +33,9 @@ nothing.
 
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 from typing import Any, Final
 
 import numpy as np
@@ -52,6 +54,11 @@ from satquery.models.loader import (
     estimate_weight_bytes,
     guard_vram,
 )
+from satquery.models.prompts.layout import LAYOUT_VERSION, chat_prompt, layout_fingerprint
+
+LAYOUT_FILE: Final[str] = "layout.json"
+"""Written beside the adapter by ``scripts/train_vlm.py``: the layout version and
+the processor fingerprint the adapter was trained under. Read back at load."""
 
 _MODEL_CLASSES: Final[tuple[str, ...]] = (
     "Qwen3VLForConditionalGeneration",
@@ -100,21 +107,89 @@ def _strip_chat_tokens(text: str) -> str:
 def build_messages(request: GenerationRequest) -> list[dict[str, Any]]:
     """Lay the request out as Qwen3-VL chat messages.
 
-    Each view is preceded by its own label as a text part, so the label and the
-    pixels are adjacent in the token stream. Naming the images only in the system
-    prompt would leave the model to align six unlabelled tensors against a list —
-    which it does unreliably, and which silently breaks the moment a view is
-    unavailable and the later slots renumber (DATA_ADAPTATION_PLAN §2.4).
+    One call into :mod:`satquery.models.prompts.layout`, which is also what the
+    training record's prompt is built from — so the label-before-image layout
+    the adapter was fitted to is the layout it is served on, byte for byte
+    (ML_PIPELINE_RECOVERY_PLAN §2). Nothing here assembles a content list by
+    hand, and a test greps to keep it that way.
     """
-    content: list[dict[str, Any]] = []
-    for image in request.images:
-        content.append({"type": "text", "text": image.label})
-        content.append({"type": "image", "image": _to_pil(image)})
-    content.append({"type": "text", "text": request.user})
-    return [
-        {"role": "system", "content": [{"type": "text", "text": request.system}]},
-        {"role": "user", "content": content},
-    ]
+    return chat_prompt(
+        request.system,
+        [image.label for image in request.images],
+        request.user,
+        images=[_to_pil(image) for image in request.images],
+    )
+
+
+def read_layout_record(adapter: Path) -> dict[str, Any] | None:
+    """The ``layout.json`` an adapter directory carries, or None when it has none.
+
+    Raises:
+        ModelLoadError: The file exists and is not a JSON object.
+    """
+    path = adapter / LAYOUT_FILE
+    if not path.is_file():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ModelLoadError(f"{path} is unreadable: {error}") from error
+    if not isinstance(loaded, dict):
+        raise ModelLoadError(f"{path} is not a JSON object")
+    return loaded
+
+
+def check_layout(adapter: Path, processor: Any) -> dict[str, Any]:
+    """Refuse to serve an adapter under a layout or pixel budget it was not trained on.
+
+    Level L3 of the parity proof (plan §2.3): the training run writes
+    ``layout.json`` — ``LAYOUT_VERSION`` and ``layout_fingerprint`` of the
+    processor it trained with — beside the adapter. Here the fingerprint is
+    recomputed with the processor this process *actually loaded* and compared.
+    A mismatch means the chat template, the layout or the image-token count per
+    view differs from training, and the adapter would be reading a token stream
+    it never saw. That must look like an error, not like a bad answer — the same
+    philosophy as the hard failure on a missing ``adapter_config.json``.
+
+    An adapter with no ``layout.json`` at all is refused too. The one adapter
+    that lacks it (``runs/full-epoch-v1``) is precisely the one trained under
+    the unlabelled-image layout this module exists to stop serving; every
+    adapter ``scripts/train_vlm.py`` writes from now on carries the file. Serve
+    the base model deliberately by unsetting ``SATQUERY_VLM_ADAPTER_PATH``.
+
+    Returns:
+        The layout record that was verified.
+
+    Raises:
+        ModelLoadError: The adapter carries no layout record, or its recorded
+            layout version or fingerprint differs from what this processor
+            produces.
+    """
+    record = read_layout_record(adapter)
+    if record is None:
+        raise ModelLoadError(
+            f"{adapter} holds no {LAYOUT_FILE}, so the prompt layout it was trained "
+            "under is unknown. Adapters from before the layout fix (runs/full-epoch-v1) "
+            "were trained on unlabelled images and must not be served. Unset "
+            "SATQUERY_VLM_ADAPTER_PATH to serve the base model deliberately."
+        )
+    version = record.get("layout_version")
+    if version != LAYOUT_VERSION:
+        raise ModelLoadError(
+            f"{adapter} was trained under prompt layout {version!r}; this build serves "
+            f"{LAYOUT_VERSION!r}. Retrain, or serve the adapter from the matching build."
+        )
+    expected = record.get("layout_fingerprint")
+    actual = layout_fingerprint(processor)
+    if expected != actual:
+        raise ModelLoadError(
+            f"{adapter} layout fingerprint {str(expected)[:12]}… does not match the "
+            f"loaded processor's {actual[:12]}…: the chat template or the image-token "
+            "count per view differs from training (expected "
+            f"{record.get('image_tokens_per_view')} tokens per 448 px view). The "
+            "processor must come from the adapter directory, not the base repo."
+        )
+    return record
 
 
 class HuggingFaceBackend(LazyBackend):
@@ -176,6 +251,12 @@ class HuggingFaceBackend(LazyBackend):
         self._processor = auto_processor.from_pretrained(
             self.processor_source, local_files_only=True
         )
+        if self.config.adapter_path is not None:
+            try:
+                check_layout(self.config.adapter_path, self._processor)
+            except ModelLoadError:
+                self._unload()
+                raise
 
         # The estimate above sized the load; this checks what it actually cost,
         # because a guard that is never reconciled against reality is decoration.
@@ -196,9 +277,22 @@ class HuggingFaceBackend(LazyBackend):
         from training changes the token stream the adapter learned to read.
         """
         adapter = self.config.adapter_path
-        if adapter is not None and (adapter / "processor_config.json").is_file():
+        if adapter is None:
+            return self.source
+        if (adapter / "processor_config.json").is_file():
             return str(adapter)
-        return self.source
+        # A hard error, not a fallback. The base repo's processor tiles a 448 px
+        # view into 196 image tokens; the training profile's max_pixels gives
+        # 144. Serving the adapter under the wrong count changes every image
+        # position it learned to read, and nothing downstream would notice
+        # (plan §2.4).
+        raise ModelLoadError(
+            f"{adapter} holds no processor_config.json, so the pixel budget the "
+            "adapter was trained under is unknown; refusing to fall back to "
+            f"{self.source}'s processor. Copy the training run's processor files "
+            "beside the adapter (scripts/train_vlm.py writes them) or unset "
+            "SATQUERY_VLM_ADAPTER_PATH."
+        )
 
     def _apply_adapter(self, model: Any) -> Any:
         """Wrap the base weights in the Phase 7 LoRA adapter, when one is configured.
@@ -336,4 +430,10 @@ class HuggingFaceBackend(LazyBackend):
         )
 
 
-__all__ = ["HuggingFaceBackend", "build_messages"]
+__all__ = [
+    "LAYOUT_FILE",
+    "HuggingFaceBackend",
+    "build_messages",
+    "check_layout",
+    "read_layout_record",
+]

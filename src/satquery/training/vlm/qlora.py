@@ -27,10 +27,15 @@ otherwise gets picked as device 0 and fails the run with an unhelpful error.
 
 from __future__ import annotations
 
+import collections
 import contextlib
+import copy
+import hashlib
 import json
 import os
+import random
 import re
+import subprocess
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
@@ -39,6 +44,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from satquery.models.loader import VRAM_BUDGET_BYTES, VramGuardError, vram_snapshot
+from satquery.models.prompts import layout
+from satquery.models.prompts.layout import LAYOUT_VERSION, chat_prompt
 from satquery.training.corpus_builder import CorpusSample, read_jsonl
 
 DEFAULT_PROFILE_PATH: Final[Path] = Path("configs/train/qlora_qwen3vl8b_rocm24g.yaml")
@@ -137,6 +144,14 @@ class DataSpec(BaseModel):
     view_size_px: int = 448
     max_pixels: int = 448 * 448
     max_seq_len: int = 4096
+    expected_sources: dict[str, int] = Field(default_factory=dict)
+    """Minimum *train* sample count per corpus source, e.g. ``{bigearthnet_v2: 8000}``.
+
+    The trainer verifies its own diet: :func:`guard_composition` counts the
+    JSONL it is about to train on — the lines, not the builder's report — and
+    refuses to start if any source is below its floor. The previous corpus lost
+    VRSBench, CDVQA and RSVQA-HR entirely and nothing noticed until the run was
+    over (ML_PIPELINE_RECOVERY_PLAN fact 9, §5.3). Empty means no expectation."""
     eval_samples: int | None = 256
     """How many validation samples an eval pass reads; None reads all of them.
 
@@ -623,46 +638,64 @@ def guard_budget(
 # ------------------------------------------------------------- data plumbing
 
 
+COMPLETION_SUFFIX: Final[str] = "<|im_end|>\n"
+"""What the chat template appends to the assistant text. The completion trl
+tokenises is ``apply_chat_template(prompt + completion)[len(prompt):]`` —
+``"{answer}<|im_end|>\\n"`` — so the loss covers the answer *and* the
+end-of-turn token. Training the EOS is deliberate: the runaway decode
+``loader.CHAT_STOP_STRINGS`` guards against is what an untrained stop token
+produces."""
+
+STRUCTURAL_TAIL_TOKENS: Final[int] = 2
+"""``<|im_end|>`` and the trailing newline: the two completion positions that
+carry no answer. Excluded from ``answer_token_accuracy`` (plan §3.6), because a
+one-token answer that is wrong still scores 67 % once the model has learned to
+stop."""
+
+
+def completion_text(sample_assistant: str) -> str:
+    """The exact string the collator tokenises as the completion."""
+    return f"{sample_assistant}{COMPLETION_SUFFIX}"
+
+
 def sample_to_chat(
     sample: CorpusSample,
     image_root: Path | None = None,
     max_views: int = 6,
 ) -> dict[str, Any]:
-    """Render one corpus sample as the multimodal record ``trl`` consumes.
+    """Render one corpus sample as the **prompt-completion** record ``trl`` consumes.
 
-    The shape is dictated by ``trl``'s SFT path and is easy to get subtly wrong:
+    ``{"prompt": [system, user], "completion": [assistant], "images": [...]}``
+    — not ``messages``. The shape is the masking mechanism (ML_PIPELINE_RECOVERY_PLAN
+    §1): with ``completion_only_loss=True`` trl's vision collator tokenises the
+    prompt and the completion separately, concatenates, and sets every prompt
+    label to −100. The previous run used ``messages`` and trained on all ~2,000
+    prompt tokens per sample; the 3–100 answer tokens were ~1 % of the gradient.
+    The alternatives the docs used to recommend are dead on the pinned stack:
+    ``DataCollatorForCompletionOnlyLM`` no longer exists and
+    ``assistant_only_loss`` raises for any dataset with an ``images`` key.
 
-    * **The record carries an ``images`` key.** ``SFTTrainer`` decides whether a
-      dataset is vision or text by ``"image" in sample or "images" in sample``
-      and nothing else. A record whose images live only inside its message
-      blocks is tokenised as *text*, while the chat template still expands one
-      ``<|image_pad|>`` per image block — so the processor ends up replacing
-      placeholders against an empty image iterator and dies with a bare
-      ``StopIteration`` inside ``get_text_with_replacements``, with nothing in
-      the message naming the cause.
-    * **The blocks are bare placeholders.** ``prepare_multimodal_messages``
-      counts blocks that are ``type: "image"`` *and carry no ``image`` payload*,
-      and refuses the example unless that count equals ``len(images)``. Filling
-      the payload in here would make the count zero and trade one error for
-      another.
+    Two trl contracts still carried, both load-bearing:
 
-    Image order is view order, and the system turn names the same views by the
-    same labels in the same order — that binding is how the model learns to read
-    a fixed-domain index view (§2.5), so the label rides along on each block.
+    * **``images`` is a top-level key.** It is the only thing that makes
+      ``SFTTrainer`` treat the dataset as vision and select the vision collator.
+      A record whose images live only in its message blocks is tokenised as
+      text and dies with a bare ``StopIteration`` deep in the processor.
+    * **Image blocks are bare placeholders.** ``prepare_multimodal_messages``
+      counts blocks of type ``image`` with no ``image`` key and refuses the
+      example unless that count equals ``len(images)``.
+
+    The user turn's layout — label as a text part immediately before each
+    view's pixels, question last — comes from :func:`~satquery.models.prompts.layout.chat_prompt`,
+    the same call the serving backend makes. The old ``label`` key on the image
+    block was never printed by the chat template; the adapter trained on
+    unlabelled images and was served on labelled ones (plan §2).
     """
     views = sample.views[:max_views]
-    user: list[dict[str, Any]] = [
-        {"type": "image", "label": view.label} for view in views
-    ]
-    user.append({"type": "text", "text": sample.user})
     return {
-        "messages": [
-            {"role": "system", "content": [{"type": "text", "text": sample.system}]},
-            {"role": "user", "content": user},
-            {
-                "role": "assistant",
-                "content": [{"type": "text", "text": sample.assistant}],
-            },
+        "prompt": chat_prompt(sample.system, [view.label for view in views], sample.user),
+        "completion": [
+            {"role": "assistant", "content": [{"type": "text", "text": sample.assistant}]}
         ],
         "images": [
             str(image_root / view.path) if image_root else view.path for view in views
@@ -671,19 +704,63 @@ def sample_to_chat(
 
 
 def image_placeholder_count(record: Mapping[str, Any]) -> int:
-    """Count the placeholders ``trl`` will try to fill in one chat record.
+    """Count the placeholders ``trl`` will try to fill in one record's *prompt*.
 
     Exactly ``trl``'s own rule — a block of type ``image`` carrying no ``image``
     payload — so a record can be checked against its own ``images`` list before
-    it reaches the trainer.
+    it reaches the trainer. Counted over ``prompt``: a record that regressed to
+    the ``messages`` shape counts zero here and fails the equality with
+    ``len(images)`` instead of silently training on the whole sequence.
     """
-    return sum(
-        1
-        for message in record.get("messages", ())
-        if isinstance(message.get("content"), list)
-        for part in message["content"]
-        if part.get("type") == "image" and "image" not in part
-    )
+    return layout.image_placeholder_count(record.get("prompt") or ())
+
+
+def record_completion_text(record: Mapping[str, Any]) -> str:
+    """The assistant text a prompt-completion record supervises."""
+    completion = record.get("completion") or ()
+    for message in completion:
+        for part in message.get("content") or ():
+            if part.get("type") == "text" and part.get("text") is not None:
+                return str(part["text"])
+    raise ProfileError("record carries no assistant text in its completion")
+
+
+def stratum_of(sample: CorpusSample) -> tuple[str, str]:
+    """The ``(source, task)`` cell a sample belongs to, for stratified draws."""
+    return (str(sample.source.value), str(sample.task.value))
+
+
+def stratified_subset(
+    samples: Sequence[CorpusSample],
+    n: int,
+    seed: int = 0,
+    key: Callable[[CorpusSample], Any] = stratum_of,
+) -> list[CorpusSample]:
+    """A seeded subset of *n* samples spread as evenly as possible over strata.
+
+    Round-robin over the strata in a fixed order, each stratum shuffled by the
+    seed, until *n* are drawn or every stratum is exhausted. ``--sanity-check``
+    used to take the first 100 lines, which in a source-ordered corpus is one
+    source and one task (plan §7.6); the Stage A memorisation probe draws its
+    64 the same way with a task-aware key.
+    """
+    if n <= 0 or not samples:
+        return []
+    rng = random.Random(seed)
+    buckets: dict[Any, list[CorpusSample]] = collections.defaultdict(list)
+    for sample in samples:
+        buckets[key(sample)].append(sample)
+    for bucket in buckets.values():
+        rng.shuffle(bucket)
+    order = sorted(buckets, key=str)
+    chosen: list[CorpusSample] = []
+    cursor = 0
+    while len(chosen) < n and any(buckets.values()):
+        bucket = buckets[order[cursor % len(order)]]
+        if bucket:
+            chosen.append(bucket.pop())
+        cursor += 1
+    return chosen
 
 
 def load_corpus(
@@ -691,16 +768,20 @@ def load_corpus(
     limit: int | None = None,
     max_views: int = 6,
     image_root: Path | None = None,
+    stratify_seed: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Read a corpus JSONL into chat-formatted records.
+    """Read a corpus JSONL into prompt-completion records.
 
     Args:
         path: ``train.jsonl`` or ``val.jsonl``.
-        limit: Truncate to this many samples — how ``--sanity-check`` gets its
-            100-item run without a second corpus file.
+        limit: Keep this many samples — how ``--sanity-check`` gets its 100-item
+            run without a second corpus file.
         max_views: Per-sample image cap, from the profile.
         image_root: Prefix for the corpus's relative view paths, when the
             pre-rendered views do not live under the working directory.
+        stratify_seed: When given with *limit*, the subset is drawn by
+            :func:`stratified_subset` over ``(source, task)`` rather than as the
+            file's first *limit* lines.
 
     Raises:
         ProfileError: The corpus file does not exist.
@@ -709,11 +790,53 @@ def load_corpus(
         raise ProfileError(f"corpus {path} does not exist; run scripts/build_corpus first")
     samples = read_jsonl(path)
     if limit is not None:
-        samples = samples[:limit]
+        if stratify_seed is not None:
+            samples = stratified_subset(samples, limit, seed=stratify_seed)
+        else:
+            samples = samples[:limit]
     return [
         sample_to_chat(sample, image_root=image_root, max_views=max_views)
         for sample in samples
     ]
+
+
+def corpus_composition(path: Path) -> dict[str, int]:
+    """Train sample count per source, read from the JSONL lines themselves.
+
+    From the file the trainer is about to read, not from the builder's report:
+    a corpus swapped under the profile is caught here, at start-up.
+    """
+    counts: dict[str, int] = collections.Counter()
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            source = json.loads(line).get("source")
+            counts[str(source)] += 1
+    return dict(counts)
+
+
+def guard_composition(path: Path, expected: Mapping[str, int]) -> dict[str, int]:
+    """Refuse a corpus in which any expected source is below its floor (plan §5.3).
+
+    Raises:
+        ProfileError: A source named in *expected* has fewer train samples than
+            required, or none at all.
+    """
+    counts = corpus_composition(path)
+    short = {
+        source: (counts.get(source, 0), floor)
+        for source, floor in expected.items()
+        if counts.get(source, 0) < floor
+    }
+    if short:
+        table = ", ".join(f"{name}: {have} < {need}" for name, (have, need) in short.items())
+        raise ProfileError(
+            f"{path} does not contain the sources the profile expects ({table}). "
+            f"Present: {counts}. Rebuild with every source named and "
+            "--on-missing-views fail, or lower data.expected_sources deliberately."
+        )
+    return counts
 
 
 def missing_images(records: Sequence[Mapping[str, Any]], limit: int | None = None) -> list[str]:
@@ -775,6 +898,26 @@ def iter_corpus(path: Path) -> Iterator[CorpusSample]:
                 yield CorpusSample.model_validate_json(line)
 
 
+def file_sha256(path: Path) -> str:
+    """sha256 of a file's bytes, streamed."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def git_sha() -> str | None:
+    """The checkout's HEAD commit, or None outside a repository."""
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True, timeout=5
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() or None
+
+
 class RunPlan(BaseModel):
     """The arithmetic of one run, resolved before anything is loaded (§7.1)."""
 
@@ -817,6 +960,422 @@ def plan_run(profile: QLoraProfile, corpus_size: int, sanity_check: bool = False
     )
 
 
+# ------------------------------------------------------ the pre-flight guards
+
+
+TOKEN_BUDGET_MARGIN: Final[int] = 8
+"""Slack the token-budget guard keeps: the assistant header and any template
+whitespace the text-only count does not see."""
+
+MAX_COMPLETION_TOKENS: Final[int] = 512
+"""The longest completion the mask audit accepts. Answers are 3–100 tokens; a
+completion past this is a corpus bug, not a long answer."""
+
+MASK_AUDIT_SAMPLES: Final[int] = 32
+
+
+class TokenBudgetOffender(BaseModel):
+    """One sample whose prompt and completion together overrun the context."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class TokenBudgetReport(BaseModel):
+    """What :func:`token_budget_report` measured over a corpus (plan §1.5 G3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    checked: int
+    max_seq_len: int
+    tokens_per_view: int
+    margin: int
+    prompt_min: int
+    prompt_max: int
+    completion_min: int
+    completion_max: int
+    offenders: list[TokenBudgetOffender]
+
+    @property
+    def ok(self) -> bool:
+        """True when nothing would be truncated."""
+        return not self.offenders
+
+
+def _tokenise(tokenizer: Any, text: str) -> list[int]:
+    """Token ids for *text* the way the collator tokenises: no special tokens added."""
+    encoded = tokenizer(text, add_special_tokens=False)
+    ids = encoded["input_ids"] if isinstance(encoded, Mapping) else encoded.input_ids
+    return list(ids)
+
+
+def prompt_token_count(
+    record: Mapping[str, Any], tokenizer: Any, tokens_per_view: int
+) -> int:
+    """Tokens the prompt half of a record occupies, images counted by arithmetic.
+
+    The chat template is rendered with bare placeholders (no pixels), so each
+    image lands as a single ``<|image_pad|>`` in the text; that one token is
+    then replaced by *tokens_per_view*, which is what the processor would
+    expand it to under the training pixel budget.
+    """
+    text = tokenizer.apply_chat_template(
+        list(record["prompt"]), tokenize=False, add_generation_prompt=True
+    )
+    ids = _tokenise(tokenizer, str(text))
+    pad = layout.image_token_id(tokenizer)
+    placeholders = sum(1 for token in ids if token == pad)
+    return len(ids) - placeholders + placeholders * tokens_per_view
+
+
+def completion_token_count(record: Mapping[str, Any], tokenizer: Any) -> int:
+    """Tokens the completion occupies: the answer plus the end-of-turn suffix."""
+    return len(_tokenise(tokenizer, completion_text(record_completion_text(record))))
+
+
+def token_budget_report(
+    records: Sequence[Mapping[str, Any]],
+    tokenizer: Any,
+    max_seq_len: int,
+    tokens_per_view: int,
+    margin: int = TOKEN_BUDGET_MARGIN,
+) -> TokenBudgetReport:
+    """Measure every record's token footprint against the context length.
+
+    Text only — no pixels are decoded — so it costs about a millisecond per
+    sample and can run over the whole corpus before the weights load. Truncation
+    in the collator is applied after concatenation and from the right, so an
+    over-long sample loses its *completion* first: 100 % masked, a finite zero
+    loss, one wasted forward/backward, and nothing in the log (plan fact 11).
+    """
+    prompt_lengths: list[int] = []
+    completion_lengths: list[int] = []
+    offenders: list[TokenBudgetOffender] = []
+    for index, record in enumerate(records):
+        prompt = prompt_token_count(record, tokenizer, tokens_per_view)
+        completion = completion_token_count(record, tokenizer)
+        prompt_lengths.append(prompt)
+        completion_lengths.append(completion)
+        total = prompt + completion + margin
+        if total > max_seq_len:
+            offenders.append(
+                TokenBudgetOffender(
+                    index=index,
+                    prompt_tokens=prompt,
+                    completion_tokens=completion,
+                    total_tokens=total,
+                )
+            )
+    return TokenBudgetReport(
+        checked=len(records),
+        max_seq_len=max_seq_len,
+        tokens_per_view=tokens_per_view,
+        margin=margin,
+        prompt_min=min(prompt_lengths, default=0),
+        prompt_max=max(prompt_lengths, default=0),
+        completion_min=min(completion_lengths, default=0),
+        completion_max=max(completion_lengths, default=0),
+        offenders=offenders,
+    )
+
+
+def guard_token_budget(
+    records: Sequence[Mapping[str, Any]],
+    tokenizer: Any,
+    max_seq_len: int,
+    tokens_per_view: int,
+    label: str = "corpus",
+    margin: int = TOKEN_BUDGET_MARGIN,
+) -> TokenBudgetReport:
+    """G3 — refuse to start if any sample would lose its completion to truncation.
+
+    Raises:
+        ProfileError: At least one record overruns ``max_seq_len``; the message
+            lists the first offenders by index.
+    """
+    report = token_budget_report(records, tokenizer, max_seq_len, tokens_per_view, margin)
+    if report.ok:
+        return report
+    shown = ", ".join(
+        f"#{o.index} ({o.prompt_tokens}+{o.completion_tokens} tok)" for o in report.offenders[:5]
+    )
+    raise ProfileError(
+        f"{label}: {len(report.offenders)} of {report.checked} samples exceed "
+        f"max_seq_len={max_seq_len} (prompt + completion + {margin}), e.g. {shown}. "
+        "Each would be truncated from the right, losing its completion and training on "
+        "nothing. Raise data.max_seq_len, lower max_views_per_sample, or drop them from "
+        "the corpus."
+    )
+
+
+class MaskAuditRecord(BaseModel):
+    """One audited sample: what the real collator produced for it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int
+    prompt_tokens: int
+    completion_tokens: int
+    image_tokens: int
+    views: int
+    sequence_tokens: int
+    ok: bool
+    problems: list[str] = Field(default_factory=list)
+
+
+class MaskAuditReport(BaseModel):
+    """What :func:`audit_masks` found (plan §1.5 G2); written as ``mask_audit.json``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    audited: int
+    passed: int
+    max_length: int
+    tokens_per_view: int
+    prompt_min: int
+    prompt_max: int
+    completion_min: int
+    completion_max: int
+    image_min: int
+    image_max: int
+    truncated: int
+    records: list[MaskAuditRecord]
+
+    @property
+    def ok(self) -> bool:
+        """True when every audited sample passed every check."""
+        return self.audited > 0 and self.passed == self.audited
+
+    def summary(self) -> str:
+        """The one log line: ``mask audit: 32/32 ok · prompt … · completion … · image …``."""
+        return (
+            f"mask audit: {self.passed}/{self.audited} ok · prompt "
+            f"{self.prompt_min:,}–{self.prompt_max:,} tok · completion "
+            f"{self.completion_min}–{self.completion_max} tok · image "
+            f"{self.image_min:,}–{self.image_max:,} tok · {self.truncated} truncated"
+        )
+
+
+def _open_images(paths: Sequence[Any]) -> list[Any]:
+    """Decode a record's view paths into RGB PIL images, as the dataset cast does."""
+    from PIL import Image
+
+    opened: list[Any] = []
+    for path in paths:
+        if isinstance(path, str | Path):
+            with Image.open(path) as image:
+                opened.append(image.convert("RGB"))
+        else:
+            opened.append(path)
+    return opened
+
+
+def _unify_placeholders(record: Mapping[str, Any]) -> dict[str, Any]:
+    """The record as ``datasets.Dataset.from_list`` would hand it back.
+
+    Arrow unifies the content structs, so an image placeholder round-trips with
+    a ``text: None`` beside it and a text block unchanged. The audit feeds the
+    collator the same shape the trainer will, so that unification is covered
+    rather than assumed harmless.
+    """
+    unified = copy.deepcopy(dict(record))
+    for key in ("prompt", "completion"):
+        for message in unified.get(key) or ():
+            content = message.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    part.setdefault("text", None)
+    return unified
+
+
+def audit_one_mask(
+    record: Mapping[str, Any],
+    collator: Any,
+    tokenizer: Any,
+    tokens_per_view: int,
+    max_length: int,
+    index: int = 0,
+) -> MaskAuditRecord:
+    """Run the real collator on one record and check what it would train on.
+
+    The four assertions of plan §1.5 G2:
+
+    1. the unmasked tokens are exactly the tokenised completion;
+    2. every ``<|image_pad|>`` is masked and precedes the first trained token;
+    3. the image-token count is ``tokens_per_view × views``;
+    4. ``0 < unmasked ≤ 512`` and the sequence was not truncated.
+    """
+    import torch
+
+    example = _unify_placeholders(record)
+    example["images"] = _open_images(example.get("images") or ())
+    views = len(example["images"])
+    batch = collator([example])
+    input_ids = batch["input_ids"][0]
+    labels = batch["labels"][0]
+    attention = batch["attention_mask"][0]
+
+    pad = layout.image_token_id(tokenizer)
+    trained = labels != -100
+    trained_ids = input_ids[trained].tolist()
+    expected = _tokenise(tokenizer, completion_text(record_completion_text(record)))
+    image_positions = torch.nonzero(input_ids == pad).flatten()
+    image_tokens = int(image_positions.numel())
+    sequence_tokens = int(attention.sum().item())
+    prompt_tokens = sequence_tokens - len(trained_ids)
+
+    problems: list[str] = []
+    if trained_ids != expected:
+        problems.append(
+            f"unmasked tokens ({len(trained_ids)}) are not the tokenised completion "
+            f"({len(expected)})"
+        )
+    if bool(trained[input_ids == pad].any()):
+        problems.append("an <|image_pad|> position is unmasked")
+    if image_tokens and bool(trained.any()):
+        first_trained = int(torch.nonzero(trained).flatten()[0].item())
+        if first_trained <= int(image_positions[-1].item()):
+            problems.append("the first trained token precedes the last image token")
+    if image_tokens != tokens_per_view * views:
+        problems.append(
+            f"{image_tokens} image tokens for {views} view(s); expected "
+            f"{tokens_per_view} × {views} = {tokens_per_view * views}"
+        )
+    if not 0 < len(trained_ids) <= MAX_COMPLETION_TOKENS:
+        problems.append(f"{len(trained_ids)} trained tokens (need 0 < n ≤ {MAX_COMPLETION_TOKENS})")
+    if sequence_tokens >= max_length:
+        problems.append(f"sequence of {sequence_tokens} tokens hit max_length={max_length}")
+
+    return MaskAuditRecord(
+        index=index,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=len(trained_ids),
+        image_tokens=image_tokens,
+        views=views,
+        sequence_tokens=sequence_tokens,
+        ok=not problems,
+        problems=problems,
+    )
+
+
+def audit_masks(
+    records: Sequence[Mapping[str, Any]],
+    processor: Any,
+    max_length: int,
+    tokens_per_view: int,
+    n: int = MASK_AUDIT_SAMPLES,
+    seed: int = 0,
+) -> MaskAuditReport:
+    """G2 — prove, with the real collator, that only the completion is trained.
+
+    Runs *before the weights load*: the processor is a 2 MB config, and the
+    collator needs nothing else. Draws *n* records spread across the corpus
+    (evenly spaced from a seeded offset, so a source-ordered file contributes
+    every source), decodes their views, collates each with
+    ``DataCollatorForVisionLanguageModeling(completion_only_loss=True)`` and
+    checks the labels against the tokenised answer. This is the check that
+    would have caught the 19-hour run in 30 seconds.
+    """
+    from trl.trainer.sft_trainer import DataCollatorForVisionLanguageModeling
+
+    tokenizer = getattr(processor, "tokenizer", processor)
+    collator = DataCollatorForVisionLanguageModeling(
+        processor=processor, max_length=max_length, completion_only_loss=True
+    )
+    if not records:
+        raise ProfileError("mask audit: no records to audit")
+    count = min(n, len(records))
+    rng = random.Random(seed)
+    stride = len(records) / count
+    offset = rng.random() * stride
+    indices = sorted({min(len(records) - 1, int(offset + i * stride)) for i in range(count)})
+
+    audited = [
+        audit_one_mask(records[i], collator, tokenizer, tokens_per_view, max_length, index=i)
+        for i in indices
+    ]
+    return MaskAuditReport(
+        audited=len(audited),
+        passed=sum(1 for a in audited if a.ok),
+        max_length=max_length,
+        tokens_per_view=tokens_per_view,
+        prompt_min=min(a.prompt_tokens for a in audited),
+        prompt_max=max(a.prompt_tokens for a in audited),
+        completion_min=min(a.completion_tokens for a in audited),
+        completion_max=max(a.completion_tokens for a in audited),
+        image_min=min(a.image_tokens for a in audited),
+        image_max=max(a.image_tokens for a in audited),
+        truncated=sum(1 for a in audited if a.sequence_tokens >= max_length),
+        records=audited,
+    )
+
+
+def write_mask_audit(path: Path, report: MaskAuditReport) -> None:
+    """Persist the audit beside the run, whatever its verdict."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+
+
+def guard_masks(report: MaskAuditReport) -> None:
+    """Refuse to load the weights on a failed audit.
+
+    Raises:
+        ProfileError: Any audited record failed a check; the first failures are
+            listed by index.
+    """
+    if report.ok:
+        return
+    failed = [a for a in report.records if not a.ok]
+    shown = "; ".join(f"#{a.index}: {', '.join(a.problems)}" for a in failed[:5])
+    raise ProfileError(
+        f"mask audit failed on {len(failed)} of {report.audited} samples — {shown}. "
+        "The collator would not train on exactly the completion. Refusing to load "
+        "the weights; see ML_PIPELINE_RECOVERY_PLAN §1.5 G2."
+    )
+
+
+# ---------------------------------------------------------- the layout record
+
+
+LAYOUT_RECORD_NAME: Final[str] = "layout.json"
+
+
+def layout_record(
+    processor: Any,
+    corpus_path: Path | None = None,
+    base_model: str | None = None,
+) -> dict[str, Any]:
+    """What ``layout.json`` holds: the layout the adapter was trained under.
+
+    ``layout_version`` and ``layout_fingerprint`` are what
+    :func:`satquery.models.hf_backend.check_layout` compares at load; the rest
+    is provenance for the manifest.
+    """
+    _, tokens_per_view = layout.fixture_render(processor)
+    return {
+        "layout_version": LAYOUT_VERSION,
+        "layout_fingerprint": layout.layout_fingerprint(processor),
+        "image_tokens_per_view": tokens_per_view,
+        "fixture_view_px": layout.FIXTURE_VIEW_PX,
+        "base_model": base_model,
+        "git_sha": git_sha(),
+        "corpus_sha256": file_sha256(corpus_path) if corpus_path else None,
+        "corpus_path": str(corpus_path) if corpus_path else None,
+    }
+
+
+def write_layout_record(directory: Path, record: Mapping[str, Any]) -> Path:
+    """Write ``layout.json`` beside an adapter."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / LAYOUT_RECORD_NAME
+    path.write_text(json.dumps(dict(record), indent=2, default=str), encoding="utf-8")
+    return path
+
+
 # ------------------------------------------------------- the deferred trainer
 
 
@@ -850,22 +1409,32 @@ def build_bnb_config(profile: QLoraProfile) -> Any:
     )
 
 
-def load_model_and_processor(profile: QLoraProfile) -> tuple[Any, Any]:
-    """Load the quantised backbone and its processor.
+def load_processor(profile: QLoraProfile) -> Any:
+    """Load the processor alone — a 2 MB config, not the 16 GB checkpoint.
+
+    Separate from :func:`load_model` so the mask audit and the token-budget
+    guard can run *before* the weights are on the card: every one of their
+    failures is then a 30-second refusal instead of a discovery hours in.
 
     ``max_pixels`` is set on the processor rather than left to its default: it is
     the dominant VRAM knob (§6.1), and a processor that silently upsamples a
     448 px view to its own default resolution would multiply the vision token
     count by several times per image, six times per sample.
     """
-    from transformers import AutoModelForImageTextToText, AutoProcessor
+    from transformers import AutoProcessor
 
     auto_processor: Any = AutoProcessor
-    processor = auto_processor.from_pretrained(
+    return auto_processor.from_pretrained(
         profile.base_model,
         max_pixels=profile.data.max_pixels,
         min_pixels=profile.data.view_size_px * profile.data.view_size_px // 4,
     )
+
+
+def load_model(profile: QLoraProfile) -> Any:
+    """Load the quantised backbone onto device 0."""
+    from transformers import AutoModelForImageTextToText
+
     model = AutoModelForImageTextToText.from_pretrained(
         profile.base_model,
         dtype=_torch_dtype(profile.torch_dtype),
@@ -874,7 +1443,28 @@ def load_model_and_processor(profile: QLoraProfile) -> tuple[Any, Any]:
         device_map={"": 0},
     )
     model.config.use_cache = False
-    return model, processor
+    return model
+
+
+def load_model_and_processor(profile: QLoraProfile) -> tuple[Any, Any]:
+    """Both halves, for callers that want them together."""
+    processor = load_processor(profile)
+    return load_model(profile), processor
+
+
+def image_tokens_per_view(
+    max_pixels: int, patch_px: int = 16, merge_size: int = 2
+) -> int:
+    """How many language-model tokens one view becomes under a pixel budget.
+
+    Qwen3-VL tiles the image into ``patch_px`` patches and merges them
+    ``merge_size × merge_size`` before the language model: ``147456 / 16² / 2²``
+    is 144, the base repo's default for a 448 px view is 196 (plan fact 8). The
+    arithmetic form is what the token-budget guard uses so that no pixels need
+    to be decoded; the processor's own count is what the mask audit and the
+    layout fingerprint measure, and the two must agree.
+    """
+    return max(1, max_pixels // (patch_px * patch_px) // (merge_size * merge_size))
 
 
 def build_peft_model(model: Any, profile: QLoraProfile) -> Any:
@@ -971,6 +1561,26 @@ def sft_config_kwargs(
         "max_length": profile.data.max_seq_len,
         "report_to": ["tensorboard"],
         "remove_unused_columns": False,
+        # The masking fix (ML_PIPELINE_RECOVERY_PLAN §1.4). EXPLICIT True, never
+        # None: None auto-detects from the record shape, and a regression to the
+        # `messages` shape would silently revert to full-sequence loss — the
+        # exact failure being fixed. With True, a `messages` record makes trl
+        # raise instead.
+        "completion_only_loss": True,
+        # Explicit False, with the reason: trl 1.12.0 raises
+        # ValueError("Assistant-only loss is not yet supported for vision
+        # datasets") for any dataset carrying an `images` key
+        # (sft_trainer.py:1052). Stated here so a well-meant "fix" that flips it
+        # fails the unit test rather than the run.
+        "assistant_only_loss": False,
+        # The vision prompt-completion collator raises NotImplementedError if
+        # this is set (sft_trainer.py:693-697).
+        "pad_to_multiple_of": None,
+        # The default, stated: keep_end is rejected for vision datasets because
+        # the image tokens live in the prompt and would be the first to go.
+        "truncation_mode": "keep_start",
+        # packing and padding_free stay unset: both are rejected for vision
+        # datasets (sft_trainer.py:1043-1051).
     }
 
 
@@ -1166,7 +1776,7 @@ def build_trainer(
         interrupt: Shared stop flag; when given, the trainer checkpoints and
             exits cleanly on the next step boundary after a signal arrives.
     """
-    from trl import SFTConfig, SFTTrainer
+    from trl import SFTConfig
 
     config = SFTConfig(
         **sft_config_kwargs(
@@ -1177,7 +1787,8 @@ def build_trainer(
             total_steps=total_steps,
         )
     )
-    return SFTTrainer(
+    trainer_class = satquery_sft_trainer_class()
+    trainer = trainer_class(
         model=model,
         args=config,
         train_dataset=train_dataset,
@@ -1185,6 +1796,158 @@ def build_trainer(
         processing_class=processor,
         callbacks=[graceful_stop_callback(interrupt)] if interrupt else None,
     )
+    check_trainer_masking(trainer)
+    return trainer
+
+
+def check_trainer_masking(trainer: Any) -> None:
+    """G1 — the trainer self-check (plan §1.5).
+
+    Private attributes on a pinned trl (``pyproject.toml`` pins ``trl==1.12.0``;
+    the pin is part of the fix): the trainer must have recognised the dataset
+    as vision, must be masking the prompt, and must be using the vision
+    collator whose prompt-completion path does the masking.
+
+    Raises:
+        ProfileError: Any of the three is not so.
+    """
+    from trl.trainer.sft_trainer import DataCollatorForVisionLanguageModeling
+
+    problems: list[str] = []
+    if getattr(trainer, "_is_vision_dataset", None) is not True:
+        problems.append("the dataset was not recognised as vision (no top-level `images` key?)")
+    if getattr(trainer, "completion_only_loss", None) is not True:
+        problems.append("completion_only_loss did not resolve to True")
+    if not isinstance(trainer.data_collator, DataCollatorForVisionLanguageModeling):
+        problems.append(
+            f"the collator is {type(trainer.data_collator).__name__}, not "
+            "DataCollatorForVisionLanguageModeling"
+        )
+    if problems:
+        raise ProfileError(
+            "the trainer would not mask the prompt: " + "; ".join(problems) + ". "
+            "Refusing to start; see ML_PIPELINE_RECOVERY_PLAN §1."
+        )
+
+
+def answer_token_mask(shift_labels: Any, tail: int = STRUCTURAL_TAIL_TOKENS) -> Any:
+    """The supervised positions minus the last *tail* per row.
+
+    ``shift_labels != -100`` is trl's own accuracy mask; this removes the final
+    *tail* unmasked positions of every row — ``<|im_end|>`` and the newline —
+    so what remains is the answer. A row with *tail* or fewer supervised tokens
+    contributes nothing rather than going negative.
+    """
+    import torch
+
+    mask = shift_labels != -100
+    if tail <= 0:
+        return mask
+    # Rank each supervised position from the end of its row: the last one is 1.
+    reversed_counts = torch.flip(torch.cumsum(torch.flip(mask.long(), dims=[1]), dim=1), dims=[1])
+    return mask & (reversed_counts > tail)
+
+
+def satquery_sft_trainer_class() -> Any:
+    """``SFTTrainer`` plus ``answer_token_accuracy`` (plan §3.6), built on demand.
+
+    Defined inside a factory so importing this module never imports trl.
+
+    41 % of the corpus's answers are ≤ 3 characters, so their completion is one
+    or two answer tokens plus ``<|im_end|>`` and a newline. Once the model has
+    learned the two structural tokens those samples sit at 50–67 % token
+    accuracy with the *answer* still wrong. This subclass reports accuracy over
+    completion positions excluding the final two, alongside trl's own number.
+
+    Under ``loss_type="chunked_nll"`` — the default, kept because it runs the
+    ``lm_head`` only on unmasked positions — no logits are ever materialised,
+    so the metric is computed from the post-norm hidden state the chunked loss
+    itself consumes, captured by a forward hook on the decoder's final norm,
+    projected through ``lm_head`` for the completion positions only (a few
+    hundred rows of a 152 k-wide matmul, under ``no_grad``). When trl's
+    non-chunked path is in use the logits exist and are used directly.
+    """
+    import torch
+    from trl import SFTTrainer
+
+    base: Any = SFTTrainer
+
+    class SatQuerySFTTrainer(base):  # type: ignore[misc]
+        """trl's trainer with the structural-token exclusion of plan §3.6."""
+
+        def __init__(self, *args: Any, answer_accuracy: bool = True, **kwargs: Any) -> None:
+            """Wire the norm hook lazily; nothing runs until the first forward."""
+            super().__init__(*args, **kwargs)
+            self.answer_accuracy = answer_accuracy
+            self._captured_hidden: Any | None = None
+            self._norm_hook: Any | None = None
+
+        def _final_norm(self) -> Any | None:
+            """The decoder's final norm module, whose output feeds ``lm_head``."""
+            model = self.model
+            base_model = model.get_base_model() if hasattr(model, "get_base_model") else model
+            decoder = base_model.get_decoder() if hasattr(base_model, "get_decoder") else None
+            norm = getattr(decoder, "norm", None)
+            return norm if isinstance(norm, torch.nn.Module) else None
+
+        def _ensure_hook(self) -> bool:
+            if self._norm_hook is not None:
+                return True
+            norm = self._final_norm()
+            if norm is None:
+                return False
+
+            def capture(_module: Any, _inputs: Any, output: Any) -> None:
+                self._captured_hidden = output.detach()
+
+            self._norm_hook = norm.register_forward_hook(capture)
+            return True
+
+        def compute_loss(
+            self,
+            model: Any,
+            inputs: Any,
+            return_outputs: bool = False,
+            num_items_in_batch: Any = None,
+        ) -> Any:
+            """The trl loss, then the answer-only accuracy from the same forward."""
+            mode = "train" if self.model.training else "eval"
+            labels = inputs.get("labels") if "shift_labels" not in inputs else None
+            hooked = self.answer_accuracy and labels is not None and self._ensure_hook()
+            self._captured_hidden = None
+            loss, outputs = super().compute_loss(
+                model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
+            )
+            if hooked:
+                accuracy = self._answer_accuracy(outputs, labels)
+                if accuracy is not None:
+                    self._metrics[mode]["answer_token_accuracy"].append(accuracy)
+            self._captured_hidden = None
+            return (loss, outputs) if return_outputs else loss
+
+        def _answer_accuracy(self, outputs: Any, labels: Any) -> float | None:
+            with torch.no_grad():
+                shift_labels = labels[..., 1:]
+                mask = answer_token_mask(shift_labels)
+                total = int(mask.sum().item())
+                if total == 0:
+                    return None
+                logits = getattr(outputs, "logits", None)
+                if logits is not None:
+                    predictions = logits[..., :-1, :].argmax(dim=-1)
+                else:
+                    hidden = self._captured_hidden
+                    if hidden is None:
+                        return None
+                    shift_hidden = hidden[:, :-1, :][mask]
+                    head = self.model.get_output_embeddings()
+                    predictions = head(shift_hidden.to(head.weight.dtype)).argmax(dim=-1)
+                    correct = (predictions == shift_labels[mask]).sum()
+                    return float(correct.item() / total)
+                correct = ((predictions == shift_labels) & mask).sum()
+                return float(correct.item() / total)
+
+    return SatQuerySFTTrainer
 
 
 def resume_target(output_dir: Path, setting: str) -> bool | str | None:
@@ -1225,8 +1988,42 @@ def write_run_manifest(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 __all__ = [
+    "COMPLETION_SUFFIX",
+    "LAYOUT_RECORD_NAME",
+    "MASK_AUDIT_SAMPLES",
+    "MAX_COMPLETION_TOKENS",
+    "STRUCTURAL_TAIL_TOKENS",
+    "TOKEN_BUDGET_MARGIN",
+    "MaskAuditRecord",
+    "MaskAuditReport",
+    "TokenBudgetOffender",
+    "TokenBudgetReport",
+    "answer_token_mask",
+    "audit_masks",
+    "audit_one_mask",
+    "check_trainer_masking",
+    "completion_text",
+    "completion_token_count",
+    "corpus_composition",
+    "file_sha256",
+    "git_sha",
+    "guard_composition",
     "guard_images_present",
+    "guard_masks",
+    "guard_token_budget",
+    "image_tokens_per_view",
+    "layout_record",
+    "load_model",
+    "load_processor",
     "missing_images",
+    "prompt_token_count",
+    "record_completion_text",
+    "satquery_sft_trainer_class",
+    "stratified_subset",
+    "stratum_of",
+    "token_budget_report",
+    "write_layout_record",
+    "write_mask_audit",
     "InterruptRequest",
     "checkpoint_step",
     "describe_resume",

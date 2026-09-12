@@ -6,13 +6,20 @@ depends on; everything else is polish by comparison. Source for most items:
 
 ## Tier 1 — the ML result (do these first, in this order)
 
-1. **Fix the training objective.** `src/satquery/training/vlm/qlora.py::sft_config_kwargs()`
-   — enable assistant-only loss (trl ≥ 0.20 `assistant_only_loss=True` + `{% generation %}`
-   markers in Qwen3-VL's chat template, or a prompt-completion dataset shape).
-   Align `sample_to_chat()` (label as a text part before each image) with
-   `hf_backend.build_messages`. Add a 10-step regression test on a micro-corpus
-   asserting assistant-token loss decreases. Re-run the 200-step throughput probe and
-   confirm assistant-token accuracy moves well past 0.5 **before** the epoch.
+1. **Fix the training objective — follow `DOCS/ML_PIPELINE_RECOVERY_PLAN.md`.**
+   Do **not** reach for `assistant_only_loss=True` + `{% generation %}` markers, and do
+   not look for `DataCollatorForCompletionOnlyLM`: on the pinned stack (trl 1.12.0,
+   `pyproject.toml` `vlm-train`) the first raises
+   `ValueError("Assistant-only loss is not yet supported for vision datasets")` for any
+   dataset with an `images` key, and the second was removed in trl 0.20. The working
+   mechanism is the **prompt-completion record shape** with `completion_only_loss=True`
+   (plan §1): `sample_to_chat()` emits `{prompt, completion, images}`, the vision
+   collator masks everything up to and including `<|im_start|>assistant\n`, and
+   `audit_masks()` checks the collated labels equal the tokenised answer before the
+   weights load. The user turn is laid out by `satquery.models.prompts.layout` on
+   both the training and serving paths (plan §2) — label as a text part before each
+   image — with a fingerprint checked at model load. Then the Stage A memorisation
+   probe and Stage B descent probe (plan §3) **before** the epoch.
 2. **Run one honest ablation.** Base Qwen3-VL-8B bf16 vs adapter, same prompt, same
    200 VRSBench VQA + BEN-val items, same CitationValidator. Metrics per
    `DATA_ADAPTATION_PLAN §8`: BEN-v2 19-class micro-F1 (zero-shot vs adapted),

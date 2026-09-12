@@ -48,7 +48,8 @@ from satquery.models.prompts.box_format import (
     BoxFormatError,
     NormalisedBox,
     from_pixels,
-    serialise,
+    is_canonical_answer,
+    serialise_answer,
 )
 from satquery.models.prompts.builder import (
     build_system_prompt,
@@ -365,6 +366,13 @@ def assemble(
     )
     if audit:
         audit_answer(sample_id, answer, sheet)
+    if task is TaskType.GROUNDING and not is_canonical_answer(answer):
+        # Every grounding target must be the format the TASK block dictates:
+        # tagged boxes or NONE. A bare box contradicts the instruction it is
+        # trained under (ML_PIPELINE_RECOVERY_PLAN fact 13, §2.5).
+        raise CorpusError(
+            f"{sample_id}: grounding answer is not in the canonical tagged form: {answer!r}"
+        )
     return CorpusSample(
         id=sample_id,
         source=source,
@@ -832,6 +840,49 @@ form, and it is never emitted: it is converted to the one serialiser's output.""
 _BEN_TXT_REF: Final[re.Pattern[str]] = re.compile(r"<ref>(?P<text>.*?)</ref>", re.DOTALL)
 
 
+def noncanonical_grounding(samples: Iterable[CorpusSample]) -> list[tuple[str, str]]:
+    """``(id, answer)`` of every GROUNDING sample whose answer is not canonical.
+
+    The corpus-level check of ML_PIPELINE_RECOVERY_PLAN §2.5: run over a
+    written JSONL (``iter_corpus``) after every build, and in the test suite
+    over whatever the adapters produce. An empty list is the only acceptable
+    result.
+    """
+    return [
+        (sample.id, sample.assistant)
+        for sample in samples
+        if sample.task is TaskType.GROUNDING and not is_canonical_answer(sample.assistant)
+    ]
+
+
+class UnlabelledGroundingError(CorpusError):
+    """A grounding row names no class, so its box cannot be written canonically.
+
+    The ``<point>(x, y)</point>`` questions of the reBEN text export ask for
+    "the land cover class instance at" a point and never say which class. The
+    system prompt's format requires a NAME on every box; without one the row
+    is excluded rather than emitted bare (ML_PIPELINE_RECOVERY_PLAN §2.5).
+    """
+
+
+def grounding_label(row: Mapping[str, Any]) -> str | None:
+    """The NAME a BEN-txt grounding box is tagged with, or None when unresolvable.
+
+    In order: the ``<ref>…</ref>`` the question carries; failing that, the
+    patch's own label set when — and only when — it holds exactly one class,
+    which is the one case the box's class is not ambiguous.
+    """
+    reference = _BEN_TXT_REF.search(str(row.get("input") or ""))
+    if reference:
+        text = reference.group("text").strip()
+        if text:
+            return text
+    labels = [str(label).strip() for label in (row.get("labels") or ()) if str(label).strip()]
+    if len(labels) == 1:
+        return labels[0]
+    return None
+
+
 def parse_ben_txt_box(answer: str, label: str | None = None) -> list[NormalisedBox]:
     """Convert reBEN's ``[x1 y1, x2 y2]`` answer onto the 0-1000 frame.
 
@@ -871,12 +922,16 @@ def _ben_txt_answer(row: Mapping[str, Any], task: TaskType) -> str:
     """
     answer = str(row["output"]).strip()
     if task is TaskType.GROUNDING:
-        reference = _BEN_TXT_REF.search(str(row.get("input") or ""))
-        label = reference.group("text").strip() if reference else None
+        label = grounding_label(row)
+        if label is None:
+            raise UnlabelledGroundingError(
+                f"grounding row {row.get('ID')!r} names no class for its box "
+                f"({str(row.get('input'))[:80]!r}); excluded rather than emitted bare"
+            )
         boxes = parse_ben_txt_box(answer, label)
         if not boxes:
             raise CorpusError(f"unparseable bounding-box answer {answer!r}")
-        return serialise(boxes)
+        return serialise_answer(boxes)
     if task is TaskType.CAPTION:
         return answer
     lowered = answer.lower()
@@ -917,7 +972,9 @@ def from_bigearthnet_txt(
             weakening the audit for every source.
 
     Returns:
-        One sample, or none when the row is skipped.
+        One sample, or none when the row is skipped — including every
+        ``bounding box`` row whose class cannot be named (see
+        :func:`grounding_label`): the prompt's format has no unnamed box.
 
     Raises:
         CorpusError: The row is missing a required column, or its annotation
@@ -948,6 +1005,10 @@ def from_bigearthnet_txt(
 
     try:
         text = _ben_txt_answer(row, task)
+    except UnlabelledGroundingError:
+        # Not a citation problem and not optional: a box with no name cannot be
+        # written in the prompt's format, whatever the caller's policy.
+        return []
     except CorpusError:
         if skip_uncitable:
             return []
@@ -1158,7 +1219,9 @@ def from_vrsbench(
         expression = str(obj.get("referring_sentence") or "").strip()
         if not coordinates or len(coordinates) != 4 or not expression:
             continue
-        label = str(obj.get("obj_cls") or "").strip() or None
+        # The class where VRSBench gives one, the referring expression where it
+        # does not: a grounding answer names every box (§2.5), never bare.
+        label = str(obj.get("obj_cls") or "").strip() or expression
         scaled = [
             max(0, min(BOX_SCALE, round(float(value) * BOX_SCALE))) for value in coordinates
         ]
@@ -1177,7 +1240,7 @@ def from_vrsbench(
                 f"ground{obj.get('obj_id', len(samples))}",
                 TaskType.GROUNDING,
                 _locate_question(expression),
-                serialise([box]),
+                serialise_answer([box]),
                 audit=False,
             )
         )
@@ -1374,7 +1437,7 @@ def from_dior_rsvg(
         pair_type=PairType.SINGLE,
         views=views,
         question=_locate_question(str(expression)),
-        answer=serialise(_boxes_from(row, boxes, str(expression).strip())),
+        answer=serialise_answer(_boxes_from(row, boxes, str(expression).strip())),
         slots={"target_class": str(expression).strip()},
         meta=_meta_for(row, source_split, gsd_m=row.get("gsd_m", 0.5)),
         audit=False,
@@ -2207,7 +2270,10 @@ __all__ = [
     "apply_augmentations",
     "assemble",
     "audit_answer",
+    "UnlabelledGroundingError",
     "ben6_labels",
+    "grounding_label",
+    "noncanonical_grounding",
     "build_corpus",
     "build_corpus_streaming",
     "build_evidence_qa",

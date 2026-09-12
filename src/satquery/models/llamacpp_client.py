@@ -42,6 +42,7 @@ from satquery.models.loader import (
     PromptImage,
     apply_stop,
 )
+from satquery.models.prompts.layout import user_turn_content
 
 CHAT_PATH: Final[str] = "/v1/chat/completions"
 HEALTH_PATH: Final[str] = "/health"
@@ -68,19 +69,28 @@ def encode_data_uri(image: PromptImage) -> str:
     return f"data:image/jpeg;base64,{payload}"
 
 
+def _image_url_block(uri: Any) -> dict[str, Any]:
+    """The OpenAI-shaped image block llama-server accepts."""
+    return {"type": "image_url", "image_url": {"url": uri}}
+
+
 def build_messages(request: GenerationRequest) -> list[dict[str, Any]]:
     """Lay the request out as OpenAI-shaped multimodal chat messages.
 
-    The label precedes its own image here for the same reason it does in the
-    transformers backend: the binding between a named view and its pixels is what
-    the whole rendering strategy rests on, and it has to be identical on both
-    paths or the two backends stop being comparable.
+    The block *type* is llama.cpp's (``image_url`` with a data URI), but the
+    *ordering* — label immediately before its own image, question last — comes
+    from :func:`~satquery.models.prompts.layout.user_turn_content`, the same
+    function the transformers backend and the training records use. The binding
+    between a named view and its pixels is what the whole rendering strategy
+    rests on, and it has to be identical on every path or the backends stop
+    being comparable.
     """
-    content: list[dict[str, Any]] = []
-    for image in request.images:
-        content.append({"type": "text", "text": image.label})
-        content.append({"type": "image_url", "image_url": {"url": encode_data_uri(image)}})
-    content.append({"type": "text", "text": request.user})
+    content = user_turn_content(
+        [image.label for image in request.images],
+        request.user,
+        images=[encode_data_uri(image) for image in request.images],
+        image_block=_image_url_block,
+    )
     return [
         {"role": "system", "content": request.system},
         {"role": "user", "content": content},

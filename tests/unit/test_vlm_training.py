@@ -1176,21 +1176,47 @@ def test_profile_env_is_applied_without_clobbering_an_explicit_one(
 
 
 def test_chat_records_carry_the_views_in_slot_order(ben_row: dict[str, Any]) -> None:
-    """The image blocks and the system turn's labels describe the same views."""
+    """Each view's label is the text part immediately before its own placeholder."""
     sample = cb.from_bigearthnet(ben_row, rng=random.Random(0), augment=False)[0]
     record = qlora.sample_to_chat(sample, max_views=6)
 
-    roles = [turn["role"] for turn in record["messages"]]
-    assert roles == ["system", "user", "assistant"]
-    images = [block for block in record["messages"][1]["content"] if block["type"] == "image"]
+    roles = [turn["role"] for turn in record["prompt"]]
+    assert roles == ["system", "user"]
+    user = record["prompt"][1]["content"]
+    images = [i for i, block in enumerate(user) if block["type"] == "image"]
     assert len(images) == 6  # capped at the §6.1 budget, from seven rendered views
-    assert [block["label"] for block in images] == [
-        view.label for view in sample.views[:6]
-    ]
+    # The label is a *text part* right before the image — the chat template
+    # prints text parts and ignored the old `label` key entirely (plan fact 7).
+    assert [user[i - 1]["text"] for i in images] == [view.label for view in sample.views[:6]]
+    assert [user[i - 1]["type"] for i in images] == ["text"] * 6
     assert record["images"] == [view.path for view in sample.views[:6]]
-    assert record["messages"][0]["content"][0]["text"] == sample.system
-    assert record["messages"][2]["content"][0]["text"] == sample.assistant
-    assert record["messages"][1]["content"][-1]["text"] == sample.user
+    assert record["prompt"][0]["content"][0]["text"] == sample.system
+    assert user[-1]["text"] == sample.user
+
+
+def test_records_are_prompt_completion_shaped(ben_row: dict[str, Any]) -> None:
+    """G4: keys exactly {prompt, completion, images}; roles [system, user] / [assistant].
+
+    The shape *is* the masking mechanism: trl's vision collator masks the
+    prompt only for prompt-completion records. A `messages` record trains on
+    the whole sequence — the 19-hour run's failure.
+    """
+    sample = cb.from_bigearthnet(ben_row, rng=random.Random(0), augment=False)[0]
+    record = qlora.sample_to_chat(sample, max_views=6)
+    assert set(record) == {"prompt", "completion", "images"}
+    assert [turn["role"] for turn in record["prompt"]] == ["system", "user"]
+    assert [turn["role"] for turn in record["completion"]] == ["assistant"]
+
+
+def test_completion_holds_only_the_assistant_text(ben_row: dict[str, Any]) -> None:
+    """G4: no image placeholders and no system text in the completion."""
+    sample = cb.from_bigearthnet(ben_row, rng=random.Random(0), augment=False)[0]
+    record = qlora.sample_to_chat(sample, max_views=6)
+    (turn,) = record["completion"]
+    assert turn["content"] == [{"type": "text", "text": sample.assistant}]
+    assert qlora.record_completion_text(record) == sample.assistant
+    assert sample.system not in sample.assistant
+    assert qlora.completion_text(sample.assistant) == f"{sample.assistant}<|im_end|>\n"
 
 
 def test_chat_records_satisfy_trls_placeholder_contract(ben_row: dict[str, Any]) -> None:
@@ -1202,7 +1228,7 @@ def test_chat_records_satisfy_trls_placeholder_contract(ben_row: dict[str, Any])
     vision *only* if an ``image``/``images`` key is present. Break either and the
     processor expands placeholders against an empty iterator, which surfaces as a
     bare ``StopIteration`` deep inside ``get_text_with_replacements`` — an error
-    that names nothing about the cause.
+    that names nothing about the cause. Counted over ``prompt`` (plan §1.2).
     """
     for sample in cb.from_bigearthnet(ben_row, rng=random.Random(0), augment=False):
         record = qlora.sample_to_chat(sample, max_views=6)
@@ -1210,7 +1236,7 @@ def test_chat_records_satisfy_trls_placeholder_contract(ben_row: dict[str, Any])
         assert qlora.image_placeholder_count(record) == len(record["images"])
         blocks = [
             block
-            for message in record["messages"]
+            for message in record["prompt"]
             for block in message["content"]
             if block["type"] == "image"
         ]
@@ -1219,16 +1245,24 @@ def test_chat_records_satisfy_trls_placeholder_contract(ben_row: dict[str, Any])
 
 
 def test_placeholder_count_ignores_filled_blocks() -> None:
-    """A block that already carries its payload is not a placeholder to fill."""
+    """A block that already carries its payload is not a placeholder to fill.
+
+    A `text: None` beside the placeholder — what ``Dataset.from_list`` adds when
+    it unifies the content structs — still counts, as it does for trl.
+    """
     filled = {
-        "messages": [
+        "prompt": [
             {"role": "user", "content": [{"type": "image", "image": "a.png"},
-                                         {"type": "image"},
+                                         {"type": "image", "text": None},
                                          {"type": "text", "text": "q"}]}
         ]
     }
     assert qlora.image_placeholder_count(filled) == 1
-    assert qlora.image_placeholder_count({"messages": []}) == 0
+    assert qlora.image_placeholder_count({"prompt": []}) == 0
+    # A regression to the old shape counts nothing, so it fails the equality
+    # with len(images) instead of silently training on the whole sequence.
+    assert qlora.image_placeholder_count({"messages": [{"role": "user", "content": [
+        {"type": "image"}]}]}) == 0
 
 
 def test_loading_a_corpus_truncates_and_prefixes(tmp_path: Path) -> None:
@@ -1713,11 +1747,11 @@ def test_a_corpus_pointing_at_unrendered_views_is_refused_before_the_weights(
     present = tmp_path / "TC.jpg"
     present.write_bytes(b"x")
 
-    good = [{"images": [str(present)], "messages": []}]
+    good = [{"images": [str(present)], "prompt": []}]
     assert qlora.missing_images(good) == []
     qlora.guard_images_present(good, "good.jsonl")
 
-    bad = [{"images": [str(present), str(tmp_path / "gone.png")], "messages": []}]
+    bad = [{"images": [str(present), str(tmp_path / "gone.png")], "prompt": []}]
     assert qlora.missing_images(bad) == [str(tmp_path / "gone.png")]
     with pytest.raises(qlora.ProfileError, match="referenced view file"):
         qlora.guard_images_present(bad, "bad.jsonl")
@@ -1757,6 +1791,27 @@ def test_trainer_arguments_exist_on_the_installed_trl() -> None:
     assert kwargs["max_steps"] == -1
     assert kwargs["eval_strategy"] == "steps"
     assert kwargs["gradient_checkpointing_kwargs"] == {"use_reentrant": False}
+    # The pin the whole masking fix rests on (plan §1.5 G1).
+    assert trl.__version__ == "1.12.0"
+
+
+def test_sft_config_pins_completion_only_loss() -> None:
+    """G4: the masking flag is explicit True and the dead-end flag explicit False.
+
+    ``completion_only_loss=None`` would auto-detect from the record shape and a
+    regression to ``messages`` would silently revert to full-sequence loss.
+    ``assistant_only_loss=True`` raises for vision datasets on trl 1.12.
+    """
+    kwargs = qlora.sft_config_kwargs(
+        profile=qlora.load_profile(qlora.DEFAULT_PROFILE_PATH),
+        output_dir=Path("runs/x"),
+        has_eval=True,
+    )
+    assert kwargs["completion_only_loss"] is True
+    assert kwargs["assistant_only_loss"] is False
+    assert kwargs["pad_to_multiple_of"] is None
+    assert kwargs["truncation_mode"] == "keep_start"
+    assert "packing" not in kwargs and "padding_free" not in kwargs
 
 
 def test_trainer_arguments_track_the_profile() -> None:
@@ -2019,3 +2074,325 @@ def test_evidence_qa_answers_are_citable_and_refusals_stay_a_minority(
 
     refusals = [s for s in samples if s.id.endswith(":unmeasured")]
     assert 0 < len(refusals) < len(samples) * 0.25
+
+
+# ------------------------------------------- the pre-flight guards (plan §1.5)
+
+
+def test_token_budget_counts_images_by_arithmetic_and_flags_overruns(tmp_path: Path) -> None:
+    """G3: an over-long sample loses its completion to right-truncation, silently.
+
+    Text only — no pixels decoded — with each placeholder standing for
+    ``tokens_per_view`` tokens, which is what the processor would expand it to.
+    """
+    from tests.unit.fake_processor import FakeProcessor
+
+    tokenizer = FakeProcessor().tokenizer
+    records = [
+        {
+            "prompt": [
+                {"role": "system", "content": [{"type": "text", "text": "rules"}]},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Image 1"}, {"type": "image"},
+                    {"type": "text", "text": "Image 2"}, {"type": "image"},
+                    {"type": "text", "text": "what?"},
+                ]},
+            ],
+            "completion": [{"role": "assistant", "content": [{"type": "text", "text": "Yes."}]}],
+            "images": ["a", "b"],
+        }
+    ]
+    # tokenizer.apply_chat_template is what the guard calls; the fake has it.
+    tokenizer.apply_chat_template = FakeProcessor().apply_chat_template  # type: ignore[attr-defined]
+
+    assert qlora.prompt_token_count(records[0], tokenizer, tokens_per_view=144) > 2 * 144
+    assert qlora.completion_token_count(records[0], tokenizer) == 3  # "Yes." <|im_end|> \n
+
+    report = qlora.token_budget_report(records, tokenizer, max_seq_len=4096, tokens_per_view=144)
+    assert report.ok and report.checked == 1
+    assert report.prompt_max == qlora.prompt_token_count(records[0], tokenizer, 144)
+
+    tight = qlora.token_budget_report(records, tokenizer, max_seq_len=300, tokens_per_view=144)
+    assert [o.index for o in tight.offenders] == [0]
+    assert tight.offenders[0].total_tokens == (
+        tight.offenders[0].prompt_tokens + tight.offenders[0].completion_tokens
+        + qlora.TOKEN_BUDGET_MARGIN
+    )
+    with pytest.raises(qlora.ProfileError, match="exceed max_seq_len=300"):
+        qlora.guard_token_budget(records, tokenizer, 300, 144, label="t.jsonl")
+
+
+def test_image_tokens_per_view_reproduces_the_measured_counts() -> None:
+    """147456 px → 144 tokens (the training profile); 448² → 196 (the base repo)."""
+    assert qlora.image_tokens_per_view(147_456) == 144
+    assert qlora.image_tokens_per_view(448 * 448) == 196
+    profile = qlora.load_profile(qlora.DEFAULT_PROFILE_PATH)
+    assert qlora.image_tokens_per_view(profile.data.max_pixels) == 144
+
+
+def test_answer_token_mask_drops_the_two_structural_tokens_per_row() -> None:
+    """§3.6: the last two supervised positions of each row are not answer tokens."""
+    torch = pytest.importorskip("torch")
+    shift_labels = torch.tensor(
+        [
+            [-100, -100, 7, 8, 9, 151645, 198, -100],  # 5 supervised → 3 answer
+            [-100, 4, 151645, 198, -100, -100, -100, -100],  # 3 → 1
+            [-100, 151645, 198, -100, -100, -100, -100, -100],  # 2 → 0, never negative
+        ]
+    )
+    mask = qlora.answer_token_mask(shift_labels)
+    assert mask.tolist() == [
+        [False, False, True, True, True, False, False, False],
+        [False, True, False, False, False, False, False, False],
+        [False] * 8,
+    ]
+    assert qlora.answer_token_mask(shift_labels, tail=0).tolist() == (shift_labels != -100).tolist()
+
+
+def test_stratified_subset_spreads_over_source_and_task() -> None:
+    """§7.6: the sanity subset is no longer the file's first hundred lines."""
+    samples = [_sample(i, cb.CorpusSource.BIGEARTHNET_V2) for i in range(20)]
+    samples += [_sample(100 + i, cb.CorpusSource.VRSBENCH) for i in range(20)]
+    chosen = qlora.stratified_subset(samples, 8, seed=1)
+    assert len(chosen) == 8
+    by_source = {s.source for s in chosen}
+    assert by_source == {cb.CorpusSource.BIGEARTHNET_V2, cb.CorpusSource.VRSBENCH}
+    assert [s.id for s in qlora.stratified_subset(samples, 8, seed=1)] == [s.id for s in chosen]
+    assert [s.id for s in qlora.stratified_subset(samples, 8, seed=2)] != [s.id for s in chosen]
+    assert len(qlora.stratified_subset(samples, 1000)) == 40
+    assert qlora.stratified_subset(samples, 0) == []
+
+
+def test_loading_a_corpus_can_stratify_its_limit(tmp_path: Path) -> None:
+    path = tmp_path / "train.jsonl"
+    rows = [_sample(i, cb.CorpusSource.BIGEARTHNET_V2) for i in range(10)]
+    rows += [_sample(100 + i, cb.CorpusSource.VRSBENCH) for i in range(10)]
+    cb.write_jsonl(path, rows)
+    head = qlora.load_corpus(path, limit=4)
+    spread = qlora.load_corpus(path, limit=4, stratify_seed=0)
+    assert len(head) == len(spread) == 4
+    # _sample writes views/<index>/TC.jpg; indices < 100 are BigEarthNet.
+    index_of = lambda r: int(r["images"][0].split("/")[1])  # noqa: E731
+    assert all(index_of(r) < 100 for r in head)
+    assert {index_of(r) < 100 for r in spread} == {True, False}
+
+
+def test_the_trainer_verifies_its_own_diet(tmp_path: Path) -> None:
+    """§5.3: counts come from the JSONL lines, and a source under its floor refuses."""
+    path = tmp_path / "train.jsonl"
+    rows = [_sample(i, cb.CorpusSource.BIGEARTHNET_V2) for i in range(5)]
+    rows += [_sample(100 + i, cb.CorpusSource.VRSBENCH) for i in range(2)]
+    cb.write_jsonl(path, rows)
+    assert qlora.corpus_composition(path) == {"bigearthnet_v2": 5, "vrsbench": 2}
+    assert qlora.guard_composition(path, {"bigearthnet_v2": 5, "vrsbench": 2}) == {
+        "bigearthnet_v2": 5, "vrsbench": 2
+    }
+    assert qlora.guard_composition(path, {})  # no expectation, no refusal
+    with pytest.raises(qlora.ProfileError, match=r"vrsbench: 2 < 3"):
+        qlora.guard_composition(path, {"vrsbench": 3})
+    with pytest.raises(qlora.ProfileError, match=r"cdvqa: 0 < 1"):
+        qlora.guard_composition(path, {"cdvqa": 1})
+
+
+def test_the_profile_states_a_floor_for_every_sprint_source() -> None:
+    profile = qlora.load_profile(qlora.DEFAULT_PROFILE_PATH)
+    assert set(profile.data.expected_sources) == {
+        "bigearthnet_v2", "vrsbench", "rsvqa_hr", "cdvqa", "evidence_qa"
+    }
+    assert all(floor > 0 for floor in profile.data.expected_sources.values())
+
+
+def test_mask_audit_report_summarises_and_refuses() -> None:
+    good = qlora.MaskAuditRecord(
+        index=0, prompt_tokens=1500, completion_tokens=4, image_tokens=720, views=5,
+        sequence_tokens=1504, ok=True,
+    )
+    bad = good.model_copy(
+        update={"index": 7, "ok": False, "problems": ["an <|image_pad|> position is unmasked"]}
+    )
+    report = qlora.MaskAuditReport(
+        audited=2, passed=1, max_length=4096, tokens_per_view=144, prompt_min=1500,
+        prompt_max=1500, completion_min=4, completion_max=4, image_min=720, image_max=720,
+        truncated=0, records=[good, bad],
+    )
+    assert not report.ok
+    assert report.summary().startswith("mask audit: 1/2 ok · prompt 1,500–1,500 tok")
+    with pytest.raises(qlora.ProfileError, match=r"#7: an <\|image_pad\|> position"):
+        qlora.guard_masks(report)
+    clean = report.model_copy(update={"passed": 2, "records": [good, good]})
+    assert clean.ok
+    qlora.guard_masks(clean)
+
+
+def test_train_script_exposes_the_probe_flags() -> None:
+    """--eval-first and the mask-audit sample count reach the parser and the resume line."""
+    import train_vlm
+
+    args = train_vlm.parse_args(
+        ["--eval-first", "--mask-audit-samples", "8", "--output-dir", "runs/x"]
+    )
+    assert args.eval_first is True
+    assert args.mask_audit_samples == 8
+    assert "--eval-first" in train_vlm.resume_command(args, Path("runs/x"))
+    assert train_vlm.parse_args([]).mask_audit_samples == qlora.MASK_AUDIT_SAMPLES
+    assert train_vlm.EXIT_REFUSED_MASKS == 5
+
+
+# ------------------------------------- grounding target format (plan §2.5)
+
+
+def _ben_txt_box_row(
+    question: str, labels: list[str] | None = None, **extra: Any
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "ID": 9,
+        "patch_id": "p9",
+        "split": "train",
+        "view_paths": {"TC": "views/ben2/p9/TC.png"},
+        "input": question,
+        "output": "[0.04 0.73, 0.11 1.0]",
+        "type": "bounding box",
+        "category": "reference",
+    }
+    if labels is not None:
+        row["labels"] = labels
+    row.update(extra)
+    return row
+
+
+def test_canonical_grounding_answers_are_tagged_boxes_or_none() -> None:
+    tagged = (
+        "<|object_ref_start|>pastures<|object_ref_end|><|box_start|>(0,730),(110,1000)<|box_end|>"
+    )
+    assert box_format.is_canonical_answer(tagged)
+    assert box_format.is_canonical_answer(tagged + tagged)
+    assert box_format.is_canonical_answer("NONE")
+    # Every form the previous corpus or the model has been seen to emit, refused:
+    assert not box_format.is_canonical_answer("<|box_start|>(0,730),(110,1000)<|box_end|>")
+    assert not box_format.is_canonical_answer("pastures(0,730),(110,1000)")
+    assert not box_format.is_canonical_answer(tagged + " ")
+    assert not box_format.is_canonical_answer("NONE.")
+    assert not box_format.is_canonical_answer("")
+    with pytest.raises(box_format.BoxFormatError, match="no label"):
+        box_format.serialise_answer([box_format.NormalisedBox(0, 730, 110, 1000)])
+    assert box_format.serialise_answer([]) == "NONE"
+
+
+def test_grounding_with_a_ref_is_tagged_with_it() -> None:
+    row = _ben_txt_box_row("Identify the location of the <ref>largest region of pastures</ref>.")
+    (sample,) = cb.from_bigearthnet_txt(row, augment=False)
+    assert sample.assistant == (
+        "<|object_ref_start|>largest region of pastures<|object_ref_end|>"
+        "<|box_start|>(40,730),(110,1000)<|box_end|>"
+    )
+    assert box_format.is_canonical_answer(sample.assistant)
+    assert box_format.parse(sample.assistant)[0].label == "largest region of pastures"
+
+
+def test_grounding_at_a_point_takes_the_patch_class_when_it_is_unambiguous() -> None:
+    """``<point>`` questions name no class; a single-label patch resolves it."""
+    row = _ben_txt_box_row(
+        "Create a bounding box around the land cover class instance at "
+        "<point>(0.04, 0.86)</point> in the satellite image.",
+        labels=["Pastures"],
+    )
+    assert cb.grounding_label(row) == "Pastures"
+    (sample,) = cb.from_bigearthnet_txt(row, augment=False)
+    assert sample.assistant.startswith("<|object_ref_start|>Pastures<|object_ref_end|>")
+    assert box_format.is_canonical_answer(sample.assistant)
+
+
+def test_grounding_at_a_point_on_a_multi_class_patch_is_excluded_not_bare() -> None:
+    """Never the bare form: the row is dropped under every skip policy."""
+    question = (
+        "Generate a bounding box enclosing the land cover class instance positioned at "
+        "<point>(0.73, 0.23)</point> in the image."
+    )
+    for labels in (None, [], ["Pastures", "Broad-leaved forest"]):
+        row = _ben_txt_box_row(question, labels=labels)
+        assert cb.grounding_label(row) is None
+        assert cb.from_bigearthnet_txt(row, augment=False) == []
+        assert cb.from_bigearthnet_txt(row, augment=False, skip_uncitable=False) == []
+    with pytest.raises(cb.UnlabelledGroundingError):
+        cb._ben_txt_answer(_ben_txt_box_row(question), TaskType.GROUNDING)
+
+
+def test_assemble_refuses_a_bare_box_for_any_grounding_source(
+    optical_views: list[cb.SourceView],
+) -> None:
+    """The guard sits in ``assemble``, so no adapter — present or future — can emit one."""
+    with pytest.raises(cb.CorpusError, match="canonical"):
+        cb.assemble(
+            sample_id="x:1",
+            source=cb.CorpusSource.VRSBENCH,
+            task=TaskType.GROUNDING,
+            pair_type=PairType.SINGLE,
+            views=optical_views,
+            question="Locate the runway.",
+            answer="<|box_start|>(0,730),(110,1000)<|box_end|>",
+            audit=False,
+        )
+    sample = cb.assemble(
+        sample_id="x:2",
+        source=cb.CorpusSource.VRSBENCH,
+        task=TaskType.GROUNDING,
+        pair_type=PairType.SINGLE,
+        views=optical_views,
+        question="Locate the runway.",
+        answer="NONE",
+        audit=False,
+    )
+    assert sample.assistant == "NONE"
+
+
+def test_vrsbench_grounding_without_a_class_falls_back_to_the_expression() -> None:
+    row = {
+        "image_id": "v1",
+        "image_path": "views/vrsbench/v1/TC.png",
+        "split": "train",
+        "objects": [
+            {"obj_id": 0, "obj_cls": "", "referring_sentence": "the white aircraft on the apron",
+             "obj_coord": [0.1, 0.1, 0.2, 0.2]},
+            {"obj_id": 1, "obj_cls": "ship", "referring_sentence": "the ship at the pier",
+             "obj_coord": [0.5, 0.5, 0.7, 0.7]},
+        ],
+    }
+    grounded = [s for s in cb.from_vrsbench(row, augment=False) if s.task is TaskType.GROUNDING]
+    assert [box_format.parse(s.assistant)[0].label for s in grounded] == [
+        "the white aircraft on the apron", "ship"
+    ]
+    assert cb.noncanonical_grounding(grounded) == []
+
+
+def test_every_grounding_sample_the_adapters_emit_is_canonical(tmp_path: Path) -> None:
+    """Corpus-level: written, read back, scanned — no bare box survives."""
+    samples = cb.from_bigearthnet_txt(
+        _ben_txt_box_row("Locate the <ref>river</ref>."), augment=False
+    )
+    samples += cb.from_bigearthnet_txt(
+        _ben_txt_box_row("Box the instance at <point>(0.5, 0.5)</point>.", labels=["Pastures"]),
+        augment=False,
+    )
+    samples.append(
+        cb.from_dior_rsvg(
+            {
+                "image_id": "d1", "image_path": "views/dior_rsvg/d1/TC.png", "split": "train",
+                "expression": "the white aircraft", "bbox": [10, 10, 50, 50],
+                "width": 100, "height": 100,
+            },
+            augment=False,
+        )
+    )
+    assert sum(1 for s in samples if s.task is TaskType.GROUNDING) == 3
+    path = tmp_path / "train.jsonl"
+    cb.write_jsonl(path, samples)
+    assert cb.noncanonical_grounding(qlora.iter_corpus(path)) == []
+
+    # A hand-edited bare box in the file is found by the same scan.
+    line = json.loads(path.read_text().splitlines()[0])
+    line["messages"][2]["content"] = "<|box_start|>(0,730),(110,1000)<|box_end|>"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line) + "\n")
+    assert [answer for _, answer in cb.noncanonical_grounding(qlora.iter_corpus(path))] == [
+        "<|box_start|>(0,730),(110,1000)<|box_end|>"
+    ]
