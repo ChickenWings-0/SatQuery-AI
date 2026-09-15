@@ -12,6 +12,20 @@ flagged as uncited — with a **versioned, schema-validated audit trace** of wha
 The VLM (Qwen3-VL-8B with a QLoRA adapter) is one tool among many, never the system.
 Runs fully local on one 24 GB consumer GPU and survives the network being pulled.
 
+## Current model
+
+| | `runs/sq-lora-v2-full/adapter` (2026-09-15) |
+|---|---|
+| Base | `Qwen/Qwen3-VL-8B-Instruct` · NF4 backbone during training · LoRA r=16, α=32 on all LLM projections + last 8 vision blocks |
+| Corpus | 53,098 train / 5,902 val from BigEarthNet-v2, VRSBench, RSVQA-HR, CDVQA and Evidence QA (`data/processed/corpus/v2-full/`) |
+| Epoch 1.0 | train loss 0.3025 · eval loss 0.1867 · answer-token accuracy 81.76 % |
+| Probes | 100 % resolution on the grounding and cross-modal fact-checking probes (`scripts/test_inference.py`) |
+| Served as | bf16 base + adapter through the transformers backend, or merged → Q4_K_M GGUF through `llama-server` (see `ROADMAP_REMAINING_FIXES.md`, Track 2) |
+
+Benchmark tables for the presentation are produced by the Track 1 suite and
+committed under `runs/eval/<name>/results.md`; until that lands, the numbers
+above come from the training run's own eval split.
+
 ## What it does
 
 | Capability | How |
@@ -40,14 +54,21 @@ the UI against recorded fixtures.
 Serving the fine-tuned model needs the optional extras and a ROCm/CUDA torch:
 
 ```bash
-uv sync --extra vlm                       # + torch/transformers/accelerate
+uv sync --extra vlm                       # + torch/transformers/accelerate (first time only)
 source scripts/rocm_env.sh                # every shell that touches the GPU
-export SATQUERY_VLM_ADAPTER_PATH=runs/full-epoch-v1/adapter
+cp .env.example .env                      # SATQUERY_* settings, read by pydantic-settings
+export SATQUERY_VLM_BACKEND=hf
+export SATQUERY_VLM_ADAPTER_PATH=runs/sq-lora-v2-full/adapter
 ```
+
+The offline path — a Q4_K_M GGUF behind `scripts/serve_vlm.sh` with
+`SATQUERY_VLM_BACKEND=llamacpp` — is the same interface and needs no Python ML
+stack at all; do not run both at once on a 24 GB card.
 
 > On a ROCm box the lockfile's CUDA torch is replaced by hand — see
 > `DOCS/AI_HANDOFF/05_ENVIRONMENT_AND_SETUP.md`. **Do not run a bare `uv sync`
-> in that environment**: it removes the hand-installed stack.
+> or a plain `uv run` in that environment**: both re-sync the lockfile and
+> remove the hand-installed stack. Use `uv run --no-sync ...` or `.venv/bin/...`.
 
 ## Quality gates
 
@@ -64,14 +85,17 @@ pre-commit hooks with `uv run pre-commit install`.
 ## Layout
 
 ```
-src/satquery/        the package: api/ agent/ evidence/ ingest/ render/ tools/ models/ trace/ training/
-scripts/             render passes, corpus build, training, export, smoke tests
+src/satquery/        the package: api/ agent/ eval/ evidence/ ingest/ render/ tools/ models/ trace/ training/
+scripts/             render passes, corpus build, training, merge/export, serving, smoke tests, git/ policy
 training/            data builders and configs for the QLoRA and CD runs
-frontend/            React 19 + Vite + Tailwind v4 mission-control UI, typed from openapi.json
+runs/                training and eval outputs (git-ignored except runs/eval/*/results.*)
+frontend/            React 19 + Vite + Tailwind v4 console: landing, console, maps, projects, saved, report
 tests/               hermetic: synthetic rasters, no network, torch only where it is under test
 DOCS/                Master.md (plan) · API_CONTRACT.md (frozen 1.0) · AGENT_POLICY_DAG.md ·
-                     project_audit.md · remediation_plan.md · AI_HANDOFF/ (start here)
+                     ML_PIPELINE_RECOVERY_PLAN.md · frontend_blueprint.md · AI_HANDOFF/ (start here)
 configs/             registry.yaml, policy_table.yaml, training profiles
+PRODUCT.md           who this is for and what "done" means for the demo
+ROADMAP_REMAINING_FIXES.md   the four tracks left before the SIH final
 ```
 
 ## Data and training
@@ -85,11 +109,35 @@ quarantined benchmark test splits; a leak fails the build.
 <https://huggingface.co/datasets/danielz01/DIOR-RSVG>, `export HF_TOKEN=hf_...`, then
 re-run `./run_overnight.sh --stage 1`. Until then the build excludes it and says so.
 
-The current adapter (`runs/full-epoch-v1`) and its known limitations are documented
-honestly in `DOCS/project_audit.md` §2 and `DOCS/AI_HANDOFF/06_DATA_AND_TRAINING.md`.
+The v2 corpus is rebuilt end-to-end by `scripts/rebuild_corpus_v2.sh`; the
+training profile is `configs/train/qlora_qwen3vl8b_rocm24g.yaml` and the run is
+launched with `scripts/train_vlm.py`. `scripts/preflight_train_serve_parity.py`
+proves the serving prompt is byte-identical to the training prompt before any
+adapter is trusted. The previous adapter (`runs/full-epoch-v1`) and its
+limitations remain documented in `DOCS/project_audit.md` §2 and
+`DOCS/AI_HANDOFF/06_DATA_AND_TRAINING.md`; `DOCS/ML_PIPELINE_RECOVERY_PLAN.md`
+is the record of what changed between v1 and v2.
+
+## Contributing
+
+**This repository has one branch: `main`.** No feature, backup or experiment
+branches — work lands on `main` in small, reviewed commits, and every clone is
+expected to be fast-forwardable to `origin/main`. `scripts/git/main_only.sh` is
+installed as a `pre-commit` and `pre-push` hook (also declared in
+`.pre-commit-config.yaml`) and refuses to commit or push from any other branch;
+`SATQUERY_ALLOW_BRANCH=1` bypasses it for a deliberate detached-HEAD bisect.
+
+```bash
+git switch main && git pull --ff-only
+# ... work ...
+make ci && git add -A && git commit && git push origin main
+```
 
 ## Where to read next
 
 1. `DOCS/AI_HANDOFF/00_START_HERE.md` — the 60-second summary and reading order.
-2. `DOCS/API_CONTRACT.md` — the frozen wire contract (additive changes only).
-3. `DOCS/remediation_plan.md` — what is being fixed and in which order.
+2. `ROADMAP_REMAINING_FIXES.md` — the four tracks left before the final: benchmark
+   suite, LoRA merge + GGUF for the air-gapped laptop, end-to-end parity, and the
+   SITREP / GeoJSON / STAC map features.
+3. `DOCS/API_CONTRACT.md` — the frozen wire contract (additive changes only).
+4. `DOCS/frontend_blueprint.md` — the console's information architecture and design system.
