@@ -85,7 +85,16 @@ traces.sqlite3
 # Adapter checkpoints, the merged export, and each run's manifest. A ~200 MB
 # adapter per save x ~20 saves is not what a git history is for; the adapter
 # that ships gets versioned in the registry (Master.md §8 Phase 7), not here.
-/runs/
+# The one exception is runs/eval/<name>/: the benchmark tables that feed the
+# slides (ROADMAP_REMAINING_FIXES.md, Track 1) are small text and are the
+# evidence for every number we present, so they are tracked on purpose.
+/runs/*
+!/runs/eval/
+/runs/eval/*/*
+!/runs/eval/*/results.md
+!/runs/eval/*/results.json
+!/runs/eval/*/results.csv
+!/runs/eval/*/sample_ids.json
 /outputs/
 /output/
 wandb/
@@ -100,7 +109,9 @@ nohup.out
 *.err
 # Inference / throughput probe dumps.
 /probe*/
-/runs/**/*.json
+/runs/*/**/*.json
+!/runs/eval/*/results.json
+!/runs/eval/*/sample_ids.json
 *_probe.json
 probe_*.json
 run_manifest.json
@@ -166,13 +177,21 @@ frontend/test-results/
 # Fonts are synced from node_modules by `npm run fonts:sync`, but the copies
 # in public/fonts are small, self-hosted and preloaded by index.html — they
 # stay tracked deliberately.
+# Playwright/agent screenshot dumps that land in a mis-resolved output path.
+frontend/undefined/
+frontend/.vercel/
+frontend/playwright/.cache/
 
 # =========================
 # 7. Secrets & IDEs
 # =========================
+# Local serving config: SATQUERY_* variables read by pydantic-settings. The
+# committed .env.example files (root and frontend/) are the documentation.
 .env
 .env.*
 !.env.example
+# Demo-bundle checksums and archives are built by hand, never committed.
+SHA256SUMS
 *.pem
 *.key
 .vscode/
