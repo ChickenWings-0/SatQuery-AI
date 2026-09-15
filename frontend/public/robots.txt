@@ -1,0 +1,11 @@
+# SatQuery AI — https://github.com/ChickenWings-0/SatQuery-AI
+# AI crawlers welcome — see /llms.txt. Only device-local pages are disallowed.
+User-agent: *
+Allow: /
+Disallow: /saved
+Disallow: /projects
+Disallow: /history
+Disallow: /report
+Disallow: /report/
+Disallow: /v1/
+# Sitemap: set VITE_PUBLIC_ORIGIN to emit an absolute sitemap URL

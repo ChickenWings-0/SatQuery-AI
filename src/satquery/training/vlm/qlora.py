@@ -171,6 +171,16 @@ class TrainSpec(BaseModel):
 
     per_device_train_batch_size: int = 1
     gradient_accumulation_steps: int = 16
+    # Eval batch is its own knob: transformers defaults it to 8 regardless of
+    # the train batch, and with six 384 px views per sample that is eight times
+    # the activation memory the train loop was sized for. The sanity check on
+    # the RX 7900 XTX trained steps 1-4 fine and went HIP OOM at step 5, the
+    # first eval boundary, inside prediction_step. Stated here so the profile
+    # has one place for both batch sizes.
+    per_device_eval_batch_size: int = 1
+    # How many eval batches' logits/labels stay on the card before being moved
+    # to host. Left at None the trainer accumulates the whole pass on the GPU.
+    eval_accumulation_steps: int | None = 1
     gradient_checkpointing: bool = True
     num_train_epochs: float = 1.0
     learning_rate: float = 1e-4
@@ -833,8 +843,8 @@ def guard_composition(path: Path, expected: Mapping[str, int]) -> dict[str, int]
         table = ", ".join(f"{name}: {have} < {need}" for name, (have, need) in short.items())
         raise ProfileError(
             f"{path} does not contain the sources the profile expects ({table}). "
-            f"Present: {counts}. Rebuild with every source named and "
-            "--on-missing-views fail, or lower data.expected_sources deliberately."
+            f"Present: {counts}. Rebuild with "
+            "scripts/rebuild_corpus_v2.sh, or lower data.expected_sources deliberately."
         )
     return counts
 
@@ -1524,6 +1534,8 @@ def sft_config_kwargs(
         "output_dir": str(output_dir),
         "run_name": profile.run_name,
         "per_device_train_batch_size": profile.train.per_device_train_batch_size,
+        "per_device_eval_batch_size": profile.train.per_device_eval_batch_size,
+        "eval_accumulation_steps": profile.train.eval_accumulation_steps,
         "gradient_accumulation_steps": profile.train.gradient_accumulation_steps,
         "gradient_checkpointing": profile.train.gradient_checkpointing,
         "gradient_checkpointing_kwargs": {"use_reentrant": False},

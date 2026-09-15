@@ -60,6 +60,7 @@ export function ManifestCard({
           <img
             src={previewUrl}
             alt=""
+            aria-hidden
             className="size-24 shrink-0 rounded-lg border border-line object-cover [image-rendering:pixelated]"
           />
         )}

@@ -332,7 +332,39 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--dry-run", action="store_true", help="Build and report, but write nothing."
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Cap the pyarrow CPU and I/O thread pools that decode the streamed "
+        "parquet record batches. pyarrow sizes both to the machine's core count, "
+        "and on a 16-thread box each in-flight batch of BigEarthNet.txt carries its "
+        "own decode buffers — which is what froze a 32 GB machine. The build "
+        "itself is single-process either way; 2 is a safe floor.",
+    )
     return parser.parse_args(argv)
+
+
+def cap_reader_threads(workers: int | None) -> None:
+    """Pin pyarrow's thread pools before ``datasets`` opens anything.
+
+    Must run before the first ``load_dataset`` call: pyarrow creates the pools
+    lazily and honours ``set_cpu_count`` only for threads not yet spawned.
+    """
+    if workers is None:
+        return
+    if workers < 1:
+        raise CorpusError(f"--workers must be >= 1, got {workers}")
+    import os
+
+    # Threads spawned by BLAS / tokenizers inside the adapters follow the same cap.
+    os.environ.setdefault("OMP_NUM_THREADS", str(workers))
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    import pyarrow as pa
+
+    pa.set_cpu_count(workers)
+    pa.set_io_thread_count(workers)
+    print(f"reader threads: pyarrow cpu={pa.cpu_count()} io={pa.io_thread_count()}")
 
 
 def view_suffix(view_id: str) -> str:
@@ -965,6 +997,7 @@ def composition_for(
 def main(argv: Sequence[str] | None = None) -> int:
     """Build the corpus. Returns a process exit code."""
     args = parse_args(argv)
+    cap_reader_threads(args.workers)
     rng = random.Random(args.seed)
     requested = {CorpusSource(name) for name in args.sources}
     tally = HashTally()

@@ -3,6 +3,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import App from '@/App'
+import { bindRouter } from '@/shell/router'
+import { bindTheme } from '@/state/theme'
 import '@/styles/theme.css'
 
 const queryClient = new QueryClient({
@@ -10,6 +12,8 @@ const queryClient = new QueryClient({
 })
 
 function render() {
+  bindTheme()
+  bindRouter()
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>

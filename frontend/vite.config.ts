@@ -9,16 +9,33 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  server: {
-    // The API is a local FastAPI on 8000. Proxying rather than hard-coding an
-    // origin keeps the app same-origin in dev, so SSE and multipart uploads
-    // behave exactly as they will in the packaged build.
-    //
-    // 127.0.0.1 rather than localhost, deliberately: uvicorn binds IPv4 only,
-    // while Node 18+ resolves localhost to ::1 first and every proxied request
-    // fails with ECONNREFUSED.
-    proxy: {
-      '/v1': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+  assetsInclude: ['**/*.glsl'],
+  build: {
+    // Explicit, though it is the default: a `sourcemap: true` copied in from
+    // a debugging session must not ship the source to every visitor.
+    sourcemap: false,
+    manifest: true,
+    chunkSizeWarningLimit: 250,
+    rollupOptions: {
+      output: {
+        // Every heavy dependency lives in the chunk of its one lazy owner
+        // (`DOCS/frontend_blueprint.md` §6.5): `three` + R3F ride with
+        // `Globe.tsx`, `maplibre-gl` with `MapStage.tsx`, `@xyflow/react`
+        // with `DagCanvas.tsx`. Rollup does that from the dynamic-import
+        // boundaries alone; the object form of `manualChunks` would name the
+        // chunks but also hoists them into the entry's static imports, which
+        // is the one thing `scripts/check-bundle.mjs` exists to forbid.
+        // The function below only *names* the chunks Rollup already split,
+        // so the manifest reads `globe-*.js` / `map-*.js` / `dag-*.js`.
+        chunkFileNames: (chunk) => {
+          const ids = chunk.moduleIds
+          const has = (needle: string) => ids.some((id) => id.includes(needle))
+          if (has('node_modules/three/')) return 'assets/globe-[hash].js'
+          if (has('node_modules/maplibre-gl/')) return 'assets/map-[hash].js'
+          if (has('node_modules/@xyflow/')) return 'assets/dag-[hash].js'
+          return 'assets/[name]-[hash].js'
+        },
+      },
     },
   },
 })

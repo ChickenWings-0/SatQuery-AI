@@ -3,8 +3,11 @@
 /*
  * The typefaces, self-hosted.
  *
- * `--font-sans` and `--font-mono` have named Inter and Geist Mono since F0, and
- * nothing loaded either one: no `@font-face`, no link, no import. The whole
+ * `--font-sans` and `--font-mono` name Geist and Geist Mono — one family, two
+ * widths, so the console's labels and its measurements share a skeleton. (They
+ * named Inter and Geist Mono until the landing-page revamp; Inter's `a` and
+ * `y` never quite agreed with Geist Mono's, and the two sat side by side on
+ * every readout.) Before F0 nothing loaded either one: no `@font-face`, no link, no import. The whole
  * product rendered in `system-ui` / `ui-monospace`, which meant the typographic
  * identity was not merely absent, it was *different on every operating system*
  * — Segoe on Windows, SF on macOS, Cantarell here. A design system whose face
@@ -24,26 +27,25 @@
  */
 
 @font-face {
-  font-family: 'Inter Variable';
+  font-family: 'Geist Variable';
   font-style: normal;
   font-weight: 100 900;
   font-display: swap; /* never hide text waiting for a face */
-  src: url('/fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
-  unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
-    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  src: url('/fonts/geist-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'Inter Variable';
+  font-family: 'Geist Variable';
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url('/fonts/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
-  unicode-range:
-    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
-    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
-    U+2C60-2C7F, U+A720-A7FF;
+  src: url('/fonts/geist-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+    U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
 @font-face {
@@ -77,13 +79,14 @@
  * face lands. On a three-column dashboard where the centre column is sized off
  * its content, that reflow is visible as a jolt.
  *
- * These faces are the *local* system fonts, re-declared with Inter's and Geist
+ * These faces are the *local* system fonts, re-declared with Geist's and Geist
  * Mono's own metrics so the first paint already occupies the right space. The
  * overrides are computed, not guessed: read from the `head`/`hhea` tables of the
- * shipped woff2 files, divided by the size-adjust, against Arial's published
- * metrics (which Liberation Sans clones, so the number holds on Linux too).
+ * shipped woff2 files with fontTools, divided by the size-adjust, against
+ * Arial's frequency-weighted lowercase width of 0.5271em (which Liberation
+ * Sans clones, so the number holds on Linux too).
  *
- *   Inter      upm 2048, asc 1984, desc -494, gap 0, avg lowercase 0.5363em
+ *   Geist      upm 1000, asc 1005, desc -295, gap 0, avg lowercase 0.5133em
  *   Geist Mono upm 1000, asc 1005, desc -295, gap 0, avg lowercase 0.6000em
  *
  * Geist Mono lands at size-adjust 100% because both it and every common
@@ -92,11 +95,11 @@
  */
 
 @font-face {
-  font-family: 'Inter Fallback';
+  font-family: 'Geist Fallback';
   src: local('Arial'), local('Liberation Sans'), local('Helvetica Neue'), local('Segoe UI');
-  size-adjust: 101.75%;
-  ascent-override: 95.21%;
-  descent-override: 23.71%;
+  size-adjust: 97.38%;
+  ascent-override: 103.2%;
+  descent-override: 30.29%;
   line-gap-override: 0%;
 }
 
@@ -170,88 +173,152 @@
 @custom-variant wide (@media (min-width: 768px) and (min-height: 500px));
 @custom-variant desk (@media (min-width: 1280px) and (min-height: 500px));
 
+/*
+ * The palette, in OKLCH.
+ *
+ * Every value here is the incumbent hex converted exactly (the hex is kept in
+ * the trailing comment, and `contrast.test.ts` converts OKLCH back to sRGB with
+ * the same matrices before it checks a pair), so the roles and the ratios the
+ * comments quote are unchanged. OKLCH buys two things the hexes could not: a
+ * light theme derived on the same lightness axis (`:root:not(.dark)` below),
+ * and alpha variants of a token written as `oklch(L C H / a)` rather than as a
+ * second, drifting rgba literal.
+ *
+ * Roles, unchanged: terracotta for edges, icons, active state and large text;
+ * sand as the accent's *small-text* voice and the citation-pill fill; white on
+ * `accent-warm-strong` for the one filled button; status hues by role.
+ */
 @theme {
-  /* ── surfaces ─────────────────────────────────────────────────────────── */
-  --color-bg-main: #100c0a; /* near-black warm ground — the canvas            */
-  --color-surface-card: #211814; /* raised: viewer, KPI cards, answer panel   */
-  --color-surface-elevated: #2d2018; /* modals, dropdowns, menus             */
-  --color-surface-sand: #dfa878; /* sand — the secondary accent, chips        */
-  --color-line: #2a1f1a; /* the everyday hairline                             */
-  --color-line-soft: #1e1612; /* internal rules inside a card                 */
-  --color-sidebar: #211814; /* the navigation column is a surface now         */
-  --color-sidebar-hi: #2d2018; /* sidebar hover/raised                        */
-  --color-sidebar-text: #e8d5c4; /* on-sidebar foreground (12.23:1)          */
-
-  /* Secondary text on the nav column: the dimmest tone that still clears
-     4.5:1 against BOTH the column and its hover state (4.98:1 / 4.51:1), so a
-     row does not fail the moment the pointer touches it.                    */
-  --color-sidebar-text-lo: #9a8579;
-
-  /* Status on the nav column. The column shares the card surface now, so
-     these are the base status hues — kept as their own tokens because the
-     health badge reaches for them by role.                                  */
-  --color-sidebar-ok: #22c55e; /* 7.65:1 on sidebar                           */
-  --color-sidebar-warn: #f97316; /* 6.22:1 on sidebar                         */
+  /* ── ground & surfaces ────────────────────────────────────────────────── */
+  --color-bg-main: oklch(0.1587 0.0081 48.16); /* #100c0a — near-black warm ground   */
+  --color-surface-card: oklch(0.2188 0.0165 45.19); /* #211814 — viewer, KPI, answer   */
+  --color-surface-elevated: oklch(0.2568 0.0249 52.9); /* #2d2018 — modals, menus     */
+  --color-surface-sand: oklch(0.772 0.0907 61.97); /* #dfa878 — sand, chips            */
+  --color-line: oklch(0.2508 0.0195 45.68); /* #2a1f1a — the everyday hairline         */
+  --color-line-soft: oklch(0.2087 0.0152 47.97); /* #1e1612 — rules inside a card      */
+  --color-sidebar: oklch(0.2188 0.0165 45.19); /* #211814                              */
+  --color-sidebar-hi: oklch(0.2568 0.0249 52.9); /* #2d2018 — sidebar hover            */
+  --color-sidebar-text: oklch(0.884 0.0312 64.26); /* #e8d5c4 — 12.23:1                */
+  --color-sidebar-text-lo: oklch(0.6324 0.0312 51.61); /* #9a8579 — 4.98:1 / 4.51:1    */
+  --color-sidebar-ok: oklch(0.7227 0.192 149.58); /* #22c55e                           */
+  --color-sidebar-warn: oklch(0.7049 0.1867 47.6); /* #f97316                          */
 
   /* ── text ─────────────────────────────────────────────────────────────── */
-  --color-text-hi: #f0e6df; /* warm off-white (15.84:1 on the ground)         */
-  --color-text-lo: #9a8579; /* warm muted grey-brown (5.57:1 ground, 4.98 card) */
+  --color-text-hi: oklch(0.9309 0.0144 57.58); /* #f0e6df — 15.84:1 on the ground      */
+  --color-text-lo: oklch(0.6324 0.0312 51.61); /* #9a8579 — 5.57:1 ground, 4.98 card   */
 
   /* ── accents ──────────────────────────────────────────────────────────── */
-  --color-accent-warm: #ba704f; /* terracotta — borders, icons, large text    */
-  --color-accent-cool: #ab6242; /* ACTIVE SELECTION only — terracotta, deeper */
-  --color-evidence: #dfa878; /* citation pill FILL only — never as text       */
+  --color-accent-warm: oklch(0.6188 0.1051 44.4); /* #ba704f — borders, icons, large   */
+  --color-accent-cool: oklch(0.5723 0.1053 43.88); /* #ab6242 — ACTIVE SELECTION only  */
+  --color-evidence: oklch(0.772 0.0907 61.97); /* #dfa878 — citation pill FILL only    */
+  --color-accent-warm-text: oklch(0.772 0.0907 61.97); /* #dfa878 — 9.28:1 / 8.30:1    */
+  --color-accent-warm-strong: oklch(0.5723 0.1053 43.88); /* #ab6242 — white on it 4.61 */
+  --color-on-evidence: oklch(0.1587 0.0081 48.16); /* #100c0a — on sand (9.28:1)       */
+  --color-on-accent-cool: oklch(1 0 0); /* #ffffff                                     */
+  --color-accent-glow: oklch(0.6188 0.1051 44.4 / 0.15); /* hover tint                  */
+  --color-bbox: oklch(0.6188 0.1051 44.4 / 0.7); /* bounding-box stroke                 */
+  --color-bbox-fill: oklch(0.6188 0.1051 44.4 / 0.12);
+  --color-bbox-label: oklch(0.772 0.0907 61.97); /* #dfa878                             */
 
-  /* Terracotta at 14px. #ba704f is 5.11:1 on the ground, which passes — but
-     sand is the small-text voice of the accent here (9.28:1 ground, 8.30:1
-     card), and keeps links and labels off the same hue as the button fill.  */
-  --color-accent-warm-text: #dfa878;
+  /* ── status ───────────────────────────────────────────────────────────── */
+  --color-ok: oklch(0.7227 0.192 149.58); /* #22c55e — 8.54:1 ground                   */
+  --color-warn: oklch(0.7049 0.1867 47.6); /* #f97316 — fills, dots, the uncited line  */
+  --color-fail: oklch(0.6617 0.1931 24.05); /* #f25555 — 5.75:1 ground                 */
+  --color-skip: oklch(0.5265 0.0226 59.85); /* #75685e — a mark, 3.61:1                */
+  --color-ok-text: oklch(0.7227 0.192 149.58); /* #22c55e                              */
+  --color-warn-text: oklch(0.7049 0.1867 47.6); /* #f97316                             */
+  --color-skip-text: oklch(0.6589 0.0309 51.64); /* #a28d81 — 4.80:1 on bg-skip/15     */
 
-  /*
-   * The primary button's fill.
-   *
-   * White on #ba704f is 3.81:1, not the 4.6:1 the mockup claimed. Darkened
-   * until white clears: the button is visibly the same terracotta, one step
-   * deeper (4.61:1). The selection colour is the same hex for the same reason.
-   */
-  --color-accent-warm-strong: #ab6242; /* white on it: 4.61:1               */
+  /* ── night-side materials ─────────────────────────────────────────────── */
+  --color-grid: oklch(0.772 0.0907 61.97 / 0.07); /* graticule hairline                */
+  --color-grid-major: oklch(0.772 0.0907 61.97 / 0.14); /* every fourth line           */
+  --color-reticle: oklch(0.772 0.0907 61.97 / 0.4);
+  --color-glass: oklch(0.2188 0.0165 45.19 / 0.62);
+  --color-glass-edge: oklch(0.9309 0.0144 57.58 / 0.08);
+  --color-glass-hi: oklch(1 0 0 / 0.04); /* inset top highlight                        */
+  --color-glow: oklch(0.6188 0.1051 44.4 / 0.22); /* atmospheric radial                 */
+  --color-scrim: oklch(0.1587 0.0081 48.16 / 0.72); /* behind popovers over imagery     */
 
-  /* Foregrounds for the fills. */
-  --color-on-evidence: #100c0a; /* ground-dark on sand (9.28:1)              */
-  --color-on-accent-cool: #ffffff; /* white on deep terracotta (4.61:1)      */
+  /* ── non-colour tokens ────────────────────────────────────────────────── */
+  --blur-glass: 16px;
+  --shadow-float: 0 12px 40px -12px oklch(0 0 0 / 0.6);
+  --shadow-lift: 0 8px 24px -10px oklch(0 0 0 / 0.55);
+  --radius-hud: 0.875rem;
+  --grid-module: 48px;
+  --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-feedback: 120ms;
+  --dur-state: 220ms;
+  --dur-overlay: 300ms;
+  --dur-focal: 720ms;
 
-  /* Tints and overlays. Alpha colours, so they sit on any surface. */
-  --color-accent-glow: rgba(186, 112, 79, 0.15); /* hover tint on cards/nav */
-  --color-bbox: rgba(186, 112, 79, 0.7); /* bounding-box stroke              */
-  --color-bbox-fill: rgba(186, 112, 79, 0.12); /* bounding-box fill          */
-  --color-bbox-label: #dfa878; /* bounding-box label text                    */
-
-  /* ── status: ToolStatus ∪ CheckStatus ─────────────────────────────────── */
-  --color-ok: #22c55e; /* emerald — 8.54:1 ground, 7.65:1 card                */
-  --color-warn: #f97316; /* amber/orange — fills, dots, the uncited underline */
-  --color-fail: #f25555; /* 5.75:1 ground · 5.15:1 card · 4.68:1 on bg-fail/8 */
-  --color-skip: #75685e; /* warm grey — 3.61:1 ground, 3.23:1 card (a mark)  */
-
-  /* Status hues at text weight. Each clears 4.5:1 on the ground, on a card,
-     AND on its own chip tint — the ground that catches people out.          */
-  --color-ok-text: #22c55e; /* 6.32:1 on bg-ok/12                            */
-  --color-warn-text: #f97316; /* 4.54:1 on bg-warn/20 · 5.58:1 on bg-warn/8  */
-  --color-skip-text: #a28d81; /* 4.80:1 on bg-skip/15                        */
-
-  /* ── type ─────────────────────────────────────────────────────────────── */
-  /* `Inter Fallback` / `Geist Mono Fallback` sit between the real face and the
-     generic stack: they are the local system fonts wearing the real face's
-     metrics, so the pre-swap paint is the right size. See the @font-face block
-     at the top of this file. The generic keywords stay last for the machine
-     that has neither the woff2 nor Arial. */
-  --font-sans: 'Inter Variable', 'Inter Fallback', ui-sans-serif, system-ui, sans-serif;
+  /* ── faces ────────────────────────────────────────────────────────────── */
+  --font-sans: 'Geist Variable', 'Geist Fallback', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Geist Mono Variable', 'Geist Mono Fallback', ui-monospace, 'SFMono-Regular',
     'Menlo', monospace;
+  /* The display voice is the body voice at a different size: Geist carries the
+     landing headline as well as the console's labels, and the two stylistic
+     sets that make it read as Geist (single-storey a, straight-leg y) are
+     switched on in `.t-display` and friends rather than globally. */
+  --font-display: var(--font-sans);
+}
+
+/*
+ * The light theme: warm paper, the same roles.
+ *
+ * `useThemeStore` puts `.dark` on <html>; without it these overrides win. They
+ * are plain custom properties on the same names Tailwind's utilities resolve
+ * at runtime, so no component knows which theme it is in. Every pair below is
+ * asserted in `contrast.test.ts` (the light block), same as the dark set.
+ */
+:root:not(.dark) {
+  color-scheme: light;
+  --color-bg-main: oklch(0.975 0.01 80);
+  --color-surface-card: oklch(0.995 0.004 80);
+  --color-surface-elevated: oklch(1 0 0);
+  --color-surface-sand: oklch(0.85 0.08 70);
+  --color-line: oklch(0.88 0.014 70);
+  --color-line-soft: oklch(0.93 0.01 75);
+  --color-sidebar: oklch(0.96 0.012 78);
+  --color-sidebar-hi: oklch(0.92 0.016 75);
+  --color-sidebar-text: oklch(0.22 0.02 50);
+  --color-sidebar-text-lo: oklch(0.45 0.03 50);
+  --color-sidebar-ok: oklch(0.48 0.15 150);
+  --color-sidebar-warn: oklch(0.52 0.16 45);
+  --color-text-hi: oklch(0.22 0.02 50);
+  --color-text-lo: oklch(0.47 0.03 50);
+  --color-accent-warm: oklch(0.56 0.11 40);
+  --color-accent-cool: oklch(0.5 0.12 38);
+  --color-evidence: oklch(0.85 0.08 70);
+  --color-accent-warm-text: oklch(0.45 0.11 40);
+  --color-accent-warm-strong: oklch(0.5 0.12 38);
+  --color-on-evidence: oklch(0.22 0.02 50);
+  --color-accent-glow: oklch(0.56 0.11 40 / 0.12);
+  --color-bbox: oklch(0.56 0.11 40 / 0.8);
+  --color-bbox-fill: oklch(0.56 0.11 40 / 0.12);
+  --color-bbox-label: oklch(0.45 0.11 40);
+  --color-ok: oklch(0.6 0.17 150);
+  --color-warn: oklch(0.65 0.18 45);
+  --color-fail: oklch(0.52 0.2 25);
+  --color-skip: oklch(0.6 0.025 60);
+  --color-ok-text: oklch(0.48 0.15 150);
+  --color-warn-text: oklch(0.52 0.16 45);
+  --color-skip-text: oklch(0.5 0.03 52);
+  --color-grid: oklch(0.56 0.11 40 / 0.07);
+  --color-grid-major: oklch(0.56 0.11 40 / 0.14);
+  --color-reticle: oklch(0.56 0.11 40 / 0.45);
+  --color-glass: oklch(0.995 0.004 80 / 0.7);
+  --color-glass-edge: oklch(0.22 0.02 50 / 0.1);
+  --color-glass-hi: oklch(1 0 0 / 0.6);
+  --color-glow: oklch(0.56 0.11 40 / 0.14);
+  --color-scrim: oklch(0.975 0.01 80 / 0.72);
+  --shadow-float: 0 12px 40px -12px oklch(0.22 0.02 50 / 0.28);
+  --shadow-lift: 0 8px 24px -10px oklch(0.22 0.02 50 / 0.22);
 }
 
 @layer base {
   :root {
-    color-scheme: dark; /* one dark theme: tell the browser, so form controls agree */
+    color-scheme: dark; /* `.dark` is the default; `:root:not(.dark)` above flips it */
   }
 
   html,
@@ -265,6 +332,8 @@
     color: var(--color-text-hi);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    font-kerning: normal;
+    font-optical-sizing: auto;
     /* Filenames, CRS strings, trace ids, checkpoint hashes and pasted URLs are
        all unbroken tokens longer than any column here. Wrapping is the default
        so that a single one of them cannot widen a grid track and drag the whole
@@ -308,7 +377,7 @@
    * Light type on a dark ground blooms: the glyphs optically thicken and the
    * counters close up, so the same tracking that is right on cream reads tight
    * here. A hair of positive tracking is the standard compensation, and it is
-   * only worth doing now that the face is actually Inter rather than whatever
+   * only worth doing now that the face is actually Geist rather than whatever
    * `system-ui` resolved to.
    */
   [data-region='sidebar'] {
@@ -317,7 +386,7 @@
 
   ::selection {
     background: var(--color-accent-warm);
-    color: #fff;
+    color: var(--color-on-accent-cool);
   }
 
   /* Scrollbars, so the three independently scrolling columns do not each
@@ -614,7 +683,7 @@
   @media (hover: hover) {
     .card:hover,
     .card-flush:hover {
-      border-color: rgba(186, 112, 79, 0.4);
+      border-color: oklch(from var(--color-accent-warm) l c h / 0.4);
     }
   }
 
@@ -633,7 +702,7 @@
   /* ── controls ─────────────────────────────────────────────────────────── */
   .btn-primary {
     background: var(--color-accent-warm-strong);
-    color: #fff;
+    color: var(--color-on-accent-cool);
     border-radius: 0.5rem;
     padding: 0.5rem 1rem;
     font-size: 0.875rem;
@@ -676,7 +745,7 @@
     .btn-ghost:hover {
       background: var(--color-accent-warm-strong);
       border-color: var(--color-accent-warm-strong);
-      color: #fff;
+      color: var(--color-on-accent-cool);
     }
   }
 
@@ -726,5 +795,963 @@
     line-height: 1.4;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+}
+
+/*
+ * ── The night-side layer ─────────────────────────────────────────────────
+ *
+ * Three materials the console never had: the graticule, the reticle and glass.
+ * They are what the brief calls "geospatial aesthetics", and they are used in
+ * one consistent way everywhere — the landing hero, the Maps HUD, the empty
+ * states, the popovers — so they read as a coordinate system the product lives
+ * in rather than a landing-page costume.
+ *
+ * Glass is bounded on purpose. It appears only on things that float over
+ * imagery or the graticule; a card on the plain ground stays the opaque
+ * `.card`. Every glass region is `contain: paint`, so the compositor never
+ * blurs more than the box that asked for it — a 24 GB GPU driving a VLM should
+ * not also be compositing a full-screen blur.
+ */
+@layer components {
+  /* ── display type: landing page only ──────────────────────────────────── */
+  /*
+   * One face at four sizes, not two faces. The scale is set in `clamp()` so
+   * it tracks the viewport between 390 and 1280 px, and every negative
+   * tracking is applied *only* at the size it was tuned for: -0.035em is
+   * right for an 88 px headline and wrong for a 44 px one, so the phone
+   * value steps back to -0.025em below `wide`. `ss01` / `cv11` are Geist's
+   * single-storey a and straight-leg y — what makes the face read as Geist
+   * rather than a generic grotesk.
+   */
+  .t-display,
+  .t-display-sub,
+  .t-section,
+  .t-lede,
+  .t-stage {
+    font-family: var(--font-display);
+    font-synthesis: none;
+    font-feature-settings: 'ss01', 'cv11';
+  }
+
+  .t-display {
+    font-size: clamp(2.75rem, 1.2rem + 5.6vw, 5.5rem);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    font-weight: 600;
+    max-width: 14ch;
+    text-wrap: balance;
+  }
+  @media (min-width: 768px) {
+    .t-display {
+      letter-spacing: -0.035em;
+    }
+  }
+
+  .t-display-sub {
+    font-size: clamp(1.125rem, 0.9rem + 0.9vw, 1.375rem);
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+    font-weight: 400;
+    max-width: 34ch;
+    color: var(--color-text-lo);
+  }
+
+  .t-section {
+    font-size: clamp(1.875rem, 1.2rem + 2.4vw, 3rem);
+    line-height: 1.06;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+    max-width: 24ch;
+    text-wrap: balance;
+  }
+
+  .t-lede {
+    font-size: 1.0625rem;
+    line-height: 1.55;
+    letter-spacing: 0;
+    max-width: 58ch;
+    color: var(--color-text-lo);
+  }
+
+  /* Stage titles and capability labels: one step above the console panel. */
+  .t-stage {
+    font-size: 1rem;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+
+  /* Coordinates, tile ids, trace ids, HUD readouts: measurement, so mono. */
+  .t-coord {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The daily quote. Geist ships no italic file here, so none is faked. */
+  .t-quote {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    font-style: normal;
+  }
+
+  /* ── materials ────────────────────────────────────────────────────────── */
+  .graticule {
+    background-image:
+      linear-gradient(to right, var(--color-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--color-grid) 1px, transparent 1px),
+      linear-gradient(to right, var(--color-grid-major) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--color-grid-major) 1px, transparent 1px);
+    background-size:
+      var(--grid-module) var(--grid-module),
+      var(--grid-module) var(--grid-module),
+      calc(var(--grid-module) * 4) calc(var(--grid-module) * 4),
+      calc(var(--grid-module) * 4) calc(var(--grid-module) * 4);
+  }
+
+  /* The grid fades to nothing at the edges: atmosphere, not wallpaper. */
+  .graticule-fade {
+    mask-image: radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 100%);
+  }
+
+  .glass {
+    background: var(--color-glass);
+    border: 1px solid var(--color-glass-edge);
+    box-shadow:
+      inset 0 1px 0 var(--color-glass-hi),
+      var(--shadow-float);
+    backdrop-filter: blur(var(--blur-glass)) saturate(1.2);
+    -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(1.2);
+    border-radius: var(--radius-hud);
+    contain: paint;
+  }
+
+  /* A terracotta edge that fades in after a popover opens: "this floats". */
+  .glass-glow {
+    outline: 1px solid oklch(from var(--color-accent-warm) l c h / 0);
+    outline-offset: 0;
+    animation: sq-edge-in var(--dur-state) var(--ease-out-quint) 120ms forwards;
+  }
+
+  /* One hover-lift, everywhere a card lifts. */
+  .lift {
+    transition:
+      transform var(--dur-state) var(--ease-out-quint),
+      box-shadow var(--dur-state) var(--ease-out-quint),
+      border-color var(--dur-feedback) ease;
+  }
+  @media (hover: hover) {
+    .lift:hover,
+    .lift:focus-within {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-lift);
+      border-color: oklch(from var(--color-accent-warm) l c h / 0.4);
+    }
+  }
+
+  .btn-ghost-sm {
+    border: 1px solid var(--color-accent-warm);
+    color: var(--color-accent-warm-text);
+    border-radius: 0.5rem;
+    padding: 0.375rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    transition:
+      background-color var(--dur-feedback) ease,
+      color var(--dur-feedback) ease;
+  }
+  @media (hover: hover) {
+    .btn-ghost-sm:hover:not(:disabled) {
+      background: var(--color-accent-warm-strong);
+      border-color: var(--color-accent-warm-strong);
+      color: var(--color-on-accent-cool);
+    }
+  }
+  .btn-ghost-sm:disabled {
+    opacity: 0.38;
+  }
+
+  /* A row in a menu-like popover: icon, label, kbd. 36px so a coarse pointer
+     does not need the 44px override to hit it comfortably. */
+  .menu-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.625rem;
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.625rem;
+    font-size: 0.8125rem;
+    line-height: 1.25;
+    text-align: left;
+    color: var(--color-text-hi);
+    transition: background-color var(--dur-feedback) ease;
+  }
+  .menu-row:hover,
+  .menu-row[data-highlighted] {
+    background: var(--color-accent-glow);
+  }
+  .menu-row:focus-visible {
+    outline: 2px solid var(--color-accent-warm);
+    outline-offset: -2px;
+  }
+
+  /* A text field in a form — the settings dialog, the account card. The
+     border is the control's boundary, so it clears 3:1 on the ground like
+     every other edge; focus swaps it for the accent rather than stacking a
+     second ring inside the outline. The caret is terracotta so the one
+     blinking thing on the surface belongs to the palette. */
+  .field {
+    display: block;
+    width: 100%;
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    background: var(--color-bg-main);
+    padding: 0.5rem 0.625rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    color: var(--color-text-hi);
+    caret-color: var(--color-accent-warm);
+    transition: border-color var(--dur-feedback) ease;
+  }
+  .field::placeholder {
+    color: var(--color-text-lo);
+  }
+  .field:focus-visible {
+    outline: 2px solid var(--color-accent-warm);
+    outline-offset: 0;
+    border-color: var(--color-accent-warm);
+  }
+
+  .switch {
+    position: relative;
+    display: inline-flex;
+    height: 1.125rem;
+    width: 2rem;
+    flex-shrink: 0;
+    align-items: center;
+    border-radius: 9999px;
+    background: var(--color-line);
+    transition: background-color var(--dur-state) ease;
+  }
+  .switch[aria-checked='true'] {
+    background: var(--color-accent-warm-strong);
+  }
+  .switch::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    height: 0.875rem;
+    width: 0.875rem;
+    border-radius: 9999px;
+    background: var(--color-text-hi);
+    transition: transform var(--dur-state) var(--ease-out-quint);
+  }
+  .switch[aria-checked='true']::after {
+    transform: translateX(0.875rem);
+  }
+
+  /* Skeleton bars: the shimmer is a background-position loop, and a static
+     tint under reduced motion. */
+  .skeleton {
+    background: linear-gradient(
+      100deg,
+      var(--color-line-soft) 20%,
+      var(--color-line) 50%,
+      var(--color-line-soft) 80%
+    );
+    background-size: 200% 100%;
+    border-radius: 0.375rem;
+    animation: sq-shimmer 1.6s ease-in-out infinite;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .skip-link {
+    position: fixed;
+    top: 0.75rem;
+    left: 0.75rem;
+    z-index: 100;
+    transform: translateY(-200%);
+    background: var(--color-accent-warm-strong);
+    color: var(--color-on-accent-cool);
+    padding: 0.5rem 0.875rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    transition: transform var(--dur-feedback) ease;
+  }
+  .skip-link:focus-visible {
+    transform: translateY(0);
+  }
+}
+
+/*
+ * ── Motion for the new surfaces ──────────────────────────────────────────
+ *
+ * One authored moment (the landing hero's acquisition sequence, in
+ * `Landing.tsx` via `data-hero` timings) and a small set of feedback and
+ * continuity keyframes shared by popovers, reveals, the radar and the shimmer.
+ * Every keyframe has its reduced-motion alternative in the block at the end,
+ * written next to the keyframe it replaces.
+ */
+@layer base {
+  @keyframes sq-pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes sq-pop-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes sq-edge-in {
+    to {
+      outline-color: oklch(from var(--color-accent-warm) l c h / 0.18);
+    }
+  }
+  @keyframes sq-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  @keyframes sq-breathe {
+    0%,
+    100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+  @keyframes sq-sweep {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes sq-scan {
+    from {
+      transform: translateY(-2%);
+    }
+    to {
+      transform: translateY(102vh);
+    }
+  }
+  @keyframes sq-wipe {
+    from {
+      clip-path: inset(0 100% 0 0);
+    }
+    to {
+      clip-path: inset(0 0 0 0);
+    }
+  }
+  @keyframes sq-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes sq-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes sq-fill {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+  @keyframes sq-pulse-once {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.6);
+      opacity: 0.4;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  [data-sq-popover][data-state='open'] {
+    animation: sq-pop-in var(--dur-state) var(--ease-out-quint);
+  }
+  [data-sq-popover][data-state='closed'] {
+    animation: sq-pop-out var(--dur-feedback) ease-in forwards;
+  }
+
+  /* Scroll reveals: hidden only once JS has marked the element, so a failed
+     script never hides content. `data-reveal` alone does nothing. */
+  [data-reveal='pending'] {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  [data-reveal='in'] {
+    animation: sq-rise 320ms var(--ease-out-quint) both;
+    animation-delay: var(--reveal-delay, 0ms);
+  }
+
+  /* The landing hero's acquisition sequence. Each layer has a `--hero-at`
+     start time; the sequence is one timeline, not eight effects. */
+  [data-hero='grid'] {
+    animation: sq-fade 600ms var(--ease-out-quint) both;
+  }
+  [data-hero='scan'] {
+    animation: sq-scan var(--dur-focal) linear both;
+  }
+  [data-hero='reticle'] {
+    animation: sq-lock 480ms var(--ease-out-quint) 120ms both;
+  }
+  @keyframes sq-lock {
+    from {
+      opacity: 0;
+      transform: scale(1.6);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  [data-hero='coord'] {
+    animation: sq-rise 320ms var(--ease-out-quint) 180ms both;
+  }
+  /* The headline wipe overscans by 4 px: at line-height 1.02 a `p` or `y`
+     hangs below the box and a tight inset would clip it mid-reveal. */
+  @keyframes sq-wipe-hero {
+    from {
+      clip-path: inset(-4px 100% -4px 0);
+    }
+    to {
+      clip-path: inset(-4px 0 -4px 0);
+    }
+  }
+  [data-hero='line-1'] {
+    animation: sq-wipe-hero 420ms var(--ease-out-quint) 240ms both;
+  }
+  [data-hero='line-2'] {
+    animation: sq-wipe-hero 420ms var(--ease-out-quint) 320ms both;
+  }
+  [data-hero='sub'] {
+    animation: sq-rise 320ms var(--ease-out-quint) 460ms both;
+  }
+  [data-hero='cta'] {
+    animation: sq-rise 320ms var(--ease-out-quint) 500ms both;
+  }
+  [data-hero='globe'] {
+    animation: sq-fade 400ms var(--ease-out-quint) 520ms both;
+  }
+  [data-hero='proof'] {
+    animation: sq-fade 300ms var(--ease-out-quint) 700ms both;
+  }
+  [data-breathe] {
+    animation: sq-breathe 4s ease-in-out infinite;
+  }
+  [data-sweep] {
+    animation: sq-sweep 4s linear infinite;
+    transform-origin: 50% 50%;
+  }
+  [data-badge-new] {
+    animation: sq-pulse-once 600ms var(--ease-in-out-soft) 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-sq-popover][data-state='open'],
+    [data-reveal='in'],
+    [data-hero='grid'],
+    [data-hero='reticle'],
+    [data-hero='coord'],
+    [data-hero='line-1'],
+    [data-hero='line-2'],
+    [data-hero='sub'],
+    [data-hero='cta'],
+    [data-hero='globe'],
+    [data-hero='proof'] {
+      animation-name: sq-fade;
+      animation-duration: 160ms;
+      animation-delay: 0ms;
+    }
+    [data-hero='scan'] {
+      display: none;
+    }
+    [data-breathe],
+    [data-sweep],
+    [data-badge-new] {
+      animation: none;
+    }
+    [data-sweep] {
+      transform: rotate(45deg);
+    }
+    .skeleton {
+      animation: none;
+      background: var(--color-line-soft);
+    }
+    .lift:hover,
+    .lift:focus-within {
+      transform: none;
+    }
+  }
+}
+
+/*
+ * ── Print: the report route ──────────────────────────────────────────────
+ * `/report/<trace>` is the PDF deliverable; the browser's own "Save as PDF"
+ * does the work. Paper is white, the ground is paper, and the nav underline
+ * is the only decoration lost.
+ */
+@media print {
+  :root,
+  :root.dark {
+    color-scheme: light;
+    --color-bg-main: #ffffff;
+    --color-surface-card: #ffffff;
+    --color-surface-elevated: #ffffff;
+    --color-line: #d9d2ca;
+    --color-line-soft: #ebe6e0;
+    --color-text-hi: #1a1512;
+    --color-text-lo: #5a4f47;
+    --color-accent-warm: #8a4a2f;
+    --color-accent-warm-text: #8a4a2f;
+    --color-accent-warm-strong: #8a4a2f;
+    --color-evidence: #e8c9a8;
+    --color-on-evidence: #1a1512;
+  }
+  body {
+    background: #fff;
+  }
+  .break-after-page {
+    break-after: page;
+  }
+  .glass {
+    backdrop-filter: none;
+    background: #fff;
+    box-shadow: none;
+  }
+}
+
+@layer components {
+  .nav-underline {
+    position: relative;
+  }
+  .nav-underline::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -4px;
+    height: 1px;
+    background: var(--color-accent-warm);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 160ms var(--ease-out-quint);
+  }
+  .nav-underline:hover::after,
+  .nav-underline:focus-visible::after {
+    transform: scaleX(1);
+  }
+}
+
+/*
+ * ── Landing page: capabilities, HUDs, scroll-linked motion ────────────────
+ *
+ * Three systems, not thirty effects. (1) The capability tabs and the HUD
+ * activation sequences, which run once on selection. (2) A scroll-linked
+ * layer — the hero parallax, the pipeline beam, the diagram "development",
+ * the closing graticule — driven by CSS `animation-timeline` where the
+ * browser has it, and by `useScrollProgress` writing `--p` where it does
+ * not (Firefox, at the time of writing). (3) Three cursor lights, gated on a
+ * fine pointer. Every rule below has its reduced-motion alternative in the
+ * block at the end.
+ */
+@layer components {
+  /* ── capability tabs ──────────────────────────────────────────────────── */
+  .cap-tab {
+    border-color: transparent;
+    /* The peek: on hover the row shows its collapsed line at 0.7 and takes
+       the console's own low-intensity leading bar. The panel does not move. */
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  .cap-tab[data-state='off']:hover {
+    border-color: var(--color-line);
+    box-shadow: inset 3px 0 0 0 var(--color-line);
+  }
+  .cap-tab[data-state='on'] {
+    border-color: oklch(from var(--color-accent-warm) l c h / 0.5);
+    background: var(--color-accent-glow);
+  }
+  .cap-copy {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  .cap-tab[data-state='off']:hover .cap-copy {
+    grid-template-rows: 1fr;
+    opacity: 0.7;
+  }
+  .cap-tab[data-state='on'] .cap-copy {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  /* The preview switch: outgoing slides away, incoming slides in, 60 ms of
+     overlap, the direction following the list order. */
+  @keyframes sq-cap-in {
+    from {
+      opacity: 0;
+      transform: translateY(calc(var(--cap-dir, 1) * 14px));
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes sq-cap-out {
+    from {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(calc(var(--cap-dir, 1) * -14px));
+    }
+  }
+  [data-cap-direction='1'] {
+    --cap-dir: 1;
+  }
+  [data-cap-direction='-1'] {
+    --cap-dir: -1;
+  }
+  [data-cap-panel='in'] {
+    animation: sq-cap-in 260ms var(--ease-out-quint) 60ms both;
+    position: relative;
+    z-index: 1;
+  }
+  [data-cap-panel='out'] {
+    animation: sq-cap-out 160ms ease-in both;
+    pointer-events: none;
+  }
+
+  /* ── HUD activation ───────────────────────────────────────────────────── */
+  /* A HUD mounts when it is shown, so "on mount" is "on activation". Each
+     element names its start with `--hud-at`; the drawing sequences are
+     ordered by those values, not by DOM order. */
+  @keyframes sq-hud-draw {
+    from {
+      stroke-dashoffset: 1;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  @keyframes sq-hud-scan {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(404px);
+    }
+  }
+  @keyframes sq-hud-seam {
+    from {
+      transform: translateX(80px);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  @keyframes sq-hud-streak {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+  @keyframes sq-hud-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.5;
+      transform: scale(1.04);
+    }
+  }
+  .hud-draw {
+    stroke-dasharray: 1;
+    animation: sq-hud-draw var(--hud-dur, 500ms) var(--ease-out-quint) var(--hud-at, 0ms) both;
+  }
+  .hud-fade {
+    animation: sq-fade 300ms var(--ease-out-quint) var(--hud-at, 0ms) both;
+  }
+  .hud-rise {
+    animation: sq-rise 200ms var(--ease-out-quint) var(--hud-at, 0ms) both;
+  }
+  .hud-scan {
+    animation: sq-hud-scan 900ms linear 80ms both;
+  }
+  .hud-seam {
+    animation: sq-hud-seam 260ms var(--ease-out-quint) both;
+  }
+  .hud-acquire {
+    animation: sq-fade 500ms var(--ease-out-quint) 120ms both;
+  }
+  .hud-streak {
+    animation: sq-hud-streak 200ms var(--ease-out-quint) var(--hud-at, 0ms) both;
+  }
+  .hud-pulse {
+    animation:
+      sq-fade 300ms var(--ease-out-quint) 1000ms both,
+      sq-hud-pulse 600ms var(--ease-in-out-soft) 1300ms 1;
+  }
+  .hud-lock {
+    animation: sq-lock 480ms var(--ease-out-quint) both;
+  }
+  /* Under a real image the drawn scene steps aside; the annotation stays. */
+  [data-hud][data-has-image] .hud-scene {
+    opacity: 0;
+  }
+
+  /* The cursor's third light: a specular on the HUD card, card-local. */
+  @media (hover: hover) and (pointer: fine) {
+    [data-cap-panel]::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 300ms var(--ease-out-quint);
+      background: radial-gradient(
+        360px circle at calc(var(--mx, 0.5) * 100%) calc(var(--my, 0.5) * 100%),
+        oklch(from var(--color-evidence) l c h / 0.1),
+        transparent 70%
+      );
+      mix-blend-mode: plus-lighter;
+    }
+    [data-cap-panel]:hover::before {
+      opacity: 1;
+    }
+  }
+
+  /* ── scroll-linked layer ──────────────────────────────────────────────── */
+  /* The fallback path first: `useScrollProgress` writes `--p` (0…1 over the
+     hero's exit) on the hero, and these rules read it. They hold on every
+     browser; the `@supports` block below hands the same properties to the
+     compositor where `animation-timeline` exists. */
+  [data-hero='copy'] {
+    transform: translateY(calc(var(--p, 0) * -60px));
+    opacity: calc(1 - var(--p, 0) * 1.4);
+  }
+  [data-hero='globe-wrap'] {
+    transform: translateY(calc(var(--p, 0) * 90px)) scale(calc(1 + var(--p, 0) * 0.08));
+  }
+  [data-hero='glow'] {
+    /* `translate` (the cursor lean, 3.3) and `transform` (the scroll drift)
+       compose because they are two different properties. */
+    transform: translateY(calc(var(--p, 0) * 120px));
+  }
+
+  @keyframes sq-hero-exit {
+    to {
+      transform: translateY(-60px);
+      opacity: 0;
+    }
+  }
+  @keyframes sq-globe-exit {
+    to {
+      transform: translateY(90px) scale(1.08);
+    }
+  }
+  @keyframes sq-glow-exit {
+    to {
+      transform: translateY(120px);
+    }
+  }
+  @keyframes sq-beam-travel {
+    from {
+      stroke-dashoffset: 1000;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  @keyframes sq-beam-loop {
+    from {
+      stroke-dashoffset: 1000;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  @keyframes sq-develop {
+    from {
+      clip-path: inset(0 0 100% 0);
+    }
+    to {
+      clip-path: inset(0 0 0 0);
+    }
+  }
+  @keyframes sq-cap-enter {
+    from {
+      transform: scale(0.96);
+      filter: blur(6px);
+    }
+    to {
+      transform: scale(1);
+      filter: blur(0);
+    }
+  }
+  @keyframes sq-grid-drift {
+    from {
+      transform: translateY(40px);
+    }
+    to {
+      transform: translateY(-40px);
+    }
+  }
+
+  /* Without scroll timelines the beam is the 6 s loop, as before. */
+  [data-beam] {
+    animation: sq-beam-loop 6s linear infinite;
+  }
+
+  @supports (animation-timeline: view()) {
+    [data-hero='copy'],
+    [data-hero='globe-wrap'],
+    [data-hero='glow'] {
+      transform: none;
+      opacity: 1;
+    }
+    [data-hero='copy'] {
+      animation: sq-hero-exit linear both;
+      animation-timeline: view();
+      animation-range: exit 0% exit 70%;
+    }
+    [data-hero='globe-wrap'] {
+      animation: sq-globe-exit linear both;
+      animation-timeline: view();
+      animation-range: exit 0% exit 70%;
+    }
+    [data-hero='glow'] {
+      animation: sq-glow-exit linear both;
+      animation-timeline: view();
+      animation-range: exit 0% exit 70%;
+    }
+    /* The beam travels as the reader travels. */
+    [data-beam] {
+      animation: sq-beam-travel linear both;
+      animation-timeline: view(block);
+      animation-range: cover 0% cover 100%;
+    }
+    [data-diagram] {
+      animation: sq-develop linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 60%;
+    }
+    [data-cap-panel='in'] {
+      animation:
+        sq-cap-in 260ms var(--ease-out-quint) 60ms both,
+        sq-cap-enter linear both;
+      animation-timeline: auto, view();
+      animation-range: normal, entry 0% entry 50%;
+    }
+    [data-closing-grid] .graticule {
+      animation: sq-grid-drift linear both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
+    }
+  }
+
+  /* ── cursor lights ────────────────────────────────────────────────────── */
+  @media (hover: hover) and (pointer: fine) {
+    /* The hero glow leans toward the pointer, lazily; ±120 × 80 px, so it
+       is a light that leans, not a spotlight that follows. */
+    [data-hero='glow'] {
+      translate: calc((var(--mx, 0.78) - 0.78) * 120px) calc((var(--my, 0.4) - 0.4) * 80px);
+      transition: translate 900ms var(--ease-out-quint);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* HUDs render their final frame; the tabs still switch, without the slide. */
+    .hud-draw,
+    .hud-fade,
+    .hud-rise,
+    .hud-seam,
+    .hud-acquire,
+    .hud-streak,
+    .hud-pulse,
+    .hud-lock,
+    [data-cap-panel='in'],
+    [data-cap-panel='out'],
+    [data-beam],
+    [data-diagram],
+    [data-closing-grid] .graticule {
+      animation: none;
+    }
+    .hud-draw {
+      stroke-dasharray: none;
+    }
+    .hud-scan {
+      display: none;
+    }
+    [data-cap-panel='out'] {
+      display: none;
+    }
+    /* Still under scroll: the fallback and the timeline both go quiet. */
+    [data-hero='copy'],
+    [data-hero='globe-wrap'],
+    [data-hero='glow'] {
+      transform: none;
+      opacity: 1;
+    }
+    [data-hero='glow'] {
+      animation: none;
+      translate: none;
+    }
+    [data-beam] {
+      stroke-dasharray: 4 8;
+    }
+    [data-cap-panel]::before {
+      display: none;
+    }
   }
 }

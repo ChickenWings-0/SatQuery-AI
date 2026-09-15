@@ -34,6 +34,7 @@ import { groupForScalar, groupViews } from '@/evidence/views'
 import { cardMatchesScalar, confidenceCard, formatKpi, selectKpis } from '@/kpi/registry'
 import { completedCount, degradedCount, isLive, useJobStore } from '@/state/job'
 import { useFocusStore } from '@/state/focus'
+import { toast } from '@/state/notifications'
 import { useUiStore } from '@/state/ui'
 import { parseSource } from '@/thread/annotate'
 import { stripBboxTokens } from '@/thread/bbox'
@@ -53,7 +54,7 @@ function Section({
   return (
     <section className={`border-t border-line px-4 py-5 md:px-5 ${className}`}>
       <div className="flex items-baseline gap-2">
-        <h3 className="t-eyebrow">{title}</h3>
+        <h2 className="t-eyebrow">{title}</h2>
         {right && <span className="ml-auto">{right}</span>}
       </div>
       <div className="mt-3 max-w-[720px]">{children}</div>
@@ -196,6 +197,27 @@ export function ThreadPanel() {
     const card = allCards.find((candidate) => cardMatchesScalar(candidate, tool, target.paths))
 
     focusCitation({ viewKey: group?.key, kpiId: card?.id, step: target.step })
+  }
+
+  // Remembered per trace, so a new run's card is unsaved without an effect.
+  const [savedTrace, setSavedTrace] = useState<string | null>(null)
+  const saved = savedTrace !== null && savedTrace === result?.trace_id
+  async function saveRun() {
+    if (!result) return
+    // The library and its IndexedDB adapter load on first save, not at boot.
+    const [{ captureCurrentRun }, { useLibraryStore }] = await Promise.all([
+      import('@/pages/saved/capture'),
+      import('@/state/library'),
+    ])
+    const asked = useUiStore.getState().recentRuns.find((r) => r.traceId === result.trace_id)
+    const run = await captureCurrentRun(asked?.query ?? '')
+    if (!run) return
+    await useLibraryStore.getState().save(run)
+    setSavedTrace(run.traceId)
+    toast('Run saved on this device.', 'ok', {
+      label: 'Open Saved',
+      run: () => useUiStore.getState().setSection('saved'),
+    })
   }
 
   async function copyAnswer() {
@@ -373,10 +395,9 @@ export function ThreadPanel() {
                       <CopyIcon size={14} />
                     </CardAction>
                     <CardAction
-                      label="Bookmark (coming soon)"
-                      onClick={() => {
-                        /* Saved runs are not implemented yet. */
-                      }}
+                      label={saved ? 'Saved on this device' : 'Save this run on this device'}
+                      onClick={() => void saveRun()}
+                      done={saved ? 'Saved' : undefined}
                     >
                       <BookmarkIcon size={14} />
                     </CardAction>

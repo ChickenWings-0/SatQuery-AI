@@ -15,6 +15,14 @@ repos:
 
   - repo: local
     hooks:
+      - id: main-only
+        name: commits and pushes happen on main only
+        entry: scripts/git/main_only.sh
+        language: script
+        always_run: true
+        pass_filenames: false
+        stages: [pre-commit, pre-push]
+
       - id: mypy
         name: mypy --strict (satquery)
         entry: uv run mypy

@@ -7,8 +7,13 @@
 #   OUT=data/processed/corpus/v2 ./scripts/rebuild_corpus_v2.sh
 #
 # 1. RSVQA-HR: extract Data/ from the already-fetched Images.tar, render TC views.
-# 2. Build with EVERY Track-B source named and --on-missing-views fail — never
-#    skip: skip is how a source quietly loses 90 % of itself.
+# 2. Build with EVERY Track-B source named and --on-missing-views skip. A
+#    handful of raw downloads are corrupt (three CDVQA PNGs fail rasterio's
+#    read); the render pass records them as unreadable and moves on, so under
+#    `fail` the build died on the first of them. `skip` drops those samples —
+#    and step 3's source-floor gate is what stops skip from becoming the way a
+#    source quietly loses 90 % of itself: a source that falls below its floor
+#    still fails the build.
 # 3. build_corpus.py's own post-build gates: every requested source above its
 #    floor (composition.json), every GROUNDING answer canonical. Exit 5 stops
 #    here; nothing downstream reads a corpus that failed them.
@@ -25,7 +30,8 @@ cd "$ROOT"
 PRESET="${PRESET:-sprint}"
 OUT="${OUT:-data/processed/corpus/v2}"
 SEED="${SEED:-42}"
-WORKERS="${WORKERS:-16}"
+WORKERS="${WORKERS:-16}"          # render threads (step 1) — I/O-bound PNG resizes
+BUILD_WORKERS="${BUILD_WORKERS:-2}"  # pyarrow decode threads (step 2) — see below
 SOURCES="bigearthnet_v2 vrsbench rsvqa_hr cdvqa evidence_qa"
 
 case "$PRESET" in
@@ -46,12 +52,18 @@ uv run python scripts/render_vhr_views.py --source rsvqa_hr --split all --size 4
 
 banner "2/3 build: $PRESET preset → $OUT (§5.2 step 2, §5.3 gates)"
 mkdir -p "$OUT"
+# --workers caps pyarrow's parquet decode pools. build_corpus.py streams the
+# 9.6 M-row BigEarthNet.txt single-process, but pyarrow fans each record batch
+# out over one thread per core, and 16 in-flight batches of decode buffers is
+# what OOM-froze the box. 2 keeps it under a few GB; raise BUILD_WORKERS only
+# on a machine with headroom.
 # shellcheck disable=SC2086
 uv run python scripts/build_corpus.py \
     --sources $SOURCES \
-    --on-missing-views fail \
+    --on-missing-views skip \
     --composition $COMPOSITION \
     --seed "$SEED" \
+    --workers "$BUILD_WORKERS" \
     --out "$OUT"
 
 banner "3/3 verify (§5.2 step 3, §5.3)"

@@ -237,7 +237,7 @@ export function ImageViewer({ group }: { group: ViewGroup }) {
   return (
     <section className="card-flush flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line-soft px-5 py-3">
-        <h3 className="t-panel">{group.name}</h3>
+        <h2 className="t-panel">{group.name}</h2>
         {comparable && (
           <span className="chip bg-accent-cool text-on-accent-cool">pre → post</span>
         )}
@@ -311,7 +311,7 @@ export function ImageViewer({ group }: { group: ViewGroup }) {
               ) : primaryUrl ? (
                 <img
                   src={primaryUrl}
-                  alt={primary?.label ?? ''}
+                  alt={primary?.label ?? group.name}
                   className={FILL}
                   style={CONTAIN}
                   onLoad={onImageLoad}

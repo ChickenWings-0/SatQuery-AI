@@ -16,15 +16,27 @@ import { describe, expect, it } from 'vitest'
 const css = readFileSync(new URL('../theme.css', import.meta.url), 'utf8')
 
 /** The body of the `prefers-reduced-motion: reduce` block, brace-matched. */
+/** Every `prefers-reduced-motion` block in the file, concatenated. */
 function reducedMotionBlock(): string {
-  const start = css.indexOf('@media (prefers-reduced-motion: reduce)')
+  const needle = '@media (prefers-reduced-motion: reduce)'
+  const blocks: string[] = []
+  let start = css.indexOf(needle)
   expect(start, 'theme.css declares a reduced-motion block').toBeGreaterThan(-1)
-  let depth = 0
-  for (let i = css.indexOf('{', start); i < css.length; i++) {
-    if (css[i] === '{') depth++
-    else if (css[i] === '}' && --depth === 0) return css.slice(start, i + 1)
+  while (start !== -1) {
+    let depth = 0
+    let end = -1
+    for (let i = css.indexOf('{', start); i < css.length; i++) {
+      if (css[i] === '{') depth++
+      else if (css[i] === '}' && --depth === 0) {
+        end = i + 1
+        break
+      }
+    }
+    if (end === -1) throw new Error('unbalanced braces in the reduced-motion block')
+    blocks.push(css.slice(start, end))
+    start = css.indexOf(needle, end)
   }
-  throw new Error('unbalanced braces in the reduced-motion block')
+  return blocks.join('\n')
 }
 
 describe('prefers-reduced-motion', () => {
@@ -62,15 +74,27 @@ describe('prefers-reduced-motion', () => {
 })
 
 describe('the motion budget', () => {
-  it('loops exactly two animations, and each reports a real ongoing state', () => {
-    // Anything `infinite` is running forever on someone's battery. There are
-    // two: the RUNNING status dot, which stops when the step does, and the
-    // health badge's breath, which reports a poll that genuinely persists.
-    // A third is a design review, not a merge.
+  it('loops only the animations on the budget, each reporting a real ongoing state', () => {
+    // Anything `infinite` is running forever on someone's battery. Each loop
+    // here is gated: the RUNNING dot stops when the step does, the health
+    // breath reports a poll that persists, the shimmer ends with the fetch,
+    // and the landing/empty-state loops (`data-breathe`, `data-sweep`, the
+    // pipeline beam's fallback loop on browsers without scroll timelines)
+    // are paused by their owners when off-screen or closed. A seventh is a
+    // design review, not a merge.
     const infinite = [...css.matchAll(/animation:[^;]*infinite[^;]*;/g)].map((m) => m[0])
-    expect(infinite).toHaveLength(2)
-    expect(infinite.some((rule) => rule.includes('sq-status-pulse'))).toBe(true)
-    expect(infinite.some((rule) => rule.includes('sq-glow'))).toBe(true)
+    const names = ['sq-status-pulse', 'sq-glow', 'sq-shimmer', 'sq-breathe', 'sq-sweep', 'sq-beam-loop']
+    expect(infinite).toHaveLength(names.length)
+    for (const name of names) {
+      expect(infinite.some((rule) => rule.includes(name)), name).toBe(true)
+    }
+  })
+
+  it('stills every loop under reduced motion', () => {
+    const block = reducedMotionBlock()
+    expect(block).toMatch(/\[data-breathe\],\s*\[data-sweep\],\s*\[data-badge-new\]\s*\{[^}]*animation:\s*none/)
+    expect(block).toMatch(/\[data-hero='glow'\]\s*\{[^}]*animation:\s*none/)
+    expect(block).toMatch(/\.skeleton\s*\{[^}]*animation:\s*none/)
   })
 
   it('stills the health glow under reduced motion', () => {

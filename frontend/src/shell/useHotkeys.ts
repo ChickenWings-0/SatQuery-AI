@@ -1,52 +1,56 @@
 /**
- * The keyboard layer (roadmap F6).
+ * The keyboard layer, dispatching over `@/shell/shortcuts`'s binding table.
  *
+ *   ⌘K       new query — a chord, works from inside a text field
+ *   ⌘/       the shortcuts guide — the always-on route in
+ *   ⌘J       toggle theme
+ *   ⌘,       settings
+ *   ?        the shortcuts guide
  *   /        focus the query composer
- *   [ / ]    nudge the A/B swipe by 5%
+ *   [ / ]    nudge the A/B swipe by 5% (or the Maps split, on Maps)
  *   ← / →    step through the evidence tray
  *   P        toggle the processing pipeline
- *   Esc      close the pipeline
+ *   G then … go to a section (600 ms window)
+ *   Esc      close the pipeline / a popover — handled by Radix, absent here
  *
  * One listener on `window` rather than a handler per component: the shortcuts
- * act across all three columns, and scattering them would mean three components
- * each guarding against the same edge cases.
+ * act across all three columns, and scattering them would mean three
+ * components each guarding against the same edge cases.
  *
- * Three of those edge cases matter.
- *
- * Typing must never trigger a shortcut — `/` in the question box is a slash, not
- * a focus command — so anything originating in a text field is ignored. And a
- * modifier means the chord belongs to the browser or the OS: `⌘←` is "go back",
- * not "previous view".
- *
- * The third is subtler and was live for a while: a text field is not the only
- * thing that owns the arrow keys. The A/B slider handle, the React Flow canvas
- * and anything inside the pipeline dialog all move with `←`/`→`, and this
- * listener was calling `preventDefault()` on every one of them from `window`.
- * The viewer's own footer advertised "the handle is focusable, so arrow keys
- * move it too" while this file made that impossible. {@link OWNS_ARROWS} is the
+ * Three of those edge cases matter. Typing must never trigger a shortcut —
+ * `/` in the question box is a slash — so anything from a text field is
+ * ignored. A modifier means the chord belongs to the browser or the OS
+ * unless it is one of ours. And a text field is not the only thing that owns
+ * the arrow keys: the A/B slider handle, the React Flow canvas, the map and
+ * anything inside a dialog all move with `←`/`→`; {@link OWNS_ARROWS} is the
  * list of widgets that get their keys back.
  *
- * WCAG 2.1.4 requires single-character shortcuts to be switchable off, which is
- * what `shortcutsEnabled` in the UI store is for; `Esc` is handled by Radix
- * inside the dialog, so it is deliberately absent here rather than racing it.
+ * WCAG 2.1.4 requires single-character shortcuts to be switchable off, which
+ * is what `useShortcutStore.enabled` is for. Chords are never gated.
  */
 import { useEffect } from 'react'
 
+import { SEQUENCE_WINDOW_MS } from '@/shell/shortcuts'
 import { useFocusStore } from '@/state/focus'
-import { useUiStore } from '@/state/ui'
+import { useMapStore } from '@/state/map'
+import { useSettingsStore } from '@/state/settings'
+import { useShortcutStore } from '@/state/shortcuts'
+import { useThemeStore } from '@/state/theme'
+import { useUiStore, type Section } from '@/state/ui'
 
 const SWIPE_STEP = 5
 
-/**
- * Widgets whose own key handling outranks the global layer.
- *
- * `[role="slider"]` is `ReactCompareSlider`'s handle, `.react-flow` the DAG
- * canvas, `[role="dialog"]` everything the pipeline modal contains, and
- * `[role="listbox"]`/`[role="menu"]` are here so any future popup inherits the
- * rule rather than rediscovering the bug.
- */
 const OWNS_ARROWS =
-  '[role="slider"], [role="dialog"], [role="listbox"], [role="menu"], .react-flow'
+  '[role="slider"], [role="dialog"], [role="listbox"], [role="menu"], .react-flow, .maplibregl-map'
+
+const GO: Record<string, Section> = {
+  h: 'home',
+  e: 'explore',
+  u: 'usecases',
+  m: 'maps',
+  s: 'saved',
+  p: 'projects',
+}
 
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
@@ -54,50 +58,95 @@ function isTyping(target: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
 }
 
-/** True when the focused element belongs to a widget that steers itself. */
 function ownsArrows(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(OWNS_ARROWS) !== null
 }
 
 export function useHotkeys(): void {
   useEffect(() => {
+    let pendingGo: number | null = null
+
+    function clearGo() {
+      if (pendingGo !== null) window.clearTimeout(pendingGo)
+      pendingGo = null
+    }
+
     function onKeyDown(event: KeyboardEvent) {
-      // ⌘K / Ctrl+K — "New Query". A chord, not a single key, so it is not
-      // covered by the WCAG 2.1.4 switch and works from inside a text field:
-      // its whole job is to get the caret to the composer from anywhere.
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        useUiStore.getState().setSection('explore')
-        useFocusStore.getState().setDraft('')
-        useFocusStore.getState().focusComposer()
+      const mod = event.metaKey || event.ctrlKey
+      const key = event.key
+
+      // Chords: never gated, work from inside a text field.
+      if (mod && !event.altKey) {
+        const lower = key.toLowerCase()
+        if (lower === 'k') {
+          event.preventDefault()
+          useUiStore.getState().setSection('explore')
+          useFocusStore.getState().setDraft('')
+          useFocusStore.getState().focusComposer()
+          return
+        }
+        if (key === '/') {
+          event.preventDefault()
+          useShortcutStore.getState().toggleGuide()
+          return
+        }
+        if (lower === 'j') {
+          event.preventDefault()
+          useThemeStore.getState().toggle()
+          return
+        }
+        if (key === ',') {
+          event.preventDefault()
+          useSettingsStore.getState().openSettings()
+          return
+        }
         return
       }
-      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (event.altKey) return
       if (isTyping(event.target)) return
-      if (!useUiStore.getState().shortcutsEnabled) return
+      if (!useShortcutStore.getState().enabled) return
 
-      const store = useFocusStore.getState()
-      const arrows = event.key === 'ArrowLeft' || event.key === 'ArrowRight'
-      // The swipe and pipeline keys are checked against the same list: `[`/`]`
-      // inside the dialog belong to whatever is focused there, and `P` would
-      // otherwise close the dialog from inside its own trap.
-      if (ownsArrows(event.target)) {
-        if (arrows || event.key === '[' || event.key === ']') return
-        if (event.key === 'p' || event.key === 'P') return
+      // `G` then a letter.
+      if (pendingGo !== null) {
+        clearGo()
+        const target = GO[key.toLowerCase()]
+        if (target) {
+          event.preventDefault()
+          useUiStore.getState().setSection(target)
+          return
+        }
+      }
+      if (key === 'g' || key === 'G') {
+        pendingGo = window.setTimeout(clearGo, SEQUENCE_WINDOW_MS)
+        return
       }
 
-      switch (event.key) {
+      const store = useFocusStore.getState()
+      const onMaps = useUiStore.getState().section === 'maps'
+      const arrows = key === 'ArrowLeft' || key === 'ArrowRight'
+      if (ownsArrows(event.target)) {
+        if (arrows || key === '[' || key === ']') return
+        if (key === 'p' || key === 'P') return
+      }
+
+      switch (key) {
+        case '?':
+          event.preventDefault()
+          useShortcutStore.getState().toggleGuide()
+          return
         case '/':
           event.preventDefault()
           store.focusComposer()
           return
         case '[':
           event.preventDefault()
-          store.nudgeSwipe(-SWIPE_STEP)
+          if (onMaps) useMapStore.getState().nudgeSplit(-SWIPE_STEP)
+          else store.nudgeSwipe(-SWIPE_STEP)
           return
         case ']':
           event.preventDefault()
-          store.nudgeSwipe(SWIPE_STEP)
+          if (onMaps) useMapStore.getState().nudgeSplit(SWIPE_STEP)
+          else store.nudgeSwipe(SWIPE_STEP)
           return
         case 'ArrowLeft':
           event.preventDefault()
@@ -111,21 +160,18 @@ export function useHotkeys(): void {
           break
       }
 
-      if (event.key === 'p' || event.key === 'P') {
+      if (key === 'p' || key === 'P') {
         event.preventDefault()
         store.togglePipeline()
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    return () => {
+      clearGo()
+      window.removeEventListener('keydown', onKeyDown)
+    }
   }, [])
 }
 
-/** The shortcuts, for the help strip. */
-export const SHORTCUTS: ReadonlyArray<[string, string]> = [
-  ['/', 'ask'],
-  ['←→', 'evidence'],
-  ['[ ]', 'swipe'],
-  ['P', 'pipeline'],
-]
+export { SHORTCUTS } from '@/shell/shortcuts'

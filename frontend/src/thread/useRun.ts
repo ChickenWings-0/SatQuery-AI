@@ -31,6 +31,8 @@ import { SatQueryError, cancelJob, createJob, streamJob } from '@/api/client'
 import { ContractViolation, type JobEvent } from '@/api/events'
 import { useFocusStore } from '@/state/focus'
 import { useJobStore } from '@/state/job'
+import { notify } from '@/state/notifications'
+import { composeQuery, useSettingsStore } from '@/state/settings'
 import { useUiStore } from '@/state/ui'
 import { resumeRun } from '@/thread/resume'
 
@@ -60,13 +62,39 @@ function describe(caught: unknown): RunFailure {
   return { message: 'The run could not be started. Is the API running?', retryable: true }
 }
 
+/**
+ * Tell the notification centre a run settled. Success is news only when the
+ * user is not looking at the stage; failure is always news. Both are real
+ * events, and the badge is the only place a judge who tabbed to Maps learns
+ * the run they started came back.
+ */
+function announce(jobId: string, outcome: 'succeeded' | 'failed', detail?: string): void {
+  const ui = useUiStore.getState()
+  const query = ui.recentRuns.find((run) => run.traceId === jobId)?.query ?? 'the run'
+  const short = query.length > 48 ? `${query.slice(0, 47)}…` : query
+  if (outcome === 'succeeded') {
+    if (ui.section === 'explore' && document.visibilityState === 'visible') return
+    notify({
+      kind: 'run',
+      tone: 'ok',
+      title: 'Run finished',
+      body: `“${short}”`,
+      action: { label: 'Open run', run: () => useUiStore.getState().openRun(jobId) },
+    })
+    return
+  }
+  notify({ kind: 'run', tone: 'fail', title: 'Run failed', body: detail ?? `“${short}”` })
+}
+
 /** Fold one event into the stores, and settle the history entry on a terminal one. */
 function applyEvent(event: JobEvent, jobId: string): void {
   useJobStore.getState().apply(event)
   if (event.type === 'done') {
     useUiStore.getState().settleRun(jobId, 'succeeded')
+    announce(jobId, 'succeeded')
   } else if (event.type === 'error') {
     useUiStore.getState().settleRun(jobId, 'failed')
+    announce(jobId, 'failed', event.data.message)
   }
 }
 
@@ -137,7 +165,16 @@ export function useRun() {
       }
 
       try {
-        const job = await createJob(files, query, undefined, controller.signal)
+        // Custom instructions ride ahead of the question inside `query`, and
+        // a non-zero seed goes in `options` — both are contract fields, and
+        // the history entry keeps the question the user actually typed.
+        const settings = useSettingsStore.getState()
+        const job = await createJob(
+          files,
+          composeQuery(query, settings.customInstructions),
+          settings.seed > 0 ? { seed: settings.seed } : undefined,
+          controller.signal,
+        )
         jobId = job.job_id
         liveJob.current = jobId
         useUiStore

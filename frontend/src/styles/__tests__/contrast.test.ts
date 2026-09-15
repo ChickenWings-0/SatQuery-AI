@@ -16,14 +16,40 @@
  * that has to be trusted about the one thing this file exists to be sure of.
  */
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+
+import { parseOklch, toHex } from '@/styles/oklch'
 
 const css = readFileSync(new URL('../theme.css', import.meta.url), 'utf8')
 
-/** Every `--color-*` custom property declared in the theme. */
-const TOKENS: Record<string, string> = Object.fromEntries(
-  [...css.matchAll(/--color-([a-z0-9-]+):\s*(#[0-9a-fA-F]{3,6})\b/g)].map((m) => [m[1]!, m[2]!]),
-)
+/**
+ * Every `--color-*` custom property in one block of `theme.css`, resolved to
+ * hex. The tokens are OKLCH now; `toHex` runs the same OKLab matrices the
+ * browser does, so the number checked here is the number that gets painted.
+ * Tokens carrying an alpha are skipped: they are washes, checked via `over`.
+ */
+function tokensIn(block: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const m of block.matchAll(/--color-([a-z0-9-]+):\s*([^;]+);/g)) {
+    const raw = m[2]!.trim()
+    const parsed = parseOklch(raw)
+    if (parsed && parsed.alpha < 1) continue
+    const hex = toHex(raw)
+    if (hex) out[m[1]!] = hex
+  }
+  return out
+}
+
+function block(open: string): string {
+  const start = css.indexOf(open)
+  if (start === -1) throw new Error(`theme.css has no ${open} block`)
+  const end = css.indexOf('\n}', start)
+  return css.slice(start, end)
+}
+
+const DARK = tokensIn(block('@theme {'))
+/** The light theme overrides only what it changes; the rest is the dark value. */
+const LIGHT = { ...DARK, ...tokensIn(block(':root:not(.dark) {')) }
 
 function channels(hex: string): [number, number, number] {
   const h = hex.replace('#', '')
@@ -57,6 +83,7 @@ function over(fg: string, bg: string, alpha: number): string {
   return `#${mix.map((c) => Math.round(c * 255).toString(16).padStart(2, '0')).join('')}`
 }
 
+let TOKENS: Record<string, string> = DARK
 const t = (name: string): string => {
   const value = TOKENS[name]
   if (!value) throw new Error(`--color-${name} is not declared in theme.css`)
@@ -67,6 +94,16 @@ const t = (name: string): string => {
 const BODY = 4.5
 /** WCAG 1.4.11 non-text: status dots, control borders, focus rings, meters. */
 const MARK = 3
+
+describe.each([
+  ['dark', DARK],
+  ['light', LIGHT],
+] as const)('%s theme', (_theme, tokens) => {
+  // Set per test, not at collection: both describe bodies run before any test
+  // does, and a module-level assignment here would leave only the last theme.
+  beforeEach(() => {
+    TOKENS = tokens
+  })
 
 describe('the palette declares every role it uses', () => {
   it.each([
@@ -171,7 +208,7 @@ describe('the navigation column', () => {
 
 describe('fills that carry light text', () => {
   it('keeps white legible on the primary button', () => {
-    expect(contrast('#ffffff', t('accent-warm-strong'))).toBeGreaterThanOrEqual(BODY)
+    expect(contrast(t('on-accent-cool'), t('accent-warm-strong'))).toBeGreaterThanOrEqual(BODY)
   })
 
   it('keeps the citation pill legible, including on hover', () => {
@@ -206,4 +243,5 @@ describe('non-text marks', () => {
     expect(contrast(t('accent-warm-strong'), t('line'))).toBeGreaterThanOrEqual(MARK)
     expect(contrast(t('accent-warm'), t('bg-main'))).toBeGreaterThanOrEqual(MARK)
   })
+})
 })
