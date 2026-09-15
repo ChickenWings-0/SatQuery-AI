@@ -84,14 +84,14 @@ export function HistoryPanel() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <h2 className="t-page">History</h2>
+      <h1 className="t-page">History</h1>
       <p className="mt-1.5 text-[13px] text-text-lo">
         Runs from this session. Each one is fetched back from the server's stored audit trace.
       </p>
 
       {recentRuns.length === 0 ? (
         <p className="mt-8 rounded-lg border border-dashed border-line p-8 text-center text-text-lo">
-          No runs yet. Ask a question in Explore.
+          No runs yet. Start a new query and ask something of your imagery.
         </p>
       ) : (
         <ul className="mt-6 space-y-2">

@@ -89,7 +89,7 @@ export function ToolsPanel() {
   return (
     <div className="mx-auto max-w-4xl">
       <header>
-        <h2 className="t-page">Tools</h2>
+        <h1 className="t-page">Tools</h1>
         <p className="tabular mt-1.5 text-[13px] text-text-lo">
           Registry {data.registry_version} · {availableCount} of {data.tools.length} available on
           this machine · adapter{' '}
@@ -99,7 +99,7 @@ export function ToolsPanel() {
 
       {categories.map((category) => (
         <section key={category} className="mt-6">
-          <h3 className="t-eyebrow">{category}</h3>
+          <h2 className="t-eyebrow">{category}</h2>
           <ul className="mt-2.5 space-y-2">
             {(byCategory.get(category) ?? []).map((tool) => (
               <ToolCard key={tool.name} tool={tool} />

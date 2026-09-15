@@ -26,7 +26,7 @@ export function PreviousQueries() {
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="t-eyebrow">Previous queries</h3>
+        <h2 className="t-eyebrow">Previous queries</h2>
         {recentRuns.length > 0 && (
           <button
             type="button"

@@ -10,7 +10,7 @@ packages in `devDependencies`, and `npm run fonts:sync` re-copies them:
 
 | Family                | Package                            | Licence                    |
 |-----------------------|------------------------------------|----------------------------|
-| `Inter Variable`      | `@fontsource-variable/inter`       | `LICENSE-Inter.txt`        |
+| `Geist Variable`      | `@fontsource-variable/geist`       | `LICENSE-Geist.txt`        |
 | `Geist Mono Variable` | `@fontsource-variable/geist-mono`  | `LICENSE-GeistMono.txt`    |
 
 Both are SIL OFL 1.1, which requires the licence and copyright notice to travel

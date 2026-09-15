@@ -139,7 +139,7 @@ export function SceneHeader({
     <header className="flex shrink-0 flex-wrap items-start gap-x-4 gap-y-3">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h2 className="t-page">{titleFor(task)}</h2>
+          <h1 className="t-page">{titleFor(task)}</h1>
           {task && <span className="chip border border-line text-text-lo">{task}</span>}
           {/* The only place a screen-reader user learns that a run has
               started, changed stage or finished — the rest of the change is

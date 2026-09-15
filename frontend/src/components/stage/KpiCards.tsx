@@ -95,7 +95,7 @@ export function KpiCards({
 
   return (
     <section className="shrink-0">
-      <h3 className="t-eyebrow">Key insights</h3>
+      <h2 className="t-eyebrow">Key insights</h2>
       <ul
         className="mt-3 grid gap-3"
         style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}

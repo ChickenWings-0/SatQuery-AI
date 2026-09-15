@@ -13,10 +13,13 @@
  * away closes it.
  */
 import { useQuery } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 
 import { health } from '@/api/client'
-import { BellIcon, DotIcon } from '@/components/ui/icons'
+import { NotificationPopover } from '@/components/shell/NotificationPopover'
+import { DotIcon } from '@/components/ui/icons'
 import { decimal, integer } from '@/format'
+import { notify } from '@/state/notifications'
 
 type Tone = 'ok' | 'warn' | 'fail' | 'pending'
 
@@ -43,6 +46,32 @@ export function HealthStrip() {
         ? 'ok'
         : 'warn'
   const { label, dot } = TONE[tone]
+
+  // Health transitions are news: tell the notification centre once per
+  // change, never per poll. The unmasked-iGPU flag is pinned the first time
+  // it is seen — API_CONTRACT §4.9 calls it a red flag before any demo.
+  const previous = useRef<Tone>('pending')
+  const flaggedGpu = useRef(false)
+  useEffect(() => {
+    if (tone === 'pending') return
+    const was = previous.current
+    previous.current = tone
+    if (was !== 'pending' && was !== tone) {
+      if (tone === 'ok') notify({ kind: 'health', tone: 'ok', title: 'System ready again' })
+      else if (tone === 'warn')
+        notify({ kind: 'health', tone: 'warn', title: 'API degraded', body: label })
+      else notify({ kind: 'health', tone: 'fail', title: 'API unreachable', body: 'Retrying every 15 s.' })
+    }
+    if (data && !data.device.igpu_masked && !flaggedGpu.current) {
+      flaggedGpu.current = true
+      notify({
+        kind: 'device',
+        tone: 'warn',
+        title: 'Integrated GPU not masked',
+        body: 'Mask it before demoing — the VLM would share VRAM with the compositor.',
+      })
+    }
+  }, [tone, data, label])
 
   // VRAM is nullable: on a CPU-only box there is none to report, and §1's
   // nulls rule makes that `null` rather than 0. Render the bar only when both
@@ -134,13 +163,7 @@ export function HealthStrip() {
         </div>
       </div>
 
-      <button
-        type="button"
-        aria-label="Notifications"
-        className="grid size-9 place-items-center rounded-full border border-line bg-surface-card text-text-lo transition-colors hover:border-accent-warm/40 hover:text-text-hi"
-      >
-        <BellIcon size={16} />
-      </button>
+      <NotificationPopover />
     </div>
   )
 }

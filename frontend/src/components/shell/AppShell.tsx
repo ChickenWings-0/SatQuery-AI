@@ -17,7 +17,7 @@
  * The top bar is its own grid row rather than a sticky header inside `<main>`:
  * a sticky header scrolls with the column it sits in and would vanish behind
  * the viewer on a short window, and it cannot span the thread column at all.
- * The bar holds the mode chip and the system status; on a phone both fold
+ * The bar holds the scene crumb and the system status; on a phone both fold
  * into one 44px row above the stage.
  *
  * Two things are deliberately *not* done here.
@@ -43,10 +43,19 @@
 import type { ReactNode } from 'react'
 
 import { HealthStrip } from '@/components/shell/HealthStrip'
-import { ModeSelector } from '@/components/shell/ModeSelector'
+import { SceneCrumb } from '@/components/shell/SceneCrumb'
 import { Sidebar } from '@/components/shell/Sidebar'
 
-export function AppShell({ stage, thread }: { stage: ReactNode; thread: ReactNode }) {
+export function AppShell({
+  stage,
+  thread,
+  bleed = false,
+}: {
+  stage: ReactNode
+  thread: ReactNode
+  /** Full-bleed centre column (Maps): no padding, the page owns its edges. */
+  bleed?: boolean
+}) {
   return (
     <div
       className="
@@ -68,13 +77,18 @@ export function AppShell({ stage, thread }: { stage: ReactNode; thread: ReactNod
           desk:col-span-2
         "
       >
-        <ModeSelector />
+        <SceneCrumb />
         <div className="ml-auto">
           <HealthStrip />
         </div>
       </header>
 
-      <main className="min-h-0 min-w-0 overflow-y-auto px-4 py-5 wide:px-7 wide:py-6">{stage}</main>
+      <main
+        id="main"
+        className={`min-h-0 min-w-0 ${bleed ? 'relative overflow-hidden' : 'overflow-y-auto px-4 py-5 wide:px-7 wide:py-6'}`}
+      >
+        {stage}
+      </main>
 
       {/*
        * The bottom sheet. `max-height` caps it; the `auto` grid row means it is

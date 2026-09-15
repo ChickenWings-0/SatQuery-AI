@@ -15,12 +15,11 @@ import { useEffect, useId, useRef } from 'react'
 import { CameraIcon, ChevronDownIcon, SendIcon } from '@/components/ui/icons'
 import { countOf } from '@/format'
 import { useFocusStore } from '@/state/focus'
+import { queryRoom, useSettingsStore } from '@/state/settings'
 import { useUiStore } from '@/state/ui'
 
-/** Matches the server's own ceiling on a query string. */
-const MAX_LENGTH = 1000
-/** Where the character count stops being noise and starts being a warning. */
-const COUNTDOWN_FROM = 900
+/** The counter appears once this many characters are left. */
+const COUNTDOWN_AT = 100
 
 export function QueryComposer({
   onSubmit,
@@ -32,6 +31,10 @@ export function QueryComposer({
   busy: boolean
 }) {
   const value = useFocusStore((state) => state.draft)
+  // The server caps `query` at 1000 characters and custom instructions are
+  // sent inside it, so the box's ceiling is what the instructions leave.
+  const instructions = useSettingsStore((state) => state.customInstructions)
+  const MAX_LENGTH = queryRoom(instructions)
   const setDraft = useFocusStore((state) => state.setDraft)
   const setComposer = useFocusStore((state) => state.setComposer)
   const validation = useUiStore((state) => state.validation)
@@ -148,7 +151,7 @@ export function QueryComposer({
 
           {/* Only once it is nearly a problem: a live counter on an empty box
               is a distraction, a silent truncation at 1000 is a bug. */}
-          {remaining <= MAX_LENGTH - COUNTDOWN_FROM && (
+          {remaining <= COUNTDOWN_AT && (
             <span
               role="status"
               className={`tabular text-[11px] ${remaining <= 0 ? 'font-medium' : 'text-text-lo'}`}

@@ -1,0 +1,35 @@
+# SatQuery AI
+
+> Evidence-bound geospatial intelligence: an agentic vision-language assistant for satellite imagery that shows its work. A query is parsed, inputs pass eleven compatibility checks, a deterministic policy table selects and sequences specialist tools, and the answer is grounded — every number bound to a measured scalar or flagged as uncited — with a versioned, schema-validated audit trace. Built for Smart India Hackathon 2026, problem statement 26167 (ISRO / Space Applications Centre).
+
+## What it does
+
+- VQA, captioning and grounding (validated bounding boxes) over pre-rendered views
+- Bi-temporal change detection: Siamese change model + change statistics, co-registered at ingest
+- Cross-modal optical + SAR: spectral-index and backscatter analysers feed one fact sheet; physics_agreement flags disagreement
+- Input validation: 11 named checks (CRS, GSD, overlap, co-registration, …) before any tool runs
+- Citation honesty: a CitationValidator that flags rather than strips
+- Audit trace: built by the executor, persisted, returned verbatim
+
+## How answers are built
+
+1. Raster ingest & pre-flight — POST /v1/validate, 11 checks
+2. Spatial policy DAG — policy_key = TaskType | PairType | Modality; a frozen table selects the tools
+3. Co-register · render · mask — spectral views (TC, FCIR, NDVI, NDBI, NDWI, SAR), change masks, measured areas
+4. Evidence-bound synthesis — the VLM (Qwen3-VL-8B + QLoRA) writes; the validator binds numbers to the trace
+
+The LLM performs slot filling and answer synthesis only. It never chooses a tool, never orders steps, and never invents a capability.
+
+## Pages
+
+- [SatQuery AI — From space to answers, with the receipts](/): Bi-temporal and cross-modal SAR/optical satellite analysis where every number is bound to a measurement and the tool graph is part of the answer. Built for SIH 2026, ISRO / SAC.
+- [New Query · SatQuery AI](/explore): The workspace: drop satellite imagery, let the eleven-check pre-flight say what it can answer, and ask.
+- [Use cases · SatQuery AI](/use-cases): Runnable geospatial investigations over Indian scenes: sprawl, floods, grounding, cross-modal checks.
+- [Maps · SatQuery AI](/maps): The loaded scene in the world, with every rendered view switchable and a swipe compare.
+- [Datasets · SatQuery AI](/datasets): The corpus sources behind the model, as the API reports them.
+- [Tools · SatQuery AI](/tools): The tool registry, live from /v1/registry: what can run on this machine right now.
+
+## Not for
+
+- No accounts, no cloud storage: saved runs and projects live in the browser
+- Runs fully local on one 24 GB consumer GPU; survives the network being pulled

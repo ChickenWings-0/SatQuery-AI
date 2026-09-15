@@ -27,7 +27,7 @@ export const DialogOverlay = forwardRef<
     // class names doing nothing. The real keyframes are in `theme.css`, keyed
     // off this attribute so `prefers-reduced-motion` can override them.
     data-sq-overlay
-    className={`fixed inset-0 z-50 bg-text-hi/45 backdrop-blur-[2px] ${className}`}
+    className={`fixed inset-0 z-50 bg-[var(--color-scrim)] backdrop-blur-[2px] ${className}`}
     {...props}
   />
 ))

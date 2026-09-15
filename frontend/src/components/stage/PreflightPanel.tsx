@@ -55,9 +55,9 @@ export function PreflightPanel() {
   return (
     <div className="mx-auto max-w-4xl space-y-5 md:space-y-6">
       <header>
-        <h2 className="t-page">Explore</h2>
+        <h1 className="t-page">New Query</h1>
         <p className="mt-1.5 text-[13px] text-text-lo">
-          Upload imagery and SatQuery checks what it can answer before you ask.
+          Start with imagery. Pre-flight says what these images can answer before you ask.
         </p>
       </header>
 
@@ -114,9 +114,9 @@ export function PreflightPanel() {
           <CompatibilityDetails report={validation.compatibility} />
 
           <section>
-            <h3 className="t-eyebrow">
+            <h2 className="t-eyebrow">
               {blocked ? 'Unavailable' : 'Questions these images can answer'}
-            </h3>
+            </h2>
 
             {blocked ? (
               <p className="mt-2 rounded-lg border border-fail/40 bg-fail/8 px-4 py-3 text-sm">

@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { useHotkeys } from '@/shell/useHotkeys'
 import { useFocusStore } from '@/state/focus'
-import { useUiStore } from '@/state/ui'
+import { useSettingsStore } from '@/state/settings'
+import { useShortcutStore } from '@/state/shortcuts'
 
 function Harness() {
   useHotkeys()
@@ -47,7 +48,7 @@ afterEach(() => {
   // render leaves its window listener attached and each key fires N times.
   cleanup()
   useFocusStore.getState().resetForNewRun()
-  useUiStore.setState({ shortcutsEnabled: true })
+  useShortcutStore.setState({ enabled: true })
 })
 
 describe('useHotkeys', () => {
@@ -175,7 +176,7 @@ describe('useHotkeys', () => {
   it('goes silent when the user turns single-key shortcuts off', () => {
     // WCAG 2.1.4: the switch is in the sidebar footer and is persisted.
     render(<Harness />)
-    useUiStore.setState({ shortcutsEnabled: false })
+    useShortcutStore.setState({ enabled: false })
 
     press(']')
     press('ArrowRight')
@@ -184,6 +185,15 @@ describe('useHotkeys', () => {
     expect(useFocusStore.getState().swipe).toBe(50)
     expect(useFocusStore.getState().activeViewKey).toBeNull()
     expect(useFocusStore.getState().pipelineOpen).toBe(false)
+  })
+
+  it('opens settings on ⌘, even from a text field and with single keys off', () => {
+    const { getByTestId } = render(<Harness />)
+    useShortcutStore.setState({ enabled: false })
+    const event = press(',', getByTestId('composer'), { metaKey: true })
+    expect(event.defaultPrevented).toBe(true)
+    expect(useSettingsStore.getState().open).toBe(true)
+    useSettingsStore.getState().closeSettings()
   })
 
   it('stops listening once unmounted', () => {

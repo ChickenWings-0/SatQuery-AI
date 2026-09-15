@@ -66,7 +66,7 @@ export function EvidenceTray({
                 {url && (
                   <img
                     src={url}
-                    alt={primary?.label ?? ''}
+                    alt={primary?.label ?? group.name}
                     loading="lazy"
                     className="aspect-[4/3] w-full border-b border-line-soft object-cover [image-rendering:pixelated]"
                   />

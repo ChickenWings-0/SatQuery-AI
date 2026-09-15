@@ -24,10 +24,16 @@ export interface RecentRun {
   outcome: RunOutcome
 }
 
-/** The rail's items, in the order the rail shows them. */
+/**
+ * The rail's items, in the order the rail shows them.
+ *
+ * Two destinations are deliberately absent. `home` — the landing page — is
+ * reached through the wordmark, which is on every page; a "Home" row beside
+ * it was the same link twice. `explore` — the workspace — is reached through
+ * the one call to action, "New Query", which sits at the head of the nav and
+ * carries `aria-current` when the workspace is showing.
+ */
 export const NAV_SECTIONS = [
-  'home',
-  'explore',
   'datasets',
   'tools',
   'usecases',
@@ -38,34 +44,20 @@ export const NAV_SECTIONS = [
 export type NavSection = (typeof NAV_SECTIONS)[number]
 
 /**
- * Everything the centre column can show. History left the rail — its shortcut
- * list lives in the thread's History tab now — but the full-page session
- * history is still a real destination that `openRun` and "View all" reach.
+ * Everything the centre column can show. `home` is the landing page and
+ * `explore` the workspace (see {@link NAV_SECTIONS} for why neither is a nav
+ * row). History left the rail — its shortcut list lives in the thread's
+ * History tab now — but the full-page session history is still a real
+ * destination that `openRun` and "View all" reach. `notFound` is what an
+ * unknown URL resolves to (`@/shell/router`): the shell still renders, so a
+ * lost user is lost, not locked out.
  */
-export type Section = NavSection | 'history'
+export type Section = NavSection | 'home' | 'explore' | 'history' | 'notFound'
 
 export interface UploadedFile {
   file: File
   /** Object URL for the local thumbnail; revoked when the selection changes. */
   previewUrl: string
-}
-
-const SHORTCUTS_KEY = 'satquery.shortcuts'
-
-/**
- * Read the shortcut preference without assuming storage works.
- *
- * `localStorage` throws outright in a Safari private window and in any context
- * where the user has blocked site data, and a throw here happens during module
- * evaluation — i.e. it takes down the whole app before React mounts. Defaults
- * to on, because the shortcuts are the product's keyboard story.
- */
-function readShortcutPreference(): boolean {
-  try {
-    return localStorage.getItem(SHORTCUTS_KEY) !== 'off'
-  } catch {
-    return true
-  }
 }
 
 /**
@@ -87,16 +79,10 @@ interface UiState {
   recentRuns: RecentRun[]
   /** The run History should open expanded, set by clicking a sidebar entry. */
   selectedTraceId: string | null
-  /**
-   * Whether the single-character shortcuts are live.
-   *
-   * WCAG 2.1.4 requires single-key shortcuts to be turnable off — they fire
-   * under speech input and under any assistive technology that synthesises
-   * keystrokes, where an unintended `P` opening a modal is genuinely
-   * disorienting. Persisted, because a preference that resets every reload is
-   * not a preference.
-   */
-  shortcutsEnabled: boolean
+  /** The use-case slug currently being fetched into the canvas, if any. */
+  loadingSample: string | null
+  /** The path the router could not resolve, shown on the 404 page. */
+  unknownPath: string | null
 
   setSection: (section: Section) => void
   setFiles: (files: File[]) => void
@@ -120,20 +106,24 @@ interface UiState {
   settleRun: (traceId: string, outcome: RunOutcome) => void
   /** Jump to History with one run already open. */
   openRun: (traceId: string) => void
-  setShortcutsEnabled: (enabled: boolean) => void
+  setLoadingSample: (slug: string | null) => void
+  setUnknownPath: (path: string | null) => void
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
   section: 'explore',
+  loadingSample: null,
+  unknownPath: null,
   files: [],
   validation: null,
   validating: false,
   validationError: null,
   recentRuns: [],
   selectedTraceId: null,
-  shortcutsEnabled: readShortcutPreference(),
-
   setSection: (section) => set({ section }),
+
+  setLoadingSample: (loadingSample) => set({ loadingSample }),
+  setUnknownPath: (unknownPath) => set({ unknownPath }),
 
   setFiles: (files) => {
     for (const existing of get().files) URL.revokeObjectURL(existing.previewUrl)
@@ -193,15 +183,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   // Navigating to History without saying *which* run left the user to re-find
   // the one they had just clicked.
   openRun: (selectedTraceId) => set({ section: 'history', selectedTraceId }),
-
-  setShortcutsEnabled: (shortcutsEnabled) => {
-    set({ shortcutsEnabled })
-    try {
-      localStorage.setItem(SHORTCUTS_KEY, shortcutsEnabled ? 'on' : 'off')
-    } catch {
-      // A preference that cannot be persisted still applies to this session.
-    }
-  },
 }))
 
 /** Every manifest field that is `null` carries a reason in `warnings` (§1). */
