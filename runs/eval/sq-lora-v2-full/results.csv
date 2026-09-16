@@ -1,0 +1,7 @@
+source,n,exact_match,set_f1,grounding_recall,grounding_iou,grounding_format_ok,citation_precision,uncited_rate,fact_recall,bleu4,rouge_l,latency_ms_mean
+bigearthnet_v2,100,0.0000,0.0000,0.0000,0.0000,0.0000,,,0.0000,0.0000,0.0000,29994
+cdvqa,100,0.0000,,,,,,,,,,27702
+evidence_qa,100,0.0000,,,,,,,0.0000,,,30295
+rsvqa_hr,100,0.0000,,,,,,,0.0000,,,27286
+vrsbench,100,0.0000,,0.0000,0.0000,0.0000,,,,0.0000,0.0000,27301
+all,500,0.0000,0.0000,0.0000,0.0000,0.0000,,,0.0000,0.0000,0.0000,28516

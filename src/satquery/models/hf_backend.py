@@ -33,6 +33,7 @@ nothing.
 
 from __future__ import annotations
 
+import itertools
 import json
 import time
 from pathlib import Path
@@ -102,6 +103,81 @@ def _strip_chat_tokens(text: str) -> str:
     for token in _CHAT_CONTROL_TOKENS:
         text = text.replace(token, "")
     return text.strip()
+
+
+_EOS_TOKENS: Final[tuple[str, ...]] = ("<|im_end|>", "<|endoftext|>")
+"""Where a Qwen3-VL turn ends, as token ids rather than text.
+
+Resolved against the tokenizer that ships beside the adapter and handed to
+``generate()`` explicitly, so stopping never depends on whichever
+``generation_config.json`` the base repository happens to carry. The text-level
+stop set in :data:`~satquery.models.loader.CHAT_STOP_STRINGS` stays as the
+second line of defence.
+"""
+
+
+def eos_token_ids(processor: Any) -> tuple[int, ...]:
+    """The end-of-turn token ids the processor's tokenizer knows, in stop order."""
+    tokenizer = getattr(processor, "tokenizer", None)
+    if tokenizer is None:
+        return ()
+    ids: list[int] = []
+    for token in _EOS_TOKENS:
+        try:
+            resolved = tokenizer.convert_tokens_to_ids(token)
+        except Exception:  # noqa: BLE001 - a tokenizer without the token is not an error
+            continue
+        if isinstance(resolved, int) and resolved >= 0 and resolved not in ids:
+            ids.append(resolved)
+    return tuple(ids)
+
+
+def check_finite_weights(model: Any, source: str) -> int:
+    """Refuse to serve weights that carry a NaN or an infinity.
+
+    A single non-finite value anywhere in the network poisons every logit that
+    passes through it, and greedy decoding over NaN logits is ``argmax`` over
+    NaN — token 0, which Qwen spells ``!``, repeated to the token budget. That
+    looks like a model that will not stop talking, and a 500-sample benchmark
+    was scored to 0.0 % before anyone looked at the text. The cause was one
+    corrupted 4 KB block in a cached safetensors shard, which nothing in the
+    load path checks: ``safetensors`` verifies the header, not the payload.
+
+    Every floating-point parameter and buffer is scanned on the device it
+    landed on, a few seconds for 8B parameters, before the backend reports
+    itself loaded.
+
+    Returns:
+        The number of tensors scanned.
+
+    Raises:
+        ModelLoadError: At least one tensor holds a NaN or an infinity. The
+            message names each one and how to repair the weights.
+    """
+    import torch
+
+    corrupt: list[str] = []
+    scanned = 0
+    with torch.inference_mode():
+        for name, tensor in itertools.chain(model.named_parameters(), model.named_buffers()):
+            if not tensor.is_floating_point():
+                continue
+            scanned += 1
+            finite = torch.isfinite(tensor)
+            if not bool(finite.all()):
+                bad = int(tensor.numel() - int(finite.sum()))
+                corrupt.append(f"{name} ({bad} of {tensor.numel()} values)")
+    if corrupt:
+        more = f"; +{len(corrupt) - 8} more" if len(corrupt) > 8 else ""
+        listed = "; ".join(corrupt[:8]) + more
+        raise ModelLoadError(
+            f"{source} holds non-finite weights and will only ever generate token 0: "
+            f"{listed}. Re-download the weights (for a Hub model: "
+            f"`hf download {source} --force-download`; a cached shard is intact when "
+            "`sha256sum blobs/<name>` equals its name), or check the adapter's "
+            "adapter_model.safetensors if the tensor is a LoRA weight."
+        )
+    return scanned
 
 
 def build_messages(request: GenerationRequest) -> list[dict[str, Any]]:
@@ -203,6 +279,7 @@ class HuggingFaceBackend(LazyBackend):
         self._model: Any | None = None
         self._processor: Any | None = None
         self._torch: Any | None = None
+        self._eos_ids: tuple[int, ...] = ()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -243,6 +320,13 @@ class HuggingFaceBackend(LazyBackend):
 
         self._torch = torch
         self._model = model
+        # Corrupt weights must fail here, not answer "!!!!" later. Scanned after
+        # the adapter is applied so its tensors are covered too.
+        try:
+            check_finite_weights(model, self.source)
+        except ModelLoadError:
+            self._unload()
+            raise
         # Bound through an explicitly Any local: transformers is an optional
         # extra, so its symbols are typed on a serving box and Any on one that
         # never installed it. Calling through Any is silent under both, where an
@@ -257,6 +341,9 @@ class HuggingFaceBackend(LazyBackend):
             except ModelLoadError:
                 self._unload()
                 raise
+        # The tokenizer that travelled with the adapter says where a turn ends;
+        # resolved once, handed to every generate() call.
+        self._eos_ids = eos_token_ids(self._processor)
 
         # The estimate above sized the load; this checks what it actually cost,
         # because a guard that is never reconciled against reality is decoration.
@@ -356,6 +443,7 @@ class HuggingFaceBackend(LazyBackend):
         self._model = None
         self._processor = None
         self._torch = None
+        self._eos_ids = ()
         empty_device_cache(self.config.device)
 
     # -- generation --------------------------------------------------------
@@ -386,6 +474,8 @@ class HuggingFaceBackend(LazyBackend):
         ).to(self.config.device)
 
         prompt_tokens = int(inputs["input_ids"].shape[-1])
+        tokenizer = getattr(processor, "tokenizer", None)
+        pad_id = getattr(tokenizer, "pad_token_id", None)
         started = time.perf_counter()
         with torch.inference_mode():
             produced = model.generate(
@@ -394,11 +484,15 @@ class HuggingFaceBackend(LazyBackend):
                 do_sample=not request.greedy,
                 temperature=None if request.greedy else request.temperature,
                 top_p=None if request.greedy else request.top_p,
+                # <|im_end|> and <|endoftext|> from the adapter's own tokenizer,
+                # not whatever the base repo's generation_config.json lists.
+                eos_token_id=list(self._eos_ids) or None,
+                pad_token_id=pad_id if isinstance(pad_id, int) else None,
                 # transformers matches these against the decoded tail, and needs
                 # the tokenizer to do it. Passing the strings without it is
                 # silently ignored, which is the same as not stopping at all.
                 stop_strings=list(request.stop) or None,
-                tokenizer=getattr(processor, "tokenizer", None),
+                tokenizer=tokenizer,
             )
         duration_ms = int((time.perf_counter() - started) * 1000)
 
@@ -434,6 +528,8 @@ __all__ = [
     "LAYOUT_FILE",
     "HuggingFaceBackend",
     "build_messages",
+    "check_finite_weights",
     "check_layout",
+    "eos_token_ids",
     "read_layout_record",
 ]
