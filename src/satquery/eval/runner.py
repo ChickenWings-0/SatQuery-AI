@@ -21,7 +21,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import numpy as np
 from PIL import Image
@@ -31,14 +31,47 @@ from satquery.models.loader import BackendKind, GenerationRequest, PromptImage, 
 from satquery.training.corpus_builder import CorpusSample
 
 __all__ = [
+    "DEGENERATE_RUN_AFTER",
+    "DegenerateRunError",
     "Prediction",
     "build_request",
+    "is_degenerate",
     "read_predictions",
     "reference_backend",
     "run",
 ]
 
 log = get_logger(__name__)
+
+DEGENERATE_RUN_AFTER: Final[int] = 3
+"""Consecutive runaway decodes that end the run instead of being scored.
+
+Three, because one is a sample and three in a row is the model: no prompt in
+the corpus has a reference that is one token repeated to the budget."""
+
+
+class DegenerateRunError(RuntimeError):
+    """The backend is emitting one token until the budget: the weights, not the samples.
+
+    Greedy decoding over NaN logits is ``argmax`` over NaN, which is token 0 —
+    ``!`` in Qwen's vocabulary — for every position. Scored, that reads as
+    0.0 % on every metric with a clean "0 generation errors" line, and a run
+    that costs four hours before anyone opens ``predictions.jsonl``. Raised
+    instead, after :data:`DEGENERATE_RUN_AFTER` such rows.
+    """
+
+
+def is_degenerate(prediction: Prediction) -> bool:
+    """True for a truncated decode that is one short unit repeated to the budget.
+
+    Catches ``!!!!…`` (a single character) and any one-to-four-character cycle,
+    which is what a poisoned logit stream produces; an answer that merely ran
+    long is not caught, because its text is not periodic.
+    """
+    text = prediction.prediction.strip()
+    if not prediction.truncated or len(text) < 16:
+        return False
+    return any(text == (text[:unit] * (len(text) // unit + 1))[: len(text)] for unit in range(1, 5))
 
 
 @dataclass(frozen=True)
@@ -128,6 +161,13 @@ def run(
     empty prediction — it scores as wrong, which is what it is — rather than
     ending the run; the exception text is in the row for the post-mortem.
 
+    A generation that *succeeds* with one token repeated to the budget is a
+    different matter: after :data:`DEGENERATE_RUN_AFTER` of those in a row
+    the run stops with :class:`DegenerateRunError`, because that is the
+    signature of NaN logits and every further sample would say the same
+    thing at thirty seconds each. Resumed rows count too, so ``--resume``
+    over a poisoned ``predictions.jsonl`` refuses rather than re-scoring it.
+
     Args:
         samples: The rows to score.
         backend: Any loaded-or-lazy VLM backend.
@@ -142,11 +182,16 @@ def run(
 
     Yields:
         Every prediction, resumed rows included, in sample order.
+
+    Raises:
+        DegenerateRunError: :data:`DEGENERATE_RUN_AFTER` consecutive rows were
+            one token repeated to the budget.
     """
     rows = list(samples)
     existing = read_predictions(out) if resume else {}
     out.parent.mkdir(parents=True, exist_ok=True)
     mode = "a" if resume and out.exists() else "w"
+    streak = 0
     with out.open(mode, encoding="utf-8") as handle:
         for index, sample in enumerate(rows, start=1):
             if sample.id in existing:
@@ -155,6 +200,20 @@ def run(
                 prediction = _predict(sample, backend, root, max_views, max_new_tokens)
                 handle.write(prediction.to_json() + "\n")
                 handle.flush()
+            streak = streak + 1 if is_degenerate(prediction) else 0
+            if streak >= DEGENERATE_RUN_AFTER:
+                handle.flush()
+                raise DegenerateRunError(
+                    f"{streak} consecutive decodes are one token repeated to the "
+                    f"{max_new_tokens}-token budget (last: {prediction.id}, "
+                    f"{prediction.prediction[:24]!r}…). That is argmax over NaN "
+                    "logits, not an answer: the weights are corrupt or overflowing, "
+                    "and scoring the remaining samples would only cost time. The HF "
+                    "backend refuses non-finite weights at load; if it loaded, look "
+                    f"at the backend ({prediction.backend}, {prediction.model_id}). "
+                    f"Rows already in {out} count towards this, so delete it before "
+                    "re-running with --resume once the model is repaired."
+                )
             if progress is not None:
                 progress(index, len(rows), prediction)
             yield prediction
