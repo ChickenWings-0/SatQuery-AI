@@ -44,6 +44,7 @@ from tests.conftest import BEN_FACTS, BEN_VIEW_IDS  # noqa: F401 - re-exported c
 
 # ------------------------------------------------------------------- fixtures
 
+
 @pytest.fixture
 def optical_views() -> list[cb.SourceView]:
     """A two-view optical stack, labelled the way the renderer labels one."""
@@ -70,9 +71,11 @@ def qwen_module_names(vision_blocks: int = 27, llm_layers: int = 36) -> list[str
         ]
     for layer in range(llm_layers):
         prefix = f"model.language_model.layers.{layer}"
-        names += [prefix] + [
-            f"{prefix}.self_attn.{leaf}" for leaf in ("q_proj", "k_proj", "v_proj", "o_proj")
-        ] + [f"{prefix}.mlp.{leaf}" for leaf in ("gate_proj", "up_proj", "down_proj")]
+        names += (
+            [prefix]
+            + [f"{prefix}.self_attn.{leaf}" for leaf in ("q_proj", "k_proj", "v_proj", "o_proj")]
+            + [f"{prefix}.mlp.{leaf}" for leaf in ("gate_proj", "up_proj", "down_proj")]
+        )
     names += ["model.visual.merger", "model.visual.merger.mlp.0"]
     return names
 
@@ -304,8 +307,7 @@ def test_vrsbench_yields_caption_vqa_and_grounding_from_one_row() -> None:
     """One VRSBench image carries a caption, N questions and M referred objects."""
     samples = cb.from_vrsbench(VRSBENCH_ROW, augment=False)
     by_task = {sample.task: sample for sample in samples}
-    assert set(by_task) == {TaskType.CAPTION, TaskType.VQA, TaskType.COUNT,
-                            TaskType.GROUNDING}
+    assert set(by_task) == {TaskType.CAPTION, TaskType.VQA, TaskType.COUNT, TaskType.GROUNDING}
 
     assert by_task[TaskType.CAPTION].assistant == VRSBENCH_ROW["caption"]
     assert by_task[TaskType.VQA].assistant == "Expressway-toll-station"
@@ -327,9 +329,7 @@ def test_vrsbench_counts_are_cited_rather_than_stated_bare() -> None:
 def test_vrsbench_grounding_uses_the_shared_serialiser() -> None:
     """``obj_coord`` is normalised 0-1; the corpus emits the 0-1000 canonical form."""
     ground = next(
-        s
-        for s in cb.from_vrsbench(VRSBENCH_ROW, augment=False)
-        if s.task is TaskType.GROUNDING
+        s for s in cb.from_vrsbench(VRSBENCH_ROW, augment=False) if s.task is TaskType.GROUNDING
     )
     parsed = box_format.parse(ground.assistant)
     assert len(parsed) == 1
@@ -364,9 +364,12 @@ def test_rsvqa_count_becomes_a_cited_measurement() -> None:
     assert sample.task is TaskType.COUNT
     assert sample.fact_sheet == {"object_counter.count": 12.0}
     assert "[object_counter.count]" in sample.assistant
-    assert validate(
-        strip_citation_markers(sample.assistant).text, cb.fact_sheet_from(sample.fact_sheet)
-    ).uncited_numeric_spans == []
+    assert (
+        validate(
+            strip_citation_markers(sample.assistant).text, cb.fact_sheet_from(sample.fact_sheet)
+        ).uncited_numeric_spans
+        == []
+    )
 
 
 def test_cdvqa_is_bi_temporal_with_dated_pre_and_post_labels() -> None:
@@ -480,9 +483,10 @@ def test_evidence_qa_teaches_refusal_as_well_as_citation(
     refusal = next(sample for sample in samples if sample.id.endswith(":unmeasured"))
     assert "did not" in refusal.assistant
     assert "[" not in refusal.assistant
-    assert validate(
-        refusal.assistant, cb.fact_sheet_from(refusal.fact_sheet)
-    ).uncited_numeric_spans == []
+    assert (
+        validate(refusal.assistant, cb.fact_sheet_from(refusal.fact_sheet)).uncited_numeric_spans
+        == []
+    )
 
 
 def test_index_readings_follow_the_fixed_domain() -> None:
@@ -539,9 +543,7 @@ def test_augmentation_is_reproducible_from_the_seed(ben_row: dict[str, Any]) -> 
     """Two builds of one seed produce the same corpus, tags included."""
     first = cb.from_bigearthnet(ben_row, rng=random.Random(7))
     second = cb.from_bigearthnet(ben_row, rng=random.Random(7))
-    assert [s.model_dump(mode="json") for s in first] == [
-        s.model_dump(mode="json") for s in second
-    ]
+    assert [s.model_dump(mode="json") for s in first] == [s.model_dump(mode="json") for s in second]
     assert all(
         tag.startswith(("rescale_", "swir_dropout", "single_pol"))
         for sample in first
@@ -760,9 +762,7 @@ def test_streaming_build_still_refuses_a_leaked_image(tmp_path: Path) -> None:
     dedup = cb.Deduplicator()
     dedup.quarantine("test:1", sha256="abc")
     with pytest.raises(cb.LeakageError):
-        cb.build_corpus_streaming(
-            iter([(cb.CorpusSource.VRSBENCH, sample)]), tmp_path, dedup=dedup
-        )
+        cb.build_corpus_streaming(iter([(cb.CorpusSource.VRSBENCH, sample)]), tmp_path, dedup=dedup)
 
 
 def test_corpus_round_trips_through_jsonl(tmp_path: Path) -> None:
@@ -947,8 +947,9 @@ def test_target_resolution_accepts_a_torch_style_module() -> None:
 
         def named_modules(self) -> list[tuple[str, object]]:
             """Mimic torch's ``(name, module)`` pairs."""
-            return [(name, object()) for name in ["", *qwen_module_names(vision_blocks=9,
-                                                                        llm_layers=2)]]
+            return [
+                (name, object()) for name in ["", *qwen_module_names(vision_blocks=9, llm_layers=2)]
+            ]
 
     targets = qlora.resolve_target_modules(FakeModel(), qlora.LoraSpec())
     assert len(qlora.split_targets(targets)[0]) == 2 * 7
@@ -1252,17 +1253,26 @@ def test_placeholder_count_ignores_filled_blocks() -> None:
     """
     filled = {
         "prompt": [
-            {"role": "user", "content": [{"type": "image", "image": "a.png"},
-                                         {"type": "image", "text": None},
-                                         {"type": "text", "text": "q"}]}
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": "a.png"},
+                    {"type": "image", "text": None},
+                    {"type": "text", "text": "q"},
+                ],
+            }
         ]
     }
     assert qlora.image_placeholder_count(filled) == 1
     assert qlora.image_placeholder_count({"prompt": []}) == 0
     # A regression to the old shape counts nothing, so it fails the equality
     # with len(images) instead of silently training on the whole sequence.
-    assert qlora.image_placeholder_count({"messages": [{"role": "user", "content": [
-        {"type": "image"}]}]}) == 0
+    assert (
+        qlora.image_placeholder_count(
+            {"messages": [{"role": "user", "content": [{"type": "image"}]}]}
+        )
+        == 0
+    )
 
 
 def test_loading_a_corpus_truncates_and_prefixes(tmp_path: Path) -> None:
@@ -1335,15 +1345,45 @@ def test_merge_export_composes_the_gguf_commands(tmp_path: Path) -> None:
     """The offline path is two llama.cpp calls, printed before they are run."""
     import merge_export
 
-    convert, quantise = merge_export.gguf_commands(
-        tmp_path / "sq-lora-v1-merged", Path("/opt/llama.cpp"), "Q4_K_M"
+    convert, mmproj, quantise = merge_export.gguf_commands(
+        tmp_path / "sq-lora-v1-merged", Path("/opt/llama.cpp"), "Q4_K_M", "f16"
     )
     assert convert[1].endswith("convert_hf_to_gguf.py")
-    assert convert[-1] == "f16"
+    assert convert[-1] == "bf16", "the quantiser reads the bf16 the merge produced"
+    assert mmproj[1].endswith("convert_hf_to_gguf.py")
+    assert "--mmproj" in mmproj
+    assert mmproj[-1] == "f16", "the vision projector is never quantised"
+    assert mmproj[mmproj.index("--outfile") + 1].endswith("sq-lora-v1-merged-mmproj-f16.gguf")
     assert quantise[0].endswith("llama-quantize")
     assert quantise[-1] == "Q4_K_M"
-    assert quantise[1].endswith("sq-lora-v1-merged-f16.gguf")
+    assert quantise[1].endswith("sq-lora-v1-merged-bf16.gguf")
     assert quantise[2].endswith("sq-lora-v1-merged-Q4_K_M.gguf")
+
+
+def test_merge_export_max_views_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Flag, then SATQUERY_VLM_MAX_VIEWS, then 3 for a GGUF export and 6 for bf16."""
+    import merge_export
+
+    monkeypatch.delenv("SATQUERY_VLM_MAX_VIEWS", raising=False)
+    assert merge_export.resolve_max_views(None, gguf=True) == 3
+    assert merge_export.resolve_max_views(None, gguf=False) == 6
+    monkeypatch.setenv("SATQUERY_VLM_MAX_VIEWS", "4")
+    assert merge_export.resolve_max_views(None, gguf=True) == 4
+    assert merge_export.resolve_max_views(2, gguf=True) == 2
+
+
+def test_merge_export_writes_sha256sums_in_sha256sum_format(tmp_path: Path) -> None:
+    import hashlib
+
+    import merge_export
+
+    (tmp_path / "models").mkdir()
+    small = tmp_path / "models" / "x-Q4_K_M.gguf"
+    small.write_bytes(b"gguf")
+    missing = tmp_path / "models" / "x-bf16.gguf"
+    out = merge_export.write_checksums([small, missing], tmp_path / "models" / "SHA256SUMS")
+    line = out.read_text().strip()
+    assert line == f"{hashlib.sha256(b'gguf').hexdigest()}  x-Q4_K_M.gguf"
 
 
 def test_merge_export_finds_the_base_model_from_the_run_manifest(tmp_path: Path) -> None:
@@ -1490,9 +1530,7 @@ def test_bigearthnet_is_loaded_as_one_bundle_and_filtered_by_its_split_column(
 
     fake = _install_datasets(monkeypatch, {"train": REBEN_ROWS})
 
-    train = list(
-        build_corpus.load_rows(cb.CorpusSource.BIGEARTHNET_V2, "train", None, False)
-    )
+    train = list(build_corpus.load_rows(cb.CorpusSource.BIGEARTHNET_V2, "train", None, False))
     # The builder is named, not inferred: a repo id ending in `.txt` is read as
     # a generic text dataset, which yields the README's prose lines and no split
     # column at all.
@@ -1558,9 +1596,7 @@ def test_a_bundled_smoke_run_stops_instead_of_scanning_to_the_end(
     fake = _install_datasets(monkeypatch, {"train": rows})
 
     tagged = list(
-        build_corpus.load_rows_by_split(
-            cb.CorpusSource.BIGEARTHNET_V2, ("train",), 2, False
-        )
+        build_corpus.load_rows_by_split(cb.CorpusSource.BIGEARTHNET_V2, ("train",), 2, False)
     )
     assert [row["patch_id"] for _, row in tagged] == ["p0", "p1"]
     assert fake.rows_read < len(rows)
@@ -1658,9 +1694,10 @@ def test_the_other_five_sources_still_ask_for_their_split_by_name(
     rows = {"train": [{"image_id": "a"}], "validation": [{"image_id": "b"}]}
     fake = _install_datasets(monkeypatch, rows)
 
-    assert [r["image_id"] for r in build_corpus.load_rows(
-        cb.CorpusSource.DIOR_RSVG, "train", None, False
-    )] == ["a"]
+    assert [
+        r["image_id"]
+        for r in build_corpus.load_rows(cb.CorpusSource.DIOR_RSVG, "train", None, False)
+    ] == ["a"]
     # Named by repo id, split by name, and still gated by --download.
     assert fake.calls[0]["name"] == "danielz01/DIOR-RSVG"
     assert fake.calls[0]["split"] == "train"
@@ -1842,8 +1879,13 @@ def test_bigearthnet_txt_rows_become_samples_by_annotation_type() -> None:
         "view_paths": {v: f"views/ben2/p/{v}.png" for v in ("TC", "SARFC")},
     }
     binary = cb.from_bigearthnet_txt(
-        dict(base, input="Does the image depict permanent crops?", output="no",
-             type="binary", category="presence"),
+        dict(
+            base,
+            input="Does the image depict permanent crops?",
+            output="no",
+            type="binary",
+            category="presence",
+        ),
         augment=False,
     )
     assert len(binary) == 1
@@ -1855,8 +1897,14 @@ def test_bigearthnet_txt_rows_become_samples_by_annotation_type() -> None:
     assert "FACT SHEET — empty" in binary[0].system
 
     mcq = cb.from_bigearthnet_txt(
-        dict(base, ID=2, input="Which classes share a boundary? a) X, b) Y", output="b",
-             type="mcq", category="adjacency"),
+        dict(
+            base,
+            ID=2,
+            input="Which classes share a boundary? a) X, b) Y",
+            output="b",
+            type="mcq",
+            category="adjacency",
+        ),
         augment=False,
     )
     assert mcq[0].assistant == "b"
@@ -1984,7 +2032,7 @@ def test_requesting_an_unresolved_source_reports_its_actual_problem() -> None:
 def test_an_unfetched_local_source_says_so_before_the_build_starts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """"Which source is missing" is far cheaper to answer now than three in."""
+    """Asking which source is missing is far cheaper to answer now than three in."""
     import argparse
 
     import build_corpus
@@ -2009,13 +2057,7 @@ def _evidence_qa_builder() -> Any:
     """
     import importlib.util
 
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "training"
-        / "data"
-        / "builders"
-        / "evidence_qa.py"
-    )
+    path = Path(__file__).resolve().parents[2] / "training" / "data" / "builders" / "evidence_qa.py"
     spec = importlib.util.spec_from_file_location("evidence_qa_builder", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -2092,11 +2134,16 @@ def test_token_budget_counts_images_by_arithmetic_and_flags_overruns(tmp_path: P
         {
             "prompt": [
                 {"role": "system", "content": [{"type": "text", "text": "rules"}]},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "Image 1"}, {"type": "image"},
-                    {"type": "text", "text": "Image 2"}, {"type": "image"},
-                    {"type": "text", "text": "what?"},
-                ]},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Image 1"},
+                        {"type": "image"},
+                        {"type": "text", "text": "Image 2"},
+                        {"type": "image"},
+                        {"type": "text", "text": "what?"},
+                    ],
+                },
             ],
             "completion": [{"role": "assistant", "content": [{"type": "text", "text": "Yes."}]}],
             "images": ["a", "b"],
@@ -2115,7 +2162,8 @@ def test_token_budget_counts_images_by_arithmetic_and_flags_overruns(tmp_path: P
     tight = qlora.token_budget_report(records, tokenizer, max_seq_len=300, tokens_per_view=144)
     assert [o.index for o in tight.offenders] == [0]
     assert tight.offenders[0].total_tokens == (
-        tight.offenders[0].prompt_tokens + tight.offenders[0].completion_tokens
+        tight.offenders[0].prompt_tokens
+        + tight.offenders[0].completion_tokens
         + qlora.TOKEN_BUDGET_MARGIN
     )
     with pytest.raises(qlora.ProfileError, match="exceed max_seq_len=300"):
@@ -2185,7 +2233,8 @@ def test_the_trainer_verifies_its_own_diet(tmp_path: Path) -> None:
     cb.write_jsonl(path, rows)
     assert qlora.corpus_composition(path) == {"bigearthnet_v2": 5, "vrsbench": 2}
     assert qlora.guard_composition(path, {"bigearthnet_v2": 5, "vrsbench": 2}) == {
-        "bigearthnet_v2": 5, "vrsbench": 2
+        "bigearthnet_v2": 5,
+        "vrsbench": 2,
     }
     assert qlora.guard_composition(path, {})  # no expectation, no refusal
     with pytest.raises(qlora.ProfileError, match=r"vrsbench: 2 < 3"):
@@ -2197,23 +2246,41 @@ def test_the_trainer_verifies_its_own_diet(tmp_path: Path) -> None:
 def test_the_profile_states_a_floor_for_every_sprint_source() -> None:
     profile = qlora.load_profile(qlora.DEFAULT_PROFILE_PATH)
     assert set(profile.data.expected_sources) == {
-        "bigearthnet_v2", "vrsbench", "rsvqa_hr", "cdvqa", "evidence_qa"
+        "bigearthnet_v2",
+        "vrsbench",
+        "rsvqa_hr",
+        "cdvqa",
+        "evidence_qa",
     }
     assert all(floor > 0 for floor in profile.data.expected_sources.values())
 
 
 def test_mask_audit_report_summarises_and_refuses() -> None:
     good = qlora.MaskAuditRecord(
-        index=0, prompt_tokens=1500, completion_tokens=4, image_tokens=720, views=5,
-        sequence_tokens=1504, ok=True,
+        index=0,
+        prompt_tokens=1500,
+        completion_tokens=4,
+        image_tokens=720,
+        views=5,
+        sequence_tokens=1504,
+        ok=True,
     )
     bad = good.model_copy(
         update={"index": 7, "ok": False, "problems": ["an <|image_pad|> position is unmasked"]}
     )
     report = qlora.MaskAuditReport(
-        audited=2, passed=1, max_length=4096, tokens_per_view=144, prompt_min=1500,
-        prompt_max=1500, completion_min=4, completion_max=4, image_min=720, image_max=720,
-        truncated=0, records=[good, bad],
+        audited=2,
+        passed=1,
+        max_length=4096,
+        tokens_per_view=144,
+        prompt_min=1500,
+        prompt_max=1500,
+        completion_min=4,
+        completion_max=4,
+        image_min=720,
+        image_max=720,
+        truncated=0,
+        records=[good, bad],
     )
     assert not report.ok
     assert report.summary().startswith("mask audit: 1/2 ok · prompt 1,500–1,500 tok")
@@ -2351,15 +2418,24 @@ def test_vrsbench_grounding_without_a_class_falls_back_to_the_expression() -> No
         "image_path": "views/vrsbench/v1/TC.png",
         "split": "train",
         "objects": [
-            {"obj_id": 0, "obj_cls": "", "referring_sentence": "the white aircraft on the apron",
-             "obj_coord": [0.1, 0.1, 0.2, 0.2]},
-            {"obj_id": 1, "obj_cls": "ship", "referring_sentence": "the ship at the pier",
-             "obj_coord": [0.5, 0.5, 0.7, 0.7]},
+            {
+                "obj_id": 0,
+                "obj_cls": "",
+                "referring_sentence": "the white aircraft on the apron",
+                "obj_coord": [0.1, 0.1, 0.2, 0.2],
+            },
+            {
+                "obj_id": 1,
+                "obj_cls": "ship",
+                "referring_sentence": "the ship at the pier",
+                "obj_coord": [0.5, 0.5, 0.7, 0.7],
+            },
         ],
     }
     grounded = [s for s in cb.from_vrsbench(row, augment=False) if s.task is TaskType.GROUNDING]
     assert [box_format.parse(s.assistant)[0].label for s in grounded] == [
-        "the white aircraft on the apron", "ship"
+        "the white aircraft on the apron",
+        "ship",
     ]
     assert cb.noncanonical_grounding(grounded) == []
 
@@ -2376,9 +2452,13 @@ def test_every_grounding_sample_the_adapters_emit_is_canonical(tmp_path: Path) -
     samples.append(
         cb.from_dior_rsvg(
             {
-                "image_id": "d1", "image_path": "views/dior_rsvg/d1/TC.png", "split": "train",
-                "expression": "the white aircraft", "bbox": [10, 10, 50, 50],
-                "width": 100, "height": 100,
+                "image_id": "d1",
+                "image_path": "views/dior_rsvg/d1/TC.png",
+                "split": "train",
+                "expression": "the white aircraft",
+                "bbox": [10, 10, 50, 50],
+                "width": 100,
+                "height": 100,
             },
             augment=False,
         )

@@ -31,8 +31,10 @@
 import { useEffect } from 'react'
 
 import { SEQUENCE_WINDOW_MS } from '@/shell/shortcuts'
+import { useExportStore } from '@/state/exports'
 import { useFocusStore } from '@/state/focus'
 import { useMapStore } from '@/state/map'
+import { toast } from '@/state/notifications'
 import { useSettingsStore } from '@/state/settings'
 import { useShortcutStore } from '@/state/shortcuts'
 import { useThemeStore } from '@/state/theme'
@@ -78,6 +80,16 @@ export function useHotkeys(): void {
       // Chords: never gated, work from inside a text field.
       if (mod && !event.altKey) {
         const lower = key.toLowerCase()
+        // ⌘⇧S / ⌘⇧G: the exports. Dispatched through the export store so the
+        // panel that owns the button runs it; nothing mounted means a toast.
+        if (event.shiftKey && (lower === 's' || lower === 'g')) {
+          event.preventDefault()
+          const kind = lower === 's' ? 'sitrep' : 'geojson'
+          if (!useExportStore.getState().request(kind)) {
+            toast(kind === 'sitrep' ? 'Nothing to brief yet — run a query first.' : 'Nothing to export yet — run a query first.', 'info')
+          }
+          return
+        }
         if (lower === 'k') {
           event.preventDefault()
           useUiStore.getState().setSection('explore')
@@ -163,6 +175,11 @@ export function useHotkeys(): void {
       if (key === 'p' || key === 'P') {
         event.preventDefault()
         store.togglePipeline()
+        return
+      }
+      if ((key === 'b' || key === 'B') && onMaps) {
+        event.preventDefault()
+        useMapStore.getState().toggleProjection()
       }
     }
 

@@ -4,7 +4,8 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 
-import { boxesToGeoJson, downloadJson } from '@/export/geojson'
+import { downloadJson } from '@/export/download'
+import { boxesToGeoJson, finishCollection } from '@/export/geojson/build'
 import { Graticule } from '@/components/ui/Graticule'
 import { GridIcon, RowsIcon, SearchIcon, UndoIcon } from '@/components/ui/icons'
 import { Reticle } from '@/components/ui/Reticle'
@@ -78,7 +79,8 @@ export function SavedList({
     const features = chosen.flatMap((run) =>
       boxesToGeoJson(run.boxes, run.bounds, { traceId: run.traceId, query: run.query }).features,
     )
-    downloadJson(`satquery-${chosen.length}-runs.geojson`, { type: 'FeatureCollection', features })
+    const georeferenced = chosen.every((run) => run.bounds !== null)
+    downloadJson(`satquery-${chosen.length}-runs.geojson`, finishCollection(features, georeferenced ? chosen[0]?.bounds ?? null : null))
     toast(`${chosen.length} runs exported.`, 'ok')
   }
 

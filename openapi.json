@@ -468,6 +468,93 @@
           }
         }
       }
+    },
+    "/v1/imagery/fetch": {
+      "post": {
+        "tags": [
+          "imagery"
+        ],
+        "summary": "Clip one or two Planetary Computer scenes to a bbox as GeoTIFFs",
+        "description": "Read a window out of each item's COGs and write it as a GeoTIFF.\n\nSentinel-2 comes back as the twelve BigEarthNet-v2 bands, Sentinel-1 as\nVV/VH \u2014 the band orders the sensor fingerprints recognise \u2014 so the files go\nthrough pre-flight exactly like an upload.",
+        "operationId": "fetch_imagery_v1_imagery_fetch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageryFetchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageryFetchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imagery/{fetch_id}/{name}": {
+      "get": {
+        "tags": [
+          "imagery"
+        ],
+        "summary": "Download one fetched GeoTIFF",
+        "description": "Serve a file written by :func:`fetch_imagery`; ids are opaque hex, names are sanitised.",
+        "operationId": "download_imagery_v1_imagery__fetch_id___name__get",
+        "parameters": [
+          {
+            "name": "fetch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fetch Id"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1599,6 +1686,202 @@
         ],
         "title": "ImageRole",
         "description": "Role an image plays within its pair (API_CONTRACT \u00a72.4)."
+      },
+      "ImageryFetchRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImageryItemRequest"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Items"
+          },
+          "bbox": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox",
+            "description": "[min_lon, min_lat, max_lon, max_lat], EPSG:4326. Clipped to the item."
+          },
+          "max_px": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 4096.0,
+                "minimum": 64.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Px",
+            "description": "Longest side in pixels; capped by the server's own ceiling."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "bbox"
+        ],
+        "title": "ImageryFetchRequest",
+        "description": "``POST /v1/imagery/fetch`` body (API_CONTRACT \u00a74.11, additive)."
+      },
+      "ImageryFetchResponse": {
+        "properties": {
+          "fetch_id": {
+            "type": "string",
+            "title": "Fetch Id",
+            "description": "Groups the files; part of every ``url``."
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ImageryFile"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/WarningItem"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "fetch_id",
+          "files"
+        ],
+        "title": "ImageryFetchResponse",
+        "description": "``POST /v1/imagery/fetch`` 200 body."
+      },
+      "ImageryFile": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Filename to upload under; carries the item id."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "``GET`` here for the bytes; same origin as the API."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Size Bytes"
+          },
+          "collection": {
+            "type": "string",
+            "title": "Collection"
+          },
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "datetime": {
+            "type": "string",
+            "title": "Datetime",
+            "description": "The item's acquisition time, ISO 8601."
+          },
+          "crs": {
+            "type": "string",
+            "title": "Crs"
+          },
+          "gsd_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Gsd M"
+          },
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Width"
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Height"
+          },
+          "band_count": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Band Count"
+          },
+          "bounds_wgs84": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bounds Wgs84"
+          },
+          "orbit_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orbit State",
+            "description": "From ``sat:orbit_state``."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "url",
+          "size_bytes",
+          "collection",
+          "item_id",
+          "datetime",
+          "crs",
+          "gsd_m",
+          "width",
+          "height",
+          "band_count",
+          "bounds_wgs84"
+        ],
+        "title": "ImageryFile",
+        "description": "One fetched GeoTIFF, ready to be uploaded to ``/v1/validate``."
+      },
+      "ImageryItemRequest": {
+        "properties": {
+          "collection": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Collection",
+            "description": "'sentinel-2-l2a' | 'sentinel-1-rtc' | 'sentinel-1-grd'."
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "description": "The STAC item id."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "collection",
+          "id"
+        ],
+        "title": "ImageryItemRequest",
+        "description": "One STAC item to fetch \u2014 the server resolves its assets itself."
       },
       "InputContract": {
         "properties": {

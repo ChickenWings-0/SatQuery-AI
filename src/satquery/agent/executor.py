@@ -199,9 +199,7 @@ def _cache_budget_bytes() -> int:
 
 def _entry_bytes(entry: CachedStep) -> int:
     """The bytes an entry keeps resident: its encoded artifact blobs."""
-    return sum(
-        len(blob) for artifact in entry.artifacts for blob in artifact.blobs.values()
-    )
+    return sum(len(blob) for artifact in entry.artifacts for blob in artifact.blobs.values())
 
 
 class ExecutionCache:
@@ -240,8 +238,7 @@ class ExecutionCache:
         if size > self.max_bytes:
             return
         while self._entries and (
-            len(self._entries) >= self.max_entries
-            or self.resident_bytes + size > self.max_bytes
+            len(self._entries) >= self.max_entries or self.resident_bytes + size > self.max_bytes
         ):
             self._evict_oldest()
         self._entries[key] = entry
@@ -450,9 +447,7 @@ class DagExecutor:
                 report.artifacts.extend(artifacts)
 
                 for offset, ref in enumerate(artifacts):
-                    artifact_hashes[ref.id] = hashlib.sha256(
-                        f"{key}:{offset}".encode()
-                    ).hexdigest()
+                    artifact_hashes[ref.id] = hashlib.sha256(f"{key}:{offset}".encode()).hexdigest()
 
                 execution.output_refs = [artifact.id for artifact in artifacts]
                 if execution.tool == "spectral_renderer" and artifacts:
@@ -523,8 +518,7 @@ class DagExecutor:
         blocked = [
             dependency
             for dependency in unproductive
-            if dependency in consumed
-            or not upstream_steps[dependency].optional
+            if dependency in consumed or not upstream_steps[dependency].optional
         ]
         if blocked:
             names = ", ".join(f"step {d}" for d in blocked)
@@ -678,8 +672,12 @@ class DagExecutor:
                     cache_hit=True,
                 )
                 execution.params["__cache_key__"] = key
-                if index or replaced:
-                    execution.status = ToolStatus.DEGRADED
+                # A replay must read like the run it replays: the same
+                # substitution note and the same tool notes, or the second
+                # submission of one query produces a different trace from the
+                # first and the "byte-identical reruns" promise is only true
+                # with a cold cache (scripts/e2e_parity.py caught exactly this).
+                self._annotate(execution, candidate, cached.result, replaced, index, report)
                 return execution, cached.result, cached
 
             started = time.perf_counter()
@@ -703,16 +701,7 @@ class DagExecutor:
                 step, candidate, result, replaced, input_refs, duration_ms, cache_hit=False
             )
             execution.params["__cache_key__"] = key
-            if index or replaced:
-                # Running something other than what the plan named is a real
-                # deviation, whether capability matching or a raised exception
-                # caused it, and the trace must show it as one.
-                execution.status = ToolStatus.DEGRADED
-                execution.error = execution.error or f"substituted for {replaced}"
-            for note in result.notes:
-                report.warnings.append(
-                    WarningItem(code="TOOL_NOTE", message=f"{candidate.name}: {note}")
-                )
+            self._annotate(execution, candidate, result, replaced, index, report)
             return execution, result, None
 
         if not step.optional:
@@ -736,6 +725,27 @@ class DagExecutor:
         )
         return failed, None, None
 
+    @staticmethod
+    def _annotate(
+        execution: Execution,
+        candidate: ToolSpec,
+        result: ToolResult,
+        replaced: str | None,
+        attempt: int,
+        report: ExecutionReport,
+    ) -> None:
+        """Record what the trace must say about this invocation, fresh or replayed."""
+        if attempt or replaced:
+            # Running something other than what the plan named is a real
+            # deviation, whether capability matching or a raised exception
+            # caused it, and the trace must show it as one.
+            execution.status = ToolStatus.DEGRADED
+            execution.error = execution.error or f"substituted for {replaced}"
+        for note in result.notes:
+            report.warnings.append(
+                WarningItem(code="TOOL_NOTE", message=f"{candidate.name}: {note}")
+            )
+
     def _cache_salt(self, spec: ToolSpec, context: ToolContext) -> str:
         """Everything outside the standard key that this tool's output depends on.
 
@@ -753,9 +763,7 @@ class DagExecutor:
             return checkpoint_fingerprint(spec.name)
         if spec.category is not ToolCategory.VLM:
             return ""
-        return canonical_json(
-            {"question": context.question, "facts": context.facts.as_dict()}
-        )
+        return canonical_json({"question": context.question, "facts": context.facts.as_dict()})
 
     async def _guarded(
         self,
@@ -943,9 +951,7 @@ class DagExecutor:
             if payload is not None:
                 report.data[ref.id] = payload
             captured.append(
-                CapturedArtifact(
-                    template=ref, blobs=self._blobs_of(ref, trace_id), payload=payload
-                )
+                CapturedArtifact(template=ref, blobs=self._blobs_of(ref, trace_id), payload=payload)
             )
         return refs, tuple(captured)
 

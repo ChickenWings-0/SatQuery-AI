@@ -168,6 +168,66 @@ class ValidateResponse(BaseModel):
     warnings: list[WarningItem] = Field(default_factory=list)
 
 
+class ImageryItemRequest(BaseModel):
+    """One STAC item to fetch — the server resolves its assets itself."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    collection: str = Field(
+        description="'sentinel-2-l2a' | 'sentinel-1-rtc' | 'sentinel-1-grd'.", max_length=64
+    )
+    id: str = Field(description="The STAC item id.", min_length=1, max_length=200)
+
+
+class ImageryFetchRequest(BaseModel):
+    """``POST /v1/imagery/fetch`` body (API_CONTRACT §4.11, additive)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ImageryItemRequest] = Field(min_length=1, max_length=2)
+    bbox: list[float] = Field(
+        min_length=4,
+        max_length=4,
+        description="[min_lon, min_lat, max_lon, max_lat], EPSG:4326. Clipped to the item.",
+    )
+    max_px: int | None = Field(
+        default=None,
+        ge=64,
+        le=4096,
+        description="Longest side in pixels; capped by the server's own ceiling.",
+    )
+
+
+class ImageryFile(BaseModel):
+    """One fetched GeoTIFF, ready to be uploaded to ``/v1/validate``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="Filename to upload under; carries the item id.")
+    url: str = Field(description="``GET`` here for the bytes; same origin as the API.")
+    size_bytes: int = Field(ge=0)
+    collection: str
+    item_id: str
+    datetime: str = Field(description="The item's acquisition time, ISO 8601.")
+    crs: str
+    gsd_m: float = Field(gt=0.0)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    band_count: int = Field(gt=0)
+    bounds_wgs84: list[float] = Field(min_length=4, max_length=4)
+    orbit_state: str | None = Field(default=None, description="From ``sat:orbit_state``.")
+
+
+class ImageryFetchResponse(BaseModel):
+    """``POST /v1/imagery/fetch`` 200 body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fetch_id: str = Field(description="Groups the files; part of every ``url``.")
+    files: list[ImageryFile]
+    warnings: list[WarningItem] = Field(default_factory=list)
+
+
 class RegistryResponse(BaseModel):
     """``GET /v1/registry`` 200 body (API_CONTRACT §4.8)."""
 

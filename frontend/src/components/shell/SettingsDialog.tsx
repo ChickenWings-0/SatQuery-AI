@@ -287,6 +287,8 @@ function DataControls() {
   const resetAccount = useAccountStore((state) => state.reset)
   const resetSettings = useSettingsStore((state) => state.reset)
   const closeSettings = useSettingsStore((state) => state.closeSettings)
+  const onlineFeatures = useSettingsStore((state) => state.onlineFeatures)
+  const setOnlineFeatures = useSettingsStore((state) => state.setOnlineFeatures)
 
   async function clearDevice() {
     await clearLibrary()
@@ -313,6 +315,25 @@ function DataControls() {
           Saved runs, projects and preferences live in this browser. Nothing is sent anywhere but the
           API on this machine.
         </p>
+      </section>
+
+      <section aria-labelledby="st-online" className="divide-y divide-line-soft">
+        <h3 id="st-online" className="t-eyebrow pb-1">
+          Online features
+        </h3>
+        <Row
+          title="Imagery search on the Maps page"
+          hint="Place search (OpenStreetMap Nominatim) and Sentinel scene search (Microsoft Planetary Computer). Off by default for offline judging; nothing is requested until this is on."
+        >
+          <button
+            type="button"
+            role="switch"
+            aria-checked={onlineFeatures}
+            aria-label="Imagery search on the Maps page"
+            onClick={() => setOnlineFeatures(!onlineFeatures)}
+            className="switch"
+          />
+        </Row>
       </section>
 
       <section aria-labelledby="st-export" className="divide-y divide-line-soft">

@@ -86,6 +86,9 @@ dev = [
     "pre-commit>=4.0.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    # ROUGE-L for the caption column of scripts/eval_benchmark.py; the scorer
+    # degrades to "—" without it, so it stays out of the runtime dependencies.
+    "rouge-score>=0.1.2",
     "ruff>=0.16.6",
 ]
 
@@ -134,7 +137,7 @@ warn_unused_ignores = true
 # Neither rasterio nor scikit-image ships type information, so their public API
 # is Any to mypy. Everything we build on top of them stays strictly typed.
 [[tool.mypy.overrides]]
-module = ["rasterio.*", "skimage.*", "affine.*", "yaml", "pandas", "huggingface_hub"]
+module = ["rasterio.*", "skimage.*", "affine.*", "yaml", "pandas", "huggingface_hub", "rouge_score.*"]
 ignore_missing_imports = true
 disallow_untyped_calls = false
 

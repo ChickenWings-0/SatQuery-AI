@@ -12,8 +12,11 @@ import { create } from 'zustand'
 import { safeStorage } from '@/shell/storage'
 
 export type Basemap = 'none' | 'satellite'
+/** Flat Web Mercator, or the globe — pure client-side geometry, no tiles needed. */
+export type Projection = 'mercator' | 'globe'
 
 const BASEMAP_KEY = 'satquery.maps.basemap'
+const PROJECTION_KEY = 'satquery.maps.projection'
 
 export interface MapCursor {
   lon: number
@@ -25,6 +28,7 @@ interface MapState {
   compareKey: string | null
   split: number
   basemap: Basemap
+  projection: Projection
   opacity: number
   zoom: number
   cursor: MapCursor | null
@@ -35,6 +39,8 @@ interface MapState {
   setSplit: (split: number) => void
   nudgeSplit: (delta: number) => void
   setBasemap: (basemap: Basemap, options?: { remember?: boolean }) => void
+  setProjection: (projection: Projection) => void
+  toggleProjection: () => void
   setOpacity: (opacity: number) => void
   setZoom: (zoom: number) => void
   setCursor: (cursor: MapCursor | null) => void
@@ -48,6 +54,7 @@ export const useMapStore = create<MapState>((set) => ({
   compareKey: null,
   split: 50,
   basemap: safeStorage.getItem(BASEMAP_KEY) === 'satellite' ? 'satellite' : 'none',
+  projection: safeStorage.getItem(PROJECTION_KEY) === 'globe' ? 'globe' : 'mercator',
   opacity: 1,
   zoom: 0,
   cursor: null,
@@ -60,6 +67,15 @@ export const useMapStore = create<MapState>((set) => ({
   setBasemap: (basemap, options) => {
     set({ basemap })
     if (options?.remember !== false) safeStorage.setItem(BASEMAP_KEY, basemap)
+  },
+  setProjection: (projection) => {
+    set({ projection })
+    safeStorage.setItem(PROJECTION_KEY, projection)
+  },
+  toggleProjection: () => {
+    const projection = useMapStore.getState().projection === 'globe' ? 'mercator' : 'globe'
+    set({ projection })
+    safeStorage.setItem(PROJECTION_KEY, projection)
   },
   setOpacity: (opacity) => set({ opacity: clamp(opacity, 0, 1) }),
   setZoom: (zoom) => set({ zoom }),

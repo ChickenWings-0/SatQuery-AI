@@ -17,7 +17,16 @@ from fastapi.responses import JSONResponse
 
 from satquery.agent.concurrency import DeviceGates
 from satquery.api.jobs import get_job_store
-from satquery.api.routers import analyze, artifacts, health, jobs, registry, traces, validate
+from satquery.api.routers import (
+    analyze,
+    artifacts,
+    health,
+    imagery,
+    jobs,
+    registry,
+    traces,
+    validate,
+)
 from satquery.core.config import Settings, get_settings, load_env_file
 from satquery.core.logging import configure_logging, get_logger
 from satquery.ingest.errors import IngestError
@@ -111,7 +120,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = ApiErrorResponse(error=exc.to_api_error(trace_id=trace_id))
         return JSONResponse(status_code=exc.http_status, content=body.model_dump(mode="json"))
 
-    for module in (health, registry, validate, analyze, jobs, artifacts, traces):
+    for module in (health, registry, validate, analyze, jobs, artifacts, traces, imagery):
         app.include_router(module.router, prefix=settings.api_prefix)
 
     return app

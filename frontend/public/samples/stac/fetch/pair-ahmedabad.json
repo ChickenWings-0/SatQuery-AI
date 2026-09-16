@@ -1,0 +1,52 @@
+{
+ "fetch_id": "mockfetch0000001",
+ "bbox": [
+  72.5201,
+  22.9615,
+  72.6401,
+  23.0815
+ ],
+ "files": [
+  {
+   "name": "s1_S1A_IW_GRDH_1SDV_20260303T010156_20260303T010221_063456_07F8DF_rtc.tif",
+   "url": "/samples/stac/fetch/s1_S1A_IW_GRDH_1SDV_20260303T010156_20260303T010221_063456_07F8DF_rtc.tif",
+   "size_bytes": 774816,
+   "collection": "sentinel-1-rtc",
+   "item_id": "S1A_IW_GRDH_1SDV_20260303T010156_20260303T010221_063456_07F8DF_rtc",
+   "datetime": "2026-03-03T01:02:09.344720Z",
+   "crs": "EPSG:32643",
+   "gsd_m": 35.168539325842694,
+   "width": 356,
+   "height": 384,
+   "band_count": 2,
+   "bounds_wgs84": [
+    72.51790381935801,
+    22.959668549931134,
+    72.64218799639535,
+    23.083339001761452
+   ],
+   "orbit_state": "descending"
+  },
+  {
+   "name": "s1_S1D_IW_GRDH_1SDV_20260906T010122_20260906T010147_004450_0083F6_rtc.tif",
+   "url": "/samples/stac/fetch/s1_S1D_IW_GRDH_1SDV_20260906T010122_20260906T010147_004450_0083F6_rtc.tif",
+   "size_bytes": 774462,
+   "collection": "sentinel-1-rtc",
+   "item_id": "S1D_IW_GRDH_1SDV_20260906T010122_20260906T010147_004450_0083F6_rtc",
+   "datetime": "2026-09-06T01:01:35.366159Z",
+   "crs": "EPSG:32643",
+   "gsd_m": 35.168539325842694,
+   "width": 356,
+   "height": 384,
+   "band_count": 2,
+   "bounds_wgs84": [
+    72.51790381935801,
+    22.959668549931134,
+    72.64218799639535,
+    23.083339001761452
+   ],
+   "orbit_state": "descending"
+  }
+ ],
+ "warnings": []
+}

@@ -223,6 +223,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/imagery/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clip one or two Planetary Computer scenes to a bbox as GeoTIFFs
+         * @description Read a window out of each item's COGs and write it as a GeoTIFF.
+         *
+         *     Sentinel-2 comes back as the twelve BigEarthNet-v2 bands, Sentinel-1 as
+         *     VV/VH — the band orders the sensor fingerprints recognise — so the files go
+         *     through pre-flight exactly like an upload.
+         */
+        post: operations["fetch_imagery_v1_imagery_fetch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/imagery/{fetch_id}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download one fetched GeoTIFF
+         * @description Serve a file written by :func:`fetch_imagery`; ids are opaque hex, names are sanitised.
+         */
+        get: operations["download_imagery_v1_imagery__fetch_id___name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -739,6 +783,99 @@ export interface components {
          * @enum {string}
          */
         ImageRole: "single" | "pre" | "post" | "optical" | "sar";
+        /**
+         * ImageryFetchRequest
+         * @description ``POST /v1/imagery/fetch`` body (API_CONTRACT §4.11, additive).
+         */
+        ImageryFetchRequest: {
+            /** Items */
+            items: components["schemas"]["ImageryItemRequest"][];
+            /**
+             * Bbox
+             * @description [min_lon, min_lat, max_lon, max_lat], EPSG:4326. Clipped to the item.
+             */
+            bbox: number[];
+            /**
+             * Max Px
+             * @description Longest side in pixels; capped by the server's own ceiling.
+             */
+            max_px?: number | null;
+        };
+        /**
+         * ImageryFetchResponse
+         * @description ``POST /v1/imagery/fetch`` 200 body.
+         */
+        ImageryFetchResponse: {
+            /**
+             * Fetch Id
+             * @description Groups the files; part of every ``url``.
+             */
+            fetch_id: string;
+            /** Files */
+            files: components["schemas"]["ImageryFile"][];
+            /** Warnings */
+            warnings?: components["schemas"]["WarningItem"][];
+        };
+        /**
+         * ImageryFile
+         * @description One fetched GeoTIFF, ready to be uploaded to ``/v1/validate``.
+         */
+        ImageryFile: {
+            /**
+             * Name
+             * @description Filename to upload under; carries the item id.
+             */
+            name: string;
+            /**
+             * Url
+             * @description ``GET`` here for the bytes; same origin as the API.
+             */
+            url: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Collection */
+            collection: string;
+            /** Item Id */
+            item_id: string;
+            /**
+             * Datetime
+             * @description The item's acquisition time, ISO 8601.
+             */
+            datetime: string;
+            /** Crs */
+            crs: string;
+            /** Gsd M */
+            gsd_m: number;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Band Count */
+            band_count: number;
+            /** Bounds Wgs84 */
+            bounds_wgs84: number[];
+            /**
+             * Orbit State
+             * @description From ``sat:orbit_state``.
+             */
+            orbit_state?: string | null;
+        };
+        /**
+         * ImageryItemRequest
+         * @description One STAC item to fetch — the server resolves its assets itself.
+         */
+        ImageryItemRequest: {
+            /**
+             * Collection
+             * @description 'sentinel-2-l2a' | 'sentinel-1-rtc' | 'sentinel-1-grd'.
+             */
+            collection: string;
+            /**
+             * Id
+             * @description The STAC item id.
+             */
+            id: string;
+        };
         /**
          * InputContract
          * @description What a tool is willing to accept — the basis of capability matching.
@@ -1549,6 +1686,69 @@ export interface operations {
             };
             /** @description Unknown trace. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fetch_imagery_v1_imagery_fetch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageryFetchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageryFetchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_imagery_v1_imagery__fetch_id___name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fetch_id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

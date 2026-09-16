@@ -43,7 +43,7 @@ from fastapi.responses import StreamingResponse
 
 from satquery.agent.concurrency import DeviceGates
 from satquery.agent.events import STAGE_PCT
-from satquery.agent.pipeline import AnalysisRequest
+from satquery.agent.pipeline import AnalysisRequest, refuse_if_incompatible
 from satquery.agent.pipeline import analyze as run_analysis
 from satquery.api.dependencies import get_artifact_store, get_device_gates, get_trace_store
 from satquery.api.jobs import Job, JobEvent, JobStore, TooManyJobsError, get_job_store
@@ -192,9 +192,7 @@ async def create_job(
     # yet. Ingestion is the GPU-free pre-flight /v1/validate already runs, so
     # this costs the caller milliseconds and buys exact parity between the two
     # submission paths. Everything after this point can only degrade, not reject.
-    directory, sources = await persist_uploads_async(
-        images, max_bytes=settings.max_upload_mb << 20
-    )
+    directory, sources = await persist_uploads_async(images, max_bytes=settings.max_upload_mb << 20)
     try:
         # Off the loop: rasterio plus phase correlation over a large pair used to
         # hold every other job's SSE heartbeat for its whole duration.
@@ -205,6 +203,12 @@ async def create_job(
             roles=parsed.roles,
             max_images=settings.max_images,
         )
+        # The compatibility verdict is part of ingestion's output, and a FAIL
+        # is the 422 /v1/analyze returns before planning. Deferring it to the
+        # worker would turn the same inputs into a 202 followed by an ``error``
+        # event — a different status, on a job the client has to subscribe to
+        # in order to learn it never stood a chance.
+        refuse_if_incompatible(ingested.compatibility)
         job_id = new_trace_id()
         job = jobs.create(job_id)
     except TooManyJobsError as error:

@@ -21,6 +21,7 @@ import {
   type RecordedEvent,
 } from '@/mocks/fixtures'
 import { activeScenario, eventsForScenario } from '@/mocks/scenarios'
+import { STAC_ROOT, NOMINATIM_ROOT } from '@/geo/collections'
 
 /** The recording for whichever scenario the page asked for. */
 function events(): RecordedEvent[] {
@@ -85,7 +86,97 @@ function snapshot(status: 'running' | 'succeeded', stage: string) {
 
 export { snapshot }
 
+/**
+ * Track 4.3's third-party hosts. `main.tsx` starts the worker with
+ * `onUnhandledRequest: 'bypass'`, which means an unhandled call goes to the
+ * real network — so every host the Maps page talks to gets a handler here,
+ * and the fixtures are static files under `public/samples/stac/` served by
+ * redirect, the same way the artifacts are. Nothing in the flow relies on
+ * bypass; the Playwright test runs it with the browser offline to prove it.
+ */
+const STAC_SAMPLES = '/samples/stac'
+
+/** The place fixture whose name the query starts with, else nothing. */
+function placeFixture(q: string): string | null {
+  const needle = q.trim().toLowerCase()
+  for (const name of ['ahmedabad', 'bengaluru', 'chennai']) {
+    if (needle && name.startsWith(needle.slice(0, 3)) && name.includes(needle.split(',')[0]!.trim().slice(0, 4))) return name
+  }
+  return null
+}
+
+/** Which recorded search a body corresponds to: sensor by collection, place by bbox centre. */
+function searchFixture(body: { collections?: string[]; bbox?: number[] }): string {
+  const sar = (body.collections ?? []).some((c) => c.startsWith('sentinel-1'))
+  const lon = body.bbox ? (body.bbox[0]! + body.bbox[2]!) / 2 : 72.6
+  const lat = body.bbox ? (body.bbox[1]! + body.bbox[3]!) / 2 : 23
+  // Chennai is the only one east of 78°; Bengaluru the only one south of 20°.
+  const place = lon > 78 ? 'chennai' : lat < 20 ? 'bengaluru' : 'ahmedabad'
+  const wanted = `${sar ? 's1' : 's2'}-${place}`
+  const recorded = ['s2-ahmedabad', 's1-ahmedabad', 's1-bengaluru', 's2-chennai']
+  if (recorded.includes(wanted)) return wanted
+  // No recording for that pair: the nearest one of the same sensor.
+  return sar ? 's1-ahmedabad' : 's2-ahmedabad'
+}
+
+export const trackFourHandlers = [
+  http.get(`${NOMINATIM_ROOT}/search`, async ({ request }) => {
+    await delay(250)
+    const q = new URL(request.url).searchParams.get('q') ?? ''
+    const fixture = placeFixture(q)
+    if (!fixture) return HttpResponse.json([])
+    // Served from within the handler rather than by redirect: a cross-origin
+    // request redirected to this origin stays CORS-tainted in the page.
+    const response = await fetch(`${STAC_SAMPLES}/places/${fixture}.json`)
+    return HttpResponse.json(await response.json())
+  }),
+
+  http.post(`${STAC_ROOT}/search`, async ({ request }) => {
+    await delay(400)
+    let body: { collections?: string[]; bbox?: number[] } = {}
+    try {
+      body = (await request.json()) as typeof body
+    } catch {
+      body = {}
+    }
+    const fixture = searchFixture(body)
+    const response = await fetch(`${STAC_SAMPLES}/search/${fixture}.json`)
+    const data = (await response.json()) as { features?: { id: string; assets?: Record<string, { href?: string }> }[] }
+    // Thumbnails come from the recorded JPEGs, never the data API.
+    for (const feature of data.features ?? []) {
+      if (feature.assets?.['rendered_preview']) {
+        feature.assets['rendered_preview'] = { ...feature.assets['rendered_preview'], href: `${STAC_SAMPLES}/thumbs/${feature.id}.jpg` }
+      }
+    }
+    return HttpResponse.json(data)
+  }),
+
+  http.get(`${STAC_ROOT.replace(/\/stac\/v1$/, '/sas/v1/token')}/:collection`, () =>
+    HttpResponse.json({ token: 'mock', 'msft:expiry': new Date(Date.now() + 3_600_000).toISOString() }),
+  ),
+
+  // The clipped pair is a real Sentinel-1 RTC recording (see the README), so
+  // the files that reach the console are genuine rasters, not placeholders.
+  http.post('*/v1/imagery/fetch', async () => {
+    await delay(900)
+    const response = await fetch(`${STAC_SAMPLES}/fetch/pair-ahmedabad.json`)
+    const recorded = (await response.json()) as { fetch_id: string; files: { url: string; name: string }[]; warnings: unknown[] }
+    return HttpResponse.json({
+      fetch_id: recorded.fetch_id,
+      files: recorded.files.map((file) => ({ ...file, url: `/v1/imagery/${recorded.fetch_id}/${file.name}` })),
+      warnings: recorded.warnings,
+    })
+  }),
+  http.get('*/v1/imagery/:fetchId/:name', async ({ params }) => {
+    const response = await fetch(`${STAC_SAMPLES}/fetch/${String(params['name'])}`)
+    if (!response.ok) return HttpResponse.json({ error: { code: 'ARTIFACT_NOT_FOUND', http_status: 404, message: 'No such imagery.' } }, { status: 404 })
+    return new HttpResponse(await response.arrayBuffer(), { headers: { 'Content-Type': 'image/tiff' } })
+  }),
+]
+
 export const handlers = [
+  ...trackFourHandlers,
+
   http.get('*/v1/health', () => HttpResponse.json(healthFixture)),
 
   http.get('*/v1/registry', () => HttpResponse.json(registryFixture)),

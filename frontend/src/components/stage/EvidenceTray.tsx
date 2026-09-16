@@ -11,6 +11,7 @@
  * fault rather than as varying content.
  */
 import { artifactUrl } from '@/api/client'
+import { ExportGeoJsonButton } from '@/components/export/ExportGeoJsonButton'
 import { countOf } from '@/format'
 import { primaryOf, type ViewGroup } from '@/evidence/views'
 
@@ -30,9 +31,14 @@ export function EvidenceTray({
 
   return (
     <section className="shrink-0" aria-label="Evidence">
-      <p className="t-meta">
-        {countOf(groups.length, { one: 'view', other: 'views' })} the model was shown
-      </p>
+      <div className="flex items-center gap-3">
+        <p className="t-meta">
+          {countOf(groups.length, { one: 'view', other: 'views' })} the model was shown
+        </p>
+        <div className="ml-auto">
+          <ExportGeoJsonButton />
+        </div>
+      </div>
 
       <ul className="mt-2.5 flex gap-3 overflow-x-auto pb-1">
         {groups.map((group) => {

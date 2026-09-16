@@ -29,7 +29,7 @@ if (kb > BUDGET_KB) {
 }
 console.log(line)
 
-for (const name of ['globe', 'map', 'dag']) {
+for (const name of ['globe', 'map', 'dag', 'sitrep', 'masks']) {
   const leaked = (entry.imports ?? []).some((key) => key.includes(name))
   if (leaked) {
     console.error(`check-bundle: the ${name} chunk is statically imported by the entry`)

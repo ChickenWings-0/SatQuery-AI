@@ -272,8 +272,9 @@ def test_a_number_copied_out_of_the_prompt_resolves_back_to_its_own_fact() -> No
     for fact in sheet.facts.values():
         printed = builder.format_number(float(fact.value))
         assert f"= {printed}" in system
-        unit = {"pct": "%", "km2": " km2", "db": " dB"}[fact.scalar.split("_")[-1]
-            if fact.scalar.split("_")[-1] in {"pct", "km2"} else "db"]
+        unit = {"pct": "%", "km2": " km2", "db": " dB"}[
+            fact.scalar.split("_")[-1] if fact.scalar.split("_")[-1] in {"pct", "km2"} else "db"
+        ]
         result = validate(f"the value is {printed}{unit}.", sheet)
         assert result.citations, f"{fact.key} printed as {printed} resolved to nothing"
 
@@ -296,9 +297,7 @@ def test_the_prompt_names_views_with_the_renderer_s_own_labels() -> None:
 
 def test_a_fixed_scale_view_is_labelled_as_absolute_and_explained() -> None:
     """A heatmap read as a relative stretch produces confidently wrong physics."""
-    label = label_for_view(
-        "NDVI", slot=2, modality=Modality.OPTICAL, role=ImageRole.PRE
-    )
+    label = label_for_view("NDVI", slot=2, modality=Modality.OPTICAL, role=ImageRole.PRE)
     assert "fixed scale -1 to +1" in label
     system = builder.build_system_prompt(TaskType.VQA, PairType.SINGLE, FactSheet(), [label])
     assert "the colours are absolute" in system
@@ -371,8 +370,10 @@ def test_every_view_is_labelled_immediately_before_its_own_pixels() -> None:
         user="what is here?",
         images=(
             PromptImage("Image 1 (optical true colour, Sentinel-2)", np.zeros((4, 4, 3), np.uint8)),
-            PromptImage("Image 2 (optical NDVI heatmap, fixed scale -1 to +1)",
-                        np.zeros((4, 4, 3), np.uint8)),
+            PromptImage(
+                "Image 2 (optical NDVI heatmap, fixed scale -1 to +1)",
+                np.zeros((4, 4, 3), np.uint8),
+            ),
         ),
     )
     for messages in (hf_messages(request), gguf_messages(request)):
@@ -502,6 +503,62 @@ def test_the_views_the_model_sees_are_the_ones_the_gallery_shows() -> None:
     assert np.array_equal(request.images[0].rgb, rgb)
 
 
+def test_the_view_ceiling_caps_what_the_model_sees_and_the_trace_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``SATQUERY_VLM_MAX_VIEWS`` is the serving machine's budget, below the plan's.
+
+    The 8 GB demo laptop runs the GGUF at 8192 context; six 448 px views do
+    not fit. The policy table still says six, the tool sends three, and the
+    execution record explains the difference rather than hiding it.
+    """
+    from satquery.core.config import get_settings
+    from satquery.schemas.trace import ArtifactRef
+
+    monkeypatch.setenv("SATQUERY_VLM_MAX_VIEWS", "3")
+    get_settings.cache_clear()
+    try:
+        artifacts, data = [], {}
+        for index in range(6):
+            artifacts.append(
+                ArtifactRef(
+                    id=f"art_{index}",
+                    type=ArtifactType.RENDERED_VIEW,
+                    mime="image/jpeg",
+                    label=f"View {index}",
+                    produced_by_step=1,
+                )
+            )
+            data[f"art_{index}"] = type(
+                "Rendered",
+                (),
+                {"rgb": np.zeros((8, 8, 3), np.uint8), "label": f"Image {index + 1}"},
+            )()
+        backend = ScriptedBackend(answer="A description.")
+        result = VlmVqa(backend=backend).run(
+            _context(FactSheet(), "describe", artifacts, data), {"mode": "vqa", "max_views": 6}
+        )
+    finally:
+        get_settings.cache_clear()
+
+    (request,) = backend.requests
+    assert len(request.images) == 3
+    assert [image.label for image in request.images] == ["Image 1", "Image 2", "Image 3"]
+    assert result.params["max_views"] == 3
+    assert result.params["views_ceiling"] == 3
+    assert result.params["views_attached"] == 3
+    assert any("SATQUERY_VLM_MAX_VIEWS" in note for note in result.notes)
+
+
+def test_the_view_ceiling_is_silent_when_it_does_not_bind() -> None:
+    """On the 24 GB box the default ceiling equals the plan; nothing is recorded."""
+    backend = ScriptedBackend(answer="A description.")
+    result = VlmVqa(backend=backend).run(_context(FactSheet(), "describe"), {"max_views": 6})
+    assert result.params["max_views"] == 6
+    assert "views_ceiling" not in result.params
+    assert not any("SATQUERY_VLM_MAX_VIEWS" in note for note in result.notes)
+
+
 def test_two_questions_over_one_scene_do_not_share_a_cached_answer() -> None:
     """A synthesiser's identity includes the question it was asked.
 
@@ -613,8 +670,9 @@ def test_a_machine_with_no_weights_still_answers_from_the_measurements(
     trace = analysis.trace
     assert trace.answer.template_fallback is True
     assert trace.answer.uncited_numeric_spans == []
-    assert any(e.tool.startswith("vlm_") and e.status is ToolStatus.SKIPPED
-               for e in trace.executions)
+    assert any(
+        e.tool.startswith("vlm_") and e.status is ToolStatus.SKIPPED for e in trace.executions
+    )
 
 
 def test_the_registry_never_advertises_a_model_this_machine_cannot_serve() -> None:
@@ -676,9 +734,7 @@ def test_a_runaway_tool_call_decode_is_cut_at_the_first_marker() -> None:
     """
     runaway = "buildings(0,0),(1000,1000)\n" + "</tool_call>\n" * 120
 
-    assert loader.apply_stop(runaway, loader.CHAT_STOP_STRINGS) == (
-        "buildings(0,0),(1000,1000)"
-    )
+    assert loader.apply_stop(runaway, loader.CHAT_STOP_STRINGS) == ("buildings(0,0),(1000,1000)")
 
 
 def test_stopping_leaves_an_ordinary_answer_untouched() -> None:

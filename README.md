@@ -61,9 +61,12 @@ export SATQUERY_VLM_BACKEND=hf
 export SATQUERY_VLM_ADAPTER_PATH=runs/sq-lora-v2-full/adapter
 ```
 
-The offline path — a Q4_K_M GGUF behind `scripts/serve_vlm.sh` with
-`SATQUERY_VLM_BACKEND=llamacpp` — is the same interface and needs no Python ML
-stack at all; do not run both at once on a 24 GB card.
+The offline path — a Q4_K_M GGUF behind `scripts/serve_vlm.sh` (Linux) or
+`scripts/serve_vlm.ps1` (Windows) with `SATQUERY_VLM_BACKEND=llamacpp` — is the
+same interface and needs no Python ML stack at all; do not run both at once on a
+24 GB card. `scripts/merge_export.py` produces the GGUF pair from the adapter,
+and `scripts/demo_laptop/README.md` is the runbook for the air-gapped 8 GB
+demo laptop (`SATQUERY_VLM_MAX_VIEWS=3`, 8192 context, q8_0 KV cache).
 
 > On a ROCm box the lockfile's CUDA torch is replaced by hand — see
 > `DOCS/AI_HANDOFF/05_ENVIRONMENT_AND_SETUP.md`. **Do not run a bare `uv sync`
