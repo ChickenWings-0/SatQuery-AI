@@ -1,0 +1,44 @@
+[
+ {
+  "place_id": 251263947,
+  "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+  "osm_type": "relation",
+  "osm_id": 1766358,
+  "lat": "13.0836939",
+  "lon": "80.2701860",
+  "category": "boundary",
+  "type": "administrative",
+  "place_rank": 16,
+  "importance": 0.6796065306212251,
+  "addresstype": "city",
+  "name": "Chennai Corporation",
+  "display_name": "Chennai Corporation, Chennai, Tamil Nadu, India",
+  "boundingbox": [
+   "12.8519771",
+   "13.2351580",
+   "80.1401875",
+   "80.3328982"
+  ]
+ },
+ {
+  "place_id": 252015517,
+  "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+  "osm_type": "relation",
+  "osm_id": 7910817,
+  "lat": "13.0008413",
+  "lon": "80.2023035",
+  "category": "boundary",
+  "type": "administrative",
+  "place_rank": 10,
+  "importance": 0.5143622024538567,
+  "addresstype": "state_district",
+  "name": "Chennai",
+  "display_name": "Chennai, Tamil Nadu, India",
+  "boundingbox": [
+   "12.8514482",
+   "13.1502817",
+   "80.1182821",
+   "80.3069299"
+  ]
+ }
+]

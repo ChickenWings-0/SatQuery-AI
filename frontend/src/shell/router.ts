@@ -85,7 +85,10 @@ export function bindRouter(): () => void {
     // itself; only push when the current location is not already inside it.
     const here = normalisePath(window.location.pathname)
     if (here === next || (next !== '/' && here.startsWith(next + '/'))) return
-    window.history.pushState({ section: state.section }, '', next)
+    // The query string rides along: `?mock=1&scenario=…` is read by the mock
+    // worker at request time, so dropping it here would silently switch a
+    // rehearsal back onto the real API the moment a section changes.
+    window.history.pushState({ section: state.section }, '', next + window.location.search)
   })
 
   const onPop = () => {

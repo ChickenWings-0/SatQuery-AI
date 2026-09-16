@@ -449,6 +449,58 @@ Also added to `GET /v1/jobs/{job_id}`: a job the in-memory store no longer holds
 
 ---
 
+### 4.11 `POST /v1/imagery/fetch` · `GET /v1/imagery/{fetch_id}/{name}` — STAC window read (added 2026-09-15, additive)
+
+Clips one or two Planetary Computer scenes to a bbox and writes each as a small GeoTIFF the client then uploads through `POST /v1/validate` exactly as it would a dropped file. The browser never touches a COG: a Sentinel-2 tile is ~1 GB, the pipeline wants a ≤ `max_px` window, and `rasterio` reads that window in a handful of HTTP range requests from the server. Nothing downstream of pre-flight changes.
+
+**Request** (`ImageryFetchRequest`, `extra="forbid"`):
+
+```json
+{
+  "items": [{ "collection": "sentinel-1-rtc", "id": "S1A_IW_GRDH_1SDV_20260303T010156_..._rtc" }],
+  "bbox": [72.5201, 22.9615, 72.6401, 23.0815],
+  "max_px": 1024
+}
+```
+
+- `items`: 1–2 entries; `collection` ∈ `sentinel-2-l2a` · `sentinel-1-rtc` · `sentinel-1-grd`. The server resolves assets itself: S2 → the twelve BigEarthNet-v2 bands, S1 → `vv`, `vh` — the band orders the sensor fingerprints in §4.5 recognise.
+- `bbox`: `[min_lon, min_lat, max_lon, max_lat]`, EPSG:4326, clipped to the item's footprint.
+- `max_px`: longest side, 64–4096; always capped by the server's `imagery_max_px` (default 1024).
+
+**Response** `200` (`ImageryFetchResponse`):
+
+```json
+{
+  "fetch_id": "9f2c…",
+  "files": [{
+    "name": "s1_S1A_IW_GRDH_…_rtc.tif", "url": "/v1/imagery/9f2c…/s1_S1A_IW_GRDH_…_rtc.tif",
+    "size_bytes": 774816, "collection": "sentinel-1-rtc", "item_id": "S1A_IW_GRDH_…_rtc",
+    "datetime": "2026-03-03T01:02:09Z", "crs": "EPSG:32643", "gsd_m": 35.17,
+    "width": 356, "height": 384, "band_count": 2,
+    "bounds_wgs84": [72.5179, 22.9597, 72.6423, 23.0833], "orbit_state": "descending"
+  }],
+  "warnings": []
+}
+```
+
+`files[]` is in request order. `orbit_state` is `sat:orbit_state` (S1 only; `null` for S2) so the client can refuse a cross-orbit pair before the co-registration check does. A band the item lacks is filled with nodata and reported as a `IMAGERY_BAND_MISSING` warning (`ref` = item id) rather than failing the fetch.
+
+`GET /v1/imagery/{fetch_id}/{name}` streams one file back as `image/tiff`; `fetch_id` is 16 hex characters and `name` is one path segment — anything else is `404` (`ARTIFACT_UNKNOWN`), as is a file the store no longer holds. Fetched files live under `<artifact_root>/imagery/<fetch_id>/` and are subject to the same retention as artifacts.
+
+**Errors** (§6 envelope in `detail`, all with a user-facing `hint`):
+
+| status | `code` | when |
+|---|---|---|
+| `502` | `IMAGERY_UPSTREAM_UNREACHABLE` | Planetary Computer did not answer (transport, 5xx, or a SAS token failure) — the venue's route out is gone |
+| `404` | `IMAGERY_ITEM_NOT_FOUND` | the STAC item does not exist in that collection (`ref` = item id) |
+| `422` | `IMAGERY_COLLECTION_UNSUPPORTED` | a collection the fetcher cannot stack |
+| `422` | `IMAGERY_WINDOW_EMPTY` | the bbox does not intersect the item's data (`ref` = item id) |
+| `422` | (FastAPI validation) | more than two items, malformed bbox, `max_px` out of range |
+
+**Client behaviour** (`frontend/src/pages/maps/hud/useImageryFetch.ts`): the response's `files[].url` are downloaded with a byte count, wrapped as `File`s, and handed to the *same* `selectFiles` the dropzone uses — pre-flight is already running when the console appears. Under `?mock=1` the MSW worker answers with `public/samples/stac/fetch/pair-ahmedabad.json`, whose two GeoTIFFs ship in the same folder, so the whole flow runs with the network off.
+
+---
+
 ## 5. SSE Event Protocol
 
 Each message: `id: <seq>` + `event: <type>` + `data: <json>`. Heartbeat comment `: ping` every 15 s.

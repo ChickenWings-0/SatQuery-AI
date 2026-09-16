@@ -457,3 +457,53 @@ export function FileIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** A folded brief: a page with a header rule and two text lines. */
+export function SitrepIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5.5 2.5h9a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z" />
+      <path d="M4.5 6h11" />
+      <path d="M7.5 9.5h5M7.5 12.5h3" />
+    </Icon>
+  )
+}
+
+/** The globe projection toggle. */
+export function GlobeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="10" cy="10" r="7" />
+      <path d="M3 10h14M10 3c2.5 2.3 2.5 11.7 0 14M10 3c-2.5 2.3-2.5 11.7 0 14" />
+    </Icon>
+  )
+}
+
+/** A pin for a place search result. */
+export function PinDropIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 17.5s5-4.6 5-9a5 5 0 0 0-10 0c0 4.4 5 9 5 9Z" />
+      <circle cx="10" cy="8.5" r="1.8" />
+    </Icon>
+  )
+}
+
+/** A cloud, for the cloud-cover filter. */
+export function CloudIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 15.5a3.5 3.5 0 0 1-.4-7 4.5 4.5 0 0 1 8.7 1.2A2.9 2.9 0 0 1 14 15.5H6Z" />
+    </Icon>
+  )
+}
+
+/** A calendar range, for the date window. */
+export function CalendarIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="3" y="4.5" width="14" height="12.5" rx="1.5" />
+      <path d="M3 8.5h14M7 2.5v4M13 2.5v4" />
+    </Icon>
+  )
+}

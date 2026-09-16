@@ -25,6 +25,8 @@ export const BINDINGS: readonly Binding[] = [
   { id: 'guide-chord', keys: ['⌘', '/'], label: 'Keyboard shortcuts', scope: 'global', chord: true },
   { id: 'theme', keys: ['⌘', 'J'], label: 'Toggle dark / light', scope: 'global', chord: true },
   { id: 'settings', keys: ['⌘', ','], label: 'Settings', scope: 'global', chord: true },
+  { id: 'sitrep', keys: ['⌘', '⇧', 'S'], label: 'SITREP — one-page PDF brief', scope: 'thread', chord: true },
+  { id: 'geojson', keys: ['⌘', '⇧', 'G'], label: 'Export GeoJSON', scope: 'stage', chord: true },
   { id: 'guide', keys: ['?'], label: 'Keyboard shortcuts', scope: 'global', chord: false },
   { id: 'focus-composer', keys: ['/'], label: 'Ask', scope: 'thread', chord: false },
   { id: 'view-prev', keys: ['←'], label: 'Previous evidence view', scope: 'stage', chord: false },
@@ -38,6 +40,7 @@ export const BINDINGS: readonly Binding[] = [
   { id: 'go-maps', keys: ['G', 'M'], label: 'Go to Maps', scope: 'navigation', chord: false },
   { id: 'go-saved', keys: ['G', 'S'], label: 'Go to Saved', scope: 'navigation', chord: false },
   { id: 'go-projects', keys: ['G', 'P'], label: 'Go to Projects', scope: 'navigation', chord: false },
+  { id: 'globe', keys: ['B'], label: 'Toggle globe / flat', scope: 'maps', chord: false },
 ]
 
 export const SCOPE_LABELS: Record<ShortcutScope, string> = {

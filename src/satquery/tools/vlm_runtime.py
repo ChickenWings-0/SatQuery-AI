@@ -21,6 +21,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+from satquery.core.config import get_settings
 from satquery.evidence.citation_validator import validate
 from satquery.models.loader import (
     BackendUnavailableError,
@@ -84,18 +85,39 @@ class SynthesisParams:
     temperature: float
     max_views: int
     prompt_version: str | None
+    views_ceiling: int | None = None
+    """``SATQUERY_VLM_MAX_VIEWS`` when it lowered :attr:`max_views`, else None.
+
+    Recorded so the trace says *why* a six-view plan reached the model as three:
+    the 8 GB demo laptop serves the GGUF at 8192 context, and every 448 px view
+    is ~1024 image tokens of it."""
 
     @classmethod
-    def read(cls, params: Mapping[str, Any], default_mode: str) -> SynthesisParams:
-        """Read the policy table's params, filling in this tool's defaults."""
+    def read(
+        cls, params: Mapping[str, Any], default_mode: str, ceiling: int | None = None
+    ) -> SynthesisParams:
+        """Read the policy table's params, filling in this tool's defaults.
+
+        Args:
+            params: The policy table's entry for this step.
+            default_mode: The tool's mode when the table does not set one.
+            ceiling: The deployment's view ceiling (``SATQUERY_VLM_MAX_VIEWS``);
+                None reads it from settings. The table's ``max_views`` is a plan,
+                the ceiling is what the serving machine can hold, and the lower
+                one wins.
+        """
+        requested = int(params.get("max_views", MAX_VIEWS))
+        limit = get_settings().vlm_max_views if ceiling is None else ceiling
+        capped = limit < requested
         return cls(
             mode=str(params.get("mode", default_mode)),
             max_new_tokens=int(params.get("max_new_tokens", 384)),
             temperature=float(params.get("temperature", 0.0)),
-            max_views=int(params.get("max_views", MAX_VIEWS)),
+            max_views=min(requested, limit),
             prompt_version=(
                 str(params["prompt_version"]) if params.get("prompt_version") else None
             ),
+            views_ceiling=limit if capped else None,
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -108,6 +130,8 @@ class SynthesisParams:
         }
         if self.prompt_version:
             recorded["prompt_version"] = self.prompt_version
+        if self.views_ceiling is not None:
+            recorded["views_ceiling"] = self.views_ceiling
         return recorded
 
 
@@ -168,8 +192,12 @@ def acquire_backend(backend: VlmBackend | None = None) -> VlmBackend:
         raise ToolError(str(error)) from error
 
 
-def generate(prompt: BuiltPrompt, params: SynthesisParams, ctx: ToolContext,
-             backend: VlmBackend | None = None) -> GenerationResult:
+def generate(
+    prompt: BuiltPrompt,
+    params: SynthesisParams,
+    ctx: ToolContext,
+    backend: VlmBackend | None = None,
+) -> GenerationResult:
     """Run one generation, turning any model-level failure into a tool failure.
 
     Raises:
@@ -259,6 +287,11 @@ def synthesise(
     )
 
     notes: list[str] = []
+    if settings.views_ceiling is not None:
+        notes.append(
+            f"views capped at {settings.views_ceiling} by SATQUERY_VLM_MAX_VIEWS "
+            f"(the plan asked for {int(params.get('max_views', MAX_VIEWS))})"
+        )
     if not views:
         notes.append("no rendered views reached the synthesiser; the answer is text-only")
     if not ctx.facts.facts:

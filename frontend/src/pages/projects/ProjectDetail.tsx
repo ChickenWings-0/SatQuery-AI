@@ -5,7 +5,8 @@
 import { useState } from 'react'
 import { useShallow } from 'zustand/shallow'
 
-import { footprintToGeoJson, downloadJson } from '@/export/geojson'
+import { downloadJson } from '@/export/download'
+import { footprintToGeoJson } from '@/export/geojson/build'
 import { ArrowRightIcon, DownloadIcon, FileIcon } from '@/components/ui/icons'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SectionHeader } from '@/components/ui/SectionHeader'

@@ -28,6 +28,8 @@ const OWNERS: Record<string, RegExp> = {
   'maplibre-gl': /^pages\/maps\/MapStage\.tsx$/,
   '@xyflow/react': /^components\/pipeline\/DagCanvas\.tsx$/,
   'idb-keyval': /^state\/library\.ts$/,
+  'pdf-lib': /^export\/sitrep\/render\.ts$/,
+  '@pdf-lib/fontkit': /^export\/sitrep\/render\.ts$/,
 }
 
 describe('bundle boundaries', () => {
@@ -46,7 +48,14 @@ describe('bundle boundaries', () => {
       ['Landing', /from '@\/pages\/Landing'/],
       ['MapStage', /from '@\/pages\/maps\/MapStage'/],
       ['Globe', /from '@\/pages\/landing\/globe\/Globe'/],
-      ['library (outside its pages)', /from '@\/state\/library'/],
+      // `import type` is erased by the compiler and pulls nothing in.
+      ['library (outside its pages)', /^import(?!\s+type)[^\n]*from '@\/state\/library'/m],
+      // pdf-lib rides with the SITREP builder, which loads on the click.
+      ['SITREP builder', /^import[^\n]*from '@\/export\/sitrep\/build'/m],
+      // The GeoJSON planner (stores + builder) loads on the click too.
+      ['GeoJSON planner', /^import(?!\s+type)[^\n]*from '@\/export\/geojson\/plan'/m],
+      // The mask vectoriser is its own chunk behind the "Include masks" switch.
+      ['mask vectoriser', /^import(?!\s+type)[^\n]*from '@\/export\/geojson\/masks'/m],
     ] as const) {
       const importers = files.filter((file) => pattern.test(readFileSync(file, 'utf8')))
       // `SettingsDialog` is itself a lazy chunk (`App.tsx`), so its static
@@ -60,6 +69,32 @@ describe('bundle boundaries', () => {
           : importers
       expect(allowed.map(rel), `${name} is statically imported`).toEqual([])
     }
+  })
+
+  it('keeps the SITREP renderer behind its builder', () => {
+    // `render.ts` is where pdf-lib lives; only the lazily loaded builder may
+    // import it, or the click stops being the moment the chunk loads.
+    const importers = files.filter((file) => /^import[^\n]*from '@\/export\/sitrep\/render'/m.test(readFileSync(file, 'utf8')))
+    expect(importers.map(rel)).toEqual(['export/sitrep/build.ts'])
+  })
+
+  it('keeps the geo clients free of React, stores and the map', () => {
+    // `geo/*` are plain fetch wrappers: MSW must see every call, vitest must
+    // replay them without a DOM, and nothing in them may drag the Maps chunk
+    // or a store into a place that only wanted a search.
+    const geo = files.filter((file) => /^geo\//.test(rel(file)))
+    expect(geo.length).toBeGreaterThan(0)
+    for (const file of geo) {
+      const source = readFileSync(file, 'utf8')
+      expect(source, `${rel(file)} imports react`).not.toMatch(/from 'react'/)
+      expect(source, `${rel(file)} imports a store`).not.toMatch(/from '@\/state\//)
+      expect(source, `${rel(file)} imports maplibre`).not.toMatch(/from 'maplibre-gl'/)
+    }
+  })
+
+  it('keeps the STAC store inside the Maps chunk', () => {
+    const importers = files.filter((file) => /from '@\/state\/stac'/.test(readFileSync(file, 'utf8')))
+    for (const file of importers) expect(rel(file)).toMatch(/^(pages\/maps\/|pages\/Maps\.tsx$|mocks\/)/)
   })
 
   it('keeps the display scale on the landing page', () => {

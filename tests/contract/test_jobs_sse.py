@@ -103,9 +103,7 @@ def submit(client: TestClient, upload_files, *names: str, query: str) -> JobAcce
 # --------------------------------------------------------------------- POST
 
 
-def test_post_jobs_returns_202_with_addressable_urls(
-    jobs_client: TestClient, upload_files
-) -> None:
+def test_post_jobs_returns_202_with_addressable_urls(jobs_client: TestClient, upload_files) -> None:
     accepted = submit(jobs_client, upload_files, "s2_pre", query="Describe this scene.")
     assert accepted.status == "queued"
     assert accepted.poll_url == f"/v1/jobs/{accepted.job_id}"
@@ -182,6 +180,172 @@ def test_sse_event_order_matches_the_contract(jobs_client: TestClient, upload_fi
     if "answer_delta" in names:
         last_step = max(i for i, n in enumerate(names) if n.startswith("step_"))
         assert names.index("answer_delta") > last_step
+
+
+def _dag_walk(events: list[tuple[str, dict]]) -> list[str]:
+    """The stream reduced to the DAG being walked.
+
+    ``plan`` then ``started:n`` / ``completed:n`` in arrival order. Stage
+    narration, artifacts and the terminal event are dropped — they are
+    asserted elsewhere.
+    """
+    walk: list[str] = []
+    for name, data in events:
+        if name == "plan":
+            walk.append("plan")
+        elif name in {"step_started", "step_completed"}:
+            walk.append(f"{name.removeprefix('step_')}:{data['step']}")
+    return walk
+
+
+def test_sse_sequence_is_the_policy_table_dag_being_executed(
+    jobs_client: TestClient, upload_files
+) -> None:
+    """The events are not a log of *something* happening; they are the DAG.
+
+    For a bi-temporal optical pair the policy table (``CHANGE_VQA|BI_TEMPORAL|
+    optical``) is five steps. The stream must name those five tools in the
+    plan, in order, and then walk the DAG they form: a step starts only after
+    every step it depends on has completed, and the one step that depends on
+    the renderer alone (``spectral_index_analyzer``) starts before the change
+    chain it does not wait for has finished — the executor runs a DAG, not a
+    list. Whatever the executor substituted for an unservable tool must be
+    reported as its ``fallback_of``, never quietly planned in its place.
+    """
+    from satquery.agent.planner import default_table
+
+    accepted = submit(
+        jobs_client,
+        upload_files,
+        "s2_pre",
+        "s2_post",
+        query="What changed between these two images?",
+    )
+    events = read_events(jobs_client, accepted.job_id)
+    plan = next(data for name, data in events if name == "plan")
+
+    expected = default_table().entries["CHANGE_VQA|BI_TEMPORAL|optical"]
+    final = AnalyzeResponse.model_validate(dict(events)["done"])
+    assert final.trace is not None
+    assert final.trace.plan.policy_key == "CHANGE_VQA|BI_TEMPORAL|optical"
+    assert [step["tool"] for step in plan["steps"]] == [step.tool for step in expected.steps]
+    assert [step["tool"] for step in plan["steps"]] == [
+        step.tool for step in final.trace.plan.steps
+    ], "the plan event and the trace's plan must name the same DAG"
+    assert [step["depends_on"] for step in plan["steps"]] == [
+        list(step.depends_on) for step in expected.steps
+    ]
+
+    walk = _dag_walk(events)
+    assert walk[0] == "plan", "the DAG is drawn before it is walked"
+    position = {token: index for index, token in enumerate(walk)}
+    dependencies = {step["step"]: step["depends_on"] for step in plan["steps"]}
+    for step, upstream in dependencies.items():
+        assert position[f"started:{step}"] < position[f"completed:{step}"]
+        for dependency in upstream:
+            assert position[f"completed:{dependency}"] < position[f"started:{step}"], (
+                f"step {step} started before its dependency {dependency} completed: {walk}"
+            )
+
+    # Independence is exercised, not just permitted: spectral_index_analyzer
+    # (step 4, depends on 1) must overlap the change chain (steps 2-3).
+    by_tool = {step["tool"]: step["step"] for step in plan["steps"]}
+    spectral = by_tool["spectral_index_analyzer"]
+    detector = by_tool["siamese_change_detector"]
+    assert position[f"started:{spectral}"] < position[f"completed:{detector}"] or (
+        position[f"started:{spectral}"] < position[f"completed:{by_tool['change_statistics']}"]
+    ), f"independent steps were serialised: {walk}"
+
+    # Every execution is either the planned tool or a declared fallback for it.
+    for planned, execution in zip(plan["steps"], final.trace.executions, strict=True):
+        assert execution.step == planned["step"]
+        assert execution.tool == planned["tool"] or execution.fallback_of == planned["tool"], (
+            f"step {execution.step} ran {execution.tool!r} which is neither "
+            f"{planned['tool']!r} nor a declared fallback for it"
+        )
+
+
+def test_streaming_and_synchronous_paths_produce_the_same_trace(
+    jobs_client: TestClient, upload_files
+) -> None:
+    """PRODUCT.md's "byte-identical reruns", across the two submission paths.
+
+    Once ``trace_id``, ``created_at``, durations and ``cache_hit`` are set
+    aside — the only fields two honest runs cannot share — the trace that
+    ``done`` carries must equal the one ``/v1/analyze`` returns for the same
+    body. This is also the regression test for the cache replay: a second run
+    used to lose its ``TOOL_NOTE`` warnings and its substitution note, so the
+    first and second submission of one query disagreed about what happened.
+    """
+    files = upload_files("s2_pre", "s2_post")
+    payload = {"query": "What changed between these two images?"}
+
+    synchronous = jobs_client.post("/v1/analyze", files=files, data=payload)
+    assert synchronous.status_code == 200, synchronous.text
+    sync_trace = AnalyzeResponse.model_validate(synchronous.json()).trace
+    assert sync_trace is not None
+
+    accepted = submit(jobs_client, upload_files, "s2_pre", "s2_post", query=payload["query"])
+    events = read_events(jobs_client, accepted.job_id)
+    job_trace = AnalyzeResponse.model_validate(dict(events)["done"]).trace
+    assert job_trace is not None
+
+    volatile = {"created_at", "duration_ms", "cache_hit"}
+
+    def normalise(trace: AuditTrace) -> str:
+        def walk(node):  # type: ignore[no-untyped-def]
+            if isinstance(node, dict):
+                return {k: walk(v) for k, v in node.items() if k not in volatile}
+            if isinstance(node, list):
+                return [walk(item) for item in node]
+            if isinstance(node, str):
+                return node.replace(trace.trace_id, "<trace_id>")
+            return node
+
+        return json.dumps(walk(trace.model_dump(mode="json")), sort_keys=True, indent=1)
+
+    left, right = normalise(sync_trace), normalise(job_trace)
+    if left != right:
+        import difflib
+
+        diff = "\n".join(
+            difflib.unified_diff(
+                left.splitlines(), right.splitlines(), "analyze", "jobs", lineterm=""
+            )
+        )
+        pytest.fail(f"traces differ between /v1/analyze and /v1/jobs:\n{diff}")
+
+    # The persisted copy is the streamed copy, verbatim.
+    stored = jobs_client.get(f"/v1/traces/{accepted.job_id}")
+    assert stored.status_code == 200
+    assert AuditTrace.model_validate(stored.json()) == job_trace
+
+
+def test_an_incompatible_pair_is_refused_in_request_on_both_paths(
+    jobs_client: TestClient, upload_files
+) -> None:
+    """A FAIL verdict is the 422 ``/v1/analyze`` returns before planning.
+
+    ``/v1/jobs`` used to accept the same pair with a 202 and report the refusal
+    as an ``error`` event on a job the client then had to subscribe to. The
+    verdict is part of ingestion's output, which runs in-request on both paths,
+    so both refuse with the same status and the same §6 error code.
+    """
+    files = upload_files("s2_pre", "s2_disjoint")
+    payload = {"query": "What changed between these two images?"}
+
+    synchronous = jobs_client.post("/v1/analyze", files=files, data=payload)
+    queued = jobs_client.post("/v1/jobs", files=files, data=payload)
+
+    assert synchronous.status_code == 422, synchronous.text
+    assert queued.status_code == synchronous.status_code, queued.text
+    assert (
+        queued.json()["error"]["code"]
+        == synchronous.json()["error"]["code"]
+        == "INSUFFICIENT_OVERLAP"
+    )
+    store = app.dependency_overrides[get_job_store]()
+    assert len(store) == 0, "a refused submission must not leave a phantom job behind"
 
 
 def test_plan_event_is_emitted_once_and_is_schema_valid(

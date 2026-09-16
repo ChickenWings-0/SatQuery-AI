@@ -28,6 +28,7 @@ import { SidebarTabs } from '@/components/thread/SidebarTabs'
 import { panelId, tabId, type Tab } from '@/components/thread/tabs'
 import { SuggestionChips } from '@/components/thread/SuggestionChips'
 import { PipelineDialog } from '@/components/pipeline/PipelineDialog'
+import { SitrepAction } from '@/components/export/SitrepAction'
 import { BookmarkIcon, CopyIcon, SatelliteIcon, ShareIcon } from '@/components/ui/icons'
 import { countOf } from '@/format'
 import { groupForScalar, groupViews } from '@/evidence/views'
@@ -404,6 +405,7 @@ export function ThreadPanel() {
                     <CardAction label="Share: copy link" onClick={() => void copyAnswer()}>
                       <ShareIcon size={14} />
                     </CardAction>
+                    <SitrepAction />
                   </div>
                 </header>
 

@@ -190,6 +190,7 @@ frontend/playwright/.cache/
 .env
 .env.*
 !.env.example
+!scripts/demo_laptop/.env.laptop
 # Demo-bundle checksums and archives are built by hand, never committed.
 SHA256SUMS
 *.pem

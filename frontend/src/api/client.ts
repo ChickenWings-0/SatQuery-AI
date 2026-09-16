@@ -14,6 +14,8 @@ import type {
   ArtifactRef,
   AuditTrace,
   HealthResponse,
+  ImageryFetchRequest,
+  ImageryFetchResponse,
   JobAccepted,
   JobStatusResponse,
   RegistryResponse,
@@ -282,6 +284,31 @@ export async function cancelJob(jobId: string, signal?: AbortSignal): Promise<Jo
   } catch {
     return null
   }
+}
+
+/**
+ * Clip one or two Planetary Computer scenes to a bbox (§4.11, additive).
+ * The server does the COG window reads; the files it returns are ordinary
+ * GeoTIFFs the client then uploads through `validate` like a dropped file.
+ */
+export async function fetchImagery(body: ImageryFetchRequest, signal?: AbortSignal): Promise<ImageryFetchResponse> {
+  const response = await send(
+    '/v1/imagery/fetch',
+    { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(body) },
+    signal,
+    TIMEOUT.upload,
+  )
+  if (!response.ok) throw await toError(response)
+  try {
+    return (await response.json()) as ImageryFetchResponse
+  } catch {
+    throw new SatQueryError(0, null, 'The API returned a response this client could not read.')
+  }
+}
+
+/** Same-origin URL of a fetched GeoTIFF. */
+export function imageryUrl(file: { url: string }): string {
+  return `${BASE}${file.url}`
 }
 
 /** The URL of one artifact. Immutable and cacheable for ever (§4.6). */

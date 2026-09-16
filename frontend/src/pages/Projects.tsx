@@ -39,11 +39,11 @@ export default function Projects() {
   }, [])
 
   function open(id: string) {
-    window.history.pushState({ section: 'projects', id }, '', `/projects/${encodeURIComponent(id)}`)
+    window.history.pushState({ section: 'projects', id }, '', `/projects/${encodeURIComponent(id)}${window.location.search}`)
     setOpenId(id)
   }
   function back() {
-    window.history.pushState({ section: 'projects' }, '', '/projects')
+    window.history.pushState({ section: 'projects' }, '', `/projects${window.location.search}`)
     setOpenId(null)
   }
 

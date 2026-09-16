@@ -139,6 +139,18 @@ class Settings(BaseSettings):
         default=22.0, gt=0.0, description="Hard ceiling on the 24 GB card (Master.md §8 Phase 4)."
     )
     vlm_max_new_tokens: int = Field(default=384, gt=0)
+    vlm_max_views: int = Field(
+        default=6,
+        ge=1,
+        le=6,
+        description=(
+            "Ceiling on rendered views per prompt, below the policy table's own "
+            "max_views. Six is the training budget and what a 24 GB card serves in "
+            "bf16; the 8 GB demo laptop runs the Q4_K_M GGUF at 8192 context, where "
+            "each 448 px view costs ~1024 image tokens, so it is served with 3 "
+            "(ROADMAP_REMAINING_FIXES.md, Track 2)."
+        ),
+    )
     vlm_idle_unload_s: float = Field(
         default=900.0,
         description="Unload the weights after this long idle; 0 keeps them resident.",
@@ -150,6 +162,26 @@ class Settings(BaseSettings):
     )
     vlm_prompt_version: str = Field(
         default="grounded_v1", description="Key into models.prompts.templates.TEMPLATES."
+    )
+
+    # -- Imagery fetch (ROADMAP Track 4.3) -----------------------------------
+    #
+    # ``POST /v1/imagery/fetch`` reads a window out of a Planetary Computer COG
+    # and writes a small GeoTIFF the frontend then uploads through the ordinary
+    # ``/v1/validate`` → ``/v1/jobs`` path. Everything here is a ceiling.
+
+    imagery_max_px: int = Field(
+        default=1024,
+        ge=64,
+        le=4096,
+        description="Longest side of a fetched window, in pixels of the finest band.",
+    )
+    imagery_timeout_s: float = Field(
+        default=90.0, gt=0.0, description="Deadline for one item's band reads, end to end."
+    )
+    imagery_stac_url: str = Field(
+        default="https://planetarycomputer.microsoft.com/api/stac/v1",
+        description="STAC API root; the SAS token endpoint is derived from it.",
     )
 
     @property
