@@ -20,11 +20,12 @@
  * edge and a wash of the accent behind it. Drawn with `box-shadow` so the row
  * does not shift by 3px when it becomes active.
  */
-import type { ComponentType } from 'react'
+import { lazy, Suspense, useState, type ComponentType } from 'react'
 
 import { AccountPopover } from '@/components/shell/AccountPopover'
 import { DailyQuote } from '@/components/shell/DailyQuote'
 import {
+  ChevronDownIcon,
   DatasetsIcon,
   MapsIcon,
   PlusIcon,
@@ -36,7 +37,23 @@ import {
   type IconProps,
 } from '@/components/ui/icons'
 import { useFocusStore } from '@/state/focus'
+import { useJobStore } from '@/state/job'
 import { NAV_SECTIONS, useUiStore, type NavSection } from '@/state/ui'
+import { NEW_QUERY_EVENT } from '@/thread/newQuery'
+
+// The past-runs list needs the library store and its IndexedDB adapter, which
+// the entry chunk does not carry; it loads the first time the disclosure opens.
+const SidebarHistory = lazy(() => import('@/components/shell/SidebarHistory'))
+
+const HISTORY_OPEN_KEY = 'satquery.rail.history'
+
+function readHistoryOpen(): boolean {
+  try {
+    return localStorage.getItem(HISTORY_OPEN_KEY) !== 'closed'
+  } catch {
+    return true
+  }
+}
 
 const LABELS: Record<NavSection, string> = {
   datasets: 'Datasets',
@@ -80,10 +97,28 @@ export function Sidebar() {
   // is concerned: both are "the query you are working on".
   const inWorkspace = section === 'explore' || section === 'history'
 
+  const [historyOpen, setHistoryOpen] = useState(readHistoryOpen)
+  function toggleHistory() {
+    const next = !historyOpen
+    setHistoryOpen(next)
+    try {
+      localStorage.setItem(HISTORY_OPEN_KEY, next ? 'open' : 'closed')
+    } catch {
+      // Session-only, then.
+    }
+  }
+
   function newQuery() {
     // The composer is the product's front door; "New Query" is a shortcut to
-    // it. It clears the draft — that is what "new" means — and hands over the
-    // caret, on the workspace stage where the imagery is.
+    // it. "New" means a clean slate: a run still streaming is abandoned on
+    // both ends (`useRun` listens for the event), the answer, DAG and
+    // evidence are cleared, the uploaded scenes and their pre-flight go, the
+    // draft is emptied — and the caret lands on the workspace stage where the
+    // imagery is. Saved runs are untouched; they are in the list below.
+    window.dispatchEvent(new Event(NEW_QUERY_EVENT))
+    useJobStore.getState().reset()
+    useFocusStore.getState().resetForNewRun()
+    useUiStore.getState().clearFiles()
     setSection('explore')
     setDraft('')
     focusComposer()
@@ -154,6 +189,41 @@ export function Sidebar() {
               ⌘K
             </kbd>
           </button>
+
+          {/* Past runs, directly under the call to action. A disclosure, not a
+              popover: on the rail there is room, and a list that is simply
+              there is one fewer thing to open. Rail-only — the phone bar is
+              a single row and the thread's History tab covers it there. */}
+          <div className="hidden wide:-mt-2 wide:mb-3 wide:block">
+            <button
+              type="button"
+              onClick={toggleHistory}
+              aria-expanded={historyOpen}
+              aria-controls="rail-history"
+              className="flex min-h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[11px] font-medium tracking-[0.06em] text-sidebar-text-lo uppercase transition-colors duration-[120ms] hover:bg-sidebar-hi hover:text-sidebar-text"
+            >
+              <span className="flex-1">Past queries</span>
+              <ChevronDownIcon
+                size={14}
+                className={`shrink-0 transition-transform duration-[220ms] ease-[var(--ease-out-quint)] ${historyOpen ? '' : '-rotate-90'}`}
+              />
+            </button>
+            {historyOpen ? (
+              <div id="rail-history" className="mt-0.5">
+                <Suspense
+                  fallback={
+                    <ul className="space-y-1 px-1" aria-busy="true" aria-label="Loading past queries">
+                      {Array.from({ length: 3 }, (_, i) => (
+                        <li key={i} className="h-8 animate-pulse rounded-md bg-sidebar-hi" />
+                      ))}
+                    </ul>
+                  }
+                >
+                  <SidebarHistory />
+                </Suspense>
+              </div>
+            ) : null}
+          </div>
 
           {NAV_SECTIONS.map((item) => {
             const Glyph = ICONS[item]

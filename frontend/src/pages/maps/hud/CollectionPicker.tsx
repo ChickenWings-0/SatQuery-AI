@@ -36,11 +36,11 @@ export function CollectionPicker() {
   }, [cloudMax])
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <Segmented value={sensor} options={OPTIONS} onChange={setSensor} label="Sensor" size="sm" />
       {sensor !== 'sar' ? (
-        <label className="flex items-center gap-2 text-[12px] text-text-lo">
-          <CloudIcon size={14} />
+        <label className="ml-auto flex shrink-0 items-center gap-2 text-[12px] text-text-lo">
+          <CloudIcon size={14} className="shrink-0" />
           <input
             type="range"
             min={0}
@@ -49,9 +49,9 @@ export function CollectionPicker() {
             value={cloudMax}
             aria-label="Maximum cloud cover"
             onChange={(event) => setCloudMax(Number(event.target.value))}
-            className="w-20 accent-[var(--color-accent-warm)]"
+            className="w-16 accent-[var(--color-accent-warm)]"
           />
-          <span className="t-coord w-9 text-text-hi">≤ {cloudMax}%</span>
+          <span className="t-coord w-10 whitespace-nowrap text-right text-text-hi">≤ {cloudMax}%</span>
         </label>
       ) : null}
     </div>

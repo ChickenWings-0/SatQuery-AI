@@ -690,17 +690,22 @@ def test_the_threshold_is_calibrated_rather_than_left_at_one_half() -> None:
 
 
 def test_a_checkpoint_round_trips_with_everything_needed_to_serve_it(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Weights alone are not servable: the normalisation and threshold travel too."""
     from satquery.training.cd.checkpoint import (
         BUNDLE_SUFFIX,
+        CHECKPOINT_ENV,
         CheckpointBundle,
         Normalisation,
         find_checkpoint,
         load_bundle,
         save_bundle,
     )
+
+    # `find_checkpoint` honours the env override first; a developer `.env` that
+    # an earlier `create_app()` copied into os.environ must not win over tmp_path.
+    monkeypatch.delenv(CHECKPOINT_ENV, raising=False)
     from satquery.training.cd.model import SiameseConfig, build_detector
 
     model = build_detector(pretrained=False)

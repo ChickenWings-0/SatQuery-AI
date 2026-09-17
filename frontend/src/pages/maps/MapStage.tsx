@@ -114,11 +114,21 @@ export default function MapStage({
   groups,
   georef,
   sensor,
+  insetRight = 0,
+  hudCovered = false,
 }: {
   groups: ViewGroup[]
   /** Null when no run is loaded: the world view, for discovery. */
   georef: Georef | null
   sensor: string | null
+  /**
+   * Pixels of the stage's right edge covered by a floating column, so a
+   * fly-to centres the place in the map the user can see rather than under
+   * the panel. Ignored on a phone, where the column is a sheet over all of it.
+   */
+  insetRight?: number
+  /** True while a sheet covers the stage on a phone: the HUD would only ghost through the glass. */
+  hudCovered?: boolean
 }) {
   const container = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MapLibre | null>(null)
@@ -126,6 +136,11 @@ export default function MapStage({
   // layer: an empty style has no glyph source, and two letters do not earn one.
   const markers = useRef<Map<string, maplibregl.Marker>>(new Map())
   const [ready, setReady] = useState(false)
+  // Null until the constructor has run; false when this browser gave maplibre
+  // no WebGL context (a locked-down lab machine, a headless runner without a
+  // GPU path). The stage then says so instead of taking the page down with
+  // an error thrown out of an effect — the discovery column still works.
+  const [webgl, setWebgl] = useState<boolean | null>(null)
   const reduced = useReducedMotion()
 
   const layerKey = useMapStore((state) => state.layerKey)
@@ -160,16 +175,24 @@ export default function MapStage({
     if (!container.current) return
     injectCss()
     const tags = markers.current
-    const map = new maplibregl.Map({
-      container: container.current,
-      style: EMPTY_STYLE,
-      ...(georef
-        ? { bounds: georef.bounds, fitBoundsOptions: { padding: 48 } }
-        : { center: WORLD_CENTER, zoom: WORLD_ZOOM }),
-      attributionControl: false,
-      pitchWithRotate: false,
-      dragRotate: false,
-    })
+    let map: MapLibre
+    try {
+      map = new maplibregl.Map({
+        container: container.current,
+        style: EMPTY_STYLE,
+        ...(georef
+          ? { bounds: georef.bounds, fitBoundsOptions: { padding: 48 } }
+          : { center: WORLD_CENTER, zoom: WORLD_ZOOM }),
+        attributionControl: false,
+        pitchWithRotate: false,
+        dragRotate: false,
+      })
+    } catch (error) {
+      console.warn('[maps] no WebGL context:', error instanceof Error ? error.message : error)
+      setWebgl(false)
+      return
+    }
+    setWebgl(true)
     map.touchZoomRotate.disableRotation()
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
     mapRef.current = map
@@ -187,6 +210,11 @@ export default function MapStage({
       })
 
       // The discovery footprints sit above the land and below the scene.
+      // A search returns a dozen scenes of the *same* tile, so their
+      // footprints coincide; any resting fill stacks a dozen times into an
+      // opaque plate over the place the user just flew to. At rest a
+      // footprint is only its outline — the fill exists for hover and the
+      // chosen pair (and as the hit target, which ignores opacity).
       map.addSource(FOOTPRINTS, { type: 'geojson', data: footprintCollection([], { t1: null, t2: null }, null), promoteId: 'id' })
       map.addLayer({
         id: `${FOOTPRINTS}-fill`,
@@ -194,7 +222,7 @@ export default function MapStage({
         source: FOOTPRINTS,
         paint: {
           'fill-color': ['case', ['==', ['get', 'sensor'], 'sar'], '#9aa6b2', '#dfa878'],
-          'fill-opacity': ['case', ['!=', ['get', 'slot'], ''], 0.28, ['get', 'hover'], 0.2, 0.08],
+          'fill-opacity': ['case', ['!=', ['get', 'slot'], ''], 0.22, ['get', 'hover'], 0.14, 0],
         },
       })
       map.addLayer({
@@ -204,7 +232,7 @@ export default function MapStage({
         paint: {
           'line-color': ['case', ['!=', ['get', 'slot'], ''], '#ab6242', ['get', 'hover'], '#dfa878', '#8a7462'],
           'line-width': ['case', ['!=', ['get', 'slot'], ''], 2.5, ['get', 'hover'], 1.8, 1],
-          'line-opacity': 0.9,
+          'line-opacity': ['case', ['!=', ['get', 'slot'], ''], 1, ['get', 'hover'], 0.95, 0.55],
         },
       })
       map.on('mousemove', `${FOOTPRINTS}-fill`, (event) => {
@@ -380,11 +408,22 @@ export default function MapStage({
     }
   }, [stacResults, stacSelection, stacHover, ready])
 
+  // The padding a fit uses: even all round, plus whatever the discovery
+  // column covers on a window wide enough to show it beside the map.
+  const fitPadding = (base: number) => {
+    const el = container.current
+    const wide = el ? el.clientWidth >= 768 && window.innerHeight >= 500 : false
+    return { top: base, bottom: base, left: base, right: base + (wide ? insetRight : 0) }
+  }
+
   // A chosen place: fly to it.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready || !flyTarget) return
-    map.fitBounds(flyTarget.bbox, { padding: 64, duration: reduced ? 0 : 700, maxZoom: 11 })
+    map.fitBounds(flyTarget.bbox, { padding: fitPadding(64), duration: reduced ? 0 : 700, maxZoom: 11 })
+    // `insetRight` is read at flight time on purpose: opening or closing the
+    // column must not re-fly the map.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyTarget, ready, reduced])
 
   function fly(lon: number, lat: number) {
@@ -397,13 +436,16 @@ export default function MapStage({
   function fit() {
     const map = mapRef.current
     if (!map) return
-    if (georef) map.fitBounds(georef.bounds, { padding: 48, duration: reduced ? 0 : 400 })
-    else if (flyTarget) map.fitBounds(flyTarget.bbox, { padding: 64, duration: reduced ? 0 : 400, maxZoom: 11 })
+    if (georef) map.fitBounds(georef.bounds, { padding: fitPadding(48), duration: reduced ? 0 : 400 })
+    else if (flyTarget) map.fitBounds(flyTarget.bbox, { padding: fitPadding(64), duration: reduced ? 0 : 400, maxZoom: 11 })
     else map.easeTo({ center: WORLD_CENTER, zoom: WORLD_ZOOM, duration: reduced ? 0 : 400 })
   }
 
   const centerLat = georef?.center[1] ?? (cursor?.lat ?? WORLD_CENTER[1])
   const showSwipe = compare !== null && projection !== 'globe'
+  // Below `wide` the discovery sheet covers the whole stage; the HUD comes
+  // back with the map when it closes.
+  const hud = hudCovered ? 'hidden wide:block' : ''
 
   return (
     <div className="absolute inset-0">
@@ -429,6 +471,16 @@ export default function MapStage({
           else if (event.key === '0') fit()
         }}
       />
+      {webgl === false ? (
+        <div role="status" className="absolute inset-0 grid place-items-center p-4">
+          <div className="glass max-w-xs p-4 text-center">
+            <p className="text-[13px] text-text-hi">This browser cannot draw the map.</p>
+            <p className="t-meta mt-1">
+              WebGL is unavailable here, so footprints and scenes stay in the shelf. Imagery search still works.
+            </p>
+          </div>
+        </div>
+      ) : null}
       {cursor ? (
         <Reticle size={32} className="absolute top-1/2 left-1/2 hidden -translate-x-1/2 -translate-y-1/2 [@media(hover:hover)]:block" style={{ opacity: 0.35 }} />
       ) : null}
@@ -455,7 +507,7 @@ export default function MapStage({
           />
         </div>
       ) : null}
-      <div className="absolute top-4 right-4">
+      <div className={`absolute top-4 right-4 ${hud}`}>
         <ZoomHud
           onIn={() => mapRef.current?.zoomIn()}
           onOut={() => mapRef.current?.zoomOut()}
@@ -464,7 +516,7 @@ export default function MapStage({
           onProjection={setProjection}
         />
       </div>
-      <div className="absolute bottom-4 left-4 flex items-end gap-2">
+      <div className={`absolute bottom-4 left-4 flex items-end gap-2 ${hudCovered ? 'hidden wide:flex' : ''}`}>
         {groups.length > 0 ? (
           <div className="wide:hidden">
             <LayerSwitcher
@@ -484,7 +536,7 @@ export default function MapStage({
         ) : null}
         <CoordinateLocator cursor={cursor} zoom={zoom} onGo={fly} />
       </div>
-      <div className="absolute right-4 bottom-10">
+      <div className={`absolute right-4 bottom-10 ${hud}`}>
         <ScaleBar zoom={zoom} lat={centerLat} gsdM={georef?.gsdM ?? null} />
       </div>
     </div>
