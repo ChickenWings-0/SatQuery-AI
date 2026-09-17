@@ -58,13 +58,14 @@ describe('bundle boundaries', () => {
       ['mask vectoriser', /^import(?!\s+type)[^\n]*from '@\/export\/geojson\/masks'/m],
     ] as const) {
       const importers = files.filter((file) => pattern.test(readFileSync(file, 'utf8')))
-      // `SettingsDialog` is itself a lazy chunk (`App.tsx`), so its static
-      // import of the library never reaches the console entry.
+      // `SettingsDialog` (`App.tsx`) and `SidebarHistory` (`Sidebar.tsx`) are
+      // themselves lazy chunks, so their static import of the library never
+      // reaches the console entry.
       const allowed =
         name === 'library (outside its pages)'
           ? importers.filter(
               (f) =>
-                !/^(pages\/(saved|projects|Saved|Projects|Report)|components\/shell\/(AccountPopover|SettingsDialog))/.test(rel(f)),
+                !/^(pages\/(saved|projects|Saved|Projects|Report)|components\/shell\/(AccountPopover|SettingsDialog|SidebarHistory))/.test(rel(f)),
             )
           : importers
       expect(allowed.map(rel), `${name} is statically imported`).toEqual([])

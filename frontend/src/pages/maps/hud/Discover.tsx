@@ -38,12 +38,14 @@ export function Discover({ onClose }: { onClose: () => void }) {
   return (
     <aside
       aria-label="Find imagery"
-      className="glass glass-glow flex max-h-full w-full flex-col gap-3 p-3 wide:w-[380px]"
+      className="glass glass-glow flex max-h-full w-full flex-col gap-3 overflow-y-auto p-3 wide:w-[380px] wide:overflow-visible"
     >
       <div className="flex items-center gap-2">
-        <h2 className="t-panel">Find imagery</h2>
-        <span className="t-coord text-text-lo">Sentinel · Planetary Computer</span>
-        <button type="button" onClick={onClose} aria-label="Close imagery search" className="ml-auto grid size-7 place-items-center rounded-md text-text-lo hover:bg-sidebar-hi hover:text-text-hi">
+        <h2 className="t-panel shrink-0 whitespace-nowrap">Find imagery</h2>
+        <span className="t-coord min-w-0 truncate text-text-lo" title="Sentinel scenes from Microsoft Planetary Computer">
+          Planetary Computer
+        </span>
+        <button type="button" onClick={onClose} aria-label="Close imagery search" className="ml-auto grid size-7 shrink-0 place-items-center rounded-md text-text-lo hover:bg-sidebar-hi hover:text-text-hi">
           <CloseIcon size={14} />
         </button>
       </div>

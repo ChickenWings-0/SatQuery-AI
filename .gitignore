@@ -72,6 +72,10 @@ traces.sqlite3
 *.geotiff
 *.jp2
 *.hdf
+# ...except the two recorded Sentinel-1 RTC scenes the offline Maps mock
+# serves to `e2e/track4.spec.ts`. Without them "Analyse change" 404s in CI
+# and the console never receives its files (the 2-minute e2e timeout).
+!frontend/public/samples/stac/fetch/*.tif
 *.hdf5
 *.h5
 *.nc

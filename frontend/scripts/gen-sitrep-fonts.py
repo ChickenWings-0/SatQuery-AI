@@ -25,10 +25,18 @@ INSTANCES = (
 )
 
 # Basic Latin, Latin-1 Supplement, the punctuation and symbols the brief uses.
-UNICODES = "U+0020-007E,U+00A0-00FF,U+2013,U+2014,U+2018,U+2019,U+201C,U+201D,U+2022,U+2026,U+2032,U+2033,U+2192,U+00B2,U+00B0,U+00B7"
+UNICODES = ",".join(
+    (
+        "U+0020-007E",
+        "U+00A0-00FF",
+        "U+2013,U+2014,U+2018,U+2019,U+201C,U+201D,U+2022,U+2026",
+        "U+2032,U+2033,U+2192,U+00B2,U+00B0,U+00B7",
+    )
+)
 
 
 def main() -> None:
+    """Instance each variable font at its weight and subset it to the sitrep glyph set."""
     for source, weight, target in INSTANCES:
         font = TTFont(FONTS / source)
         static = instancer.instantiateVariableFont(font, {"wght": weight}, inplace=False)

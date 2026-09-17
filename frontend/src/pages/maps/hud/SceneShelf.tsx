@@ -99,7 +99,7 @@ export function SceneShelf() {
   const bbox = useStacStore((state) => state.query.bbox)
 
   return (
-    <section aria-label="Matching scenes" className="flex min-h-0 flex-1 flex-col">
+    <section aria-label="Matching scenes" className="flex flex-col wide:min-h-0 wide:flex-1">
       <div className="flex items-center gap-2">
         <p className="t-meta">
           {status === 'searching' ? 'Searching the catalogue…' : results.length > 0 ? `${results.length} scenes, newest first` : bbox ? 'Scenes' : 'Pick a place to search'}
@@ -132,7 +132,7 @@ export function SceneShelf() {
       ) : null}
 
       {results.length > 0 ? (
-        <ul className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1" aria-busy={status === 'searching'}>
+        <ul className="mt-2 space-y-1.5 wide:min-h-0 wide:flex-1 wide:overflow-y-auto wide:pr-1" aria-busy={status === 'searching'}>
           {results.map((item) => (
             <Card key={item.id} item={item} />
           ))}

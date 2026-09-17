@@ -34,6 +34,7 @@ import { useJobStore } from '@/state/job'
 import { notify } from '@/state/notifications'
 import { composeQuery, useSettingsStore } from '@/state/settings'
 import { useUiStore } from '@/state/ui'
+import { NEW_QUERY_EVENT } from '@/thread/newQuery'
 import { resumeRun } from '@/thread/resume'
 
 export interface RunFailure {
@@ -133,6 +134,22 @@ export function useRun() {
     },
     [stopServerJob],
   )
+
+  // "New Query" on the rail: the same abandonment, without an unmount. The
+  // rail resets the job store right after dispatching; aborting first is what
+  // stops a buffered chunk from writing the old run back over the clean slate.
+  useEffect(() => {
+    const abandon = () => {
+      inFlight.current?.abort()
+      inFlight.current = null
+      lastQuery.current = null
+      void stopServerJob()
+      setFailure(null)
+      setReattach(null)
+    }
+    window.addEventListener(NEW_QUERY_EVENT, abandon)
+    return () => window.removeEventListener(NEW_QUERY_EVENT, abandon)
+  }, [stopServerJob])
 
   const submit = useCallback(
     async (raw: string) => {

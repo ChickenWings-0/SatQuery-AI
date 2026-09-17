@@ -27,6 +27,26 @@ async function readDownload(page: Page, trigger: () => Promise<void>) {
   return { name: download.suggestedFilename(), bytes: Buffer.concat(chunks) }
 }
 
+/**
+ * The recorded rasters the flow ends in are `*.tif` — a pattern the root
+ * `.gitignore` refuses everywhere else. If they are not in the checkout the
+ * mock "Analyse change" 404s and the console waits for files that never
+ * arrive, which is a 60-second timeout twice over. Say so in one second.
+ */
+test.beforeAll(async ({ request }) => {
+  const pair = await request.get('/samples/stac/fetch/pair-ahmedabad.json')
+  expect(pair.ok(), 'pair-ahmedabad.json is missing from public/samples/stac/fetch').toBe(true)
+  const { files } = (await pair.json()) as { files: { url: string }[] }
+  for (const file of files) {
+    // `vite preview` answers an unknown path with index.html (the SPA
+    // fallback), so "ok" is not enough: a raster that comes back as HTML is
+    // a raster that is not there.
+    const head = await request.head(file.url)
+    const type = head.headers()['content-type'] ?? ''
+    expect(head.ok() && !type.includes('text/html'), `${file.url} is missing: the recorded rasters are not in the checkout`).toBe(true)
+  }
+})
+
 test('finds imagery, sends a pair to the console, and exports a SITREP and GeoJSON — offline', async ({ page, context }) => {
   // The venue Wi-Fi drops: everything off this machine is refused. The app
   // itself is served from localhost, as on the demo laptop, so its chunks

@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { Discover } from '@/pages/maps/hud/Discover'
 import { DocumentMeta } from '@/shell/DocumentMeta'
 import { useJobStore } from '@/state/job'
+import { useStacStore } from '@/state/stac'
 import { useUiStore } from '@/state/ui'
 
 const MapStage = lazy(() => import('@/pages/maps/MapStage'))
@@ -50,8 +51,11 @@ export default function Maps() {
   )
   const georef = useMemo(() => sceneGeoref(validation), [validation])
   const sensor = validation?.inputs[0]?.sensor_guess ?? validation?.inputs[0]?.modality ?? null
+  // Once a place has been searched the world view stays: closing the column
+  // must not drop a judge from footprints back to the empty state.
+  const explored = useStacStore((state) => state.flyTarget !== null || state.results.length > 0)
   const hasScene = groups.length > 0
-  const showMap = (hasScene && georef !== null) || discovering
+  const showMap = (hasScene && georef !== null) || discovering || explored
 
   return (
     <div className="absolute inset-0">
@@ -83,25 +87,41 @@ export default function Maps() {
         <Suspense fallback={<MapSkeleton />}>
           <h1 className="sr-only">Maps</h1>
           {showMap ? (
-            <MapStage groups={georef ? groups : []} georef={georef} sensor={sensor} />
+            <MapStage
+              groups={georef ? groups : []}
+              georef={georef}
+              sensor={sensor}
+              // The column is 380px at `wide:right-16`: 444px of the stage's right edge.
+              insetRight={discovering ? 444 : 0}
+              hudCovered={discovering}
+            />
           ) : (
             <PixelStage groups={groups} sensor={sensor} />
           )}
         </Suspense>
       )}
 
-      {/* The discovery column: over the map on the right, full-width on a phone. */}
+      {/*
+       * The discovery column. From `wide` it floats on the right, clear of the
+       * zoom column (right-4, 36px wide) and of the scale bar (bottom-10 plus
+       * its own height) — the bottom inset is what keeps the two from
+       * overlapping on a short window. On a phone the map area is ~300px
+       * tall under the thread sheet, so the column is a sheet over the whole
+       * stage and scrolls as one piece; the map's own HUD sits beneath it and
+       * comes back when it closes. The "Find imagery" button lives top-left on
+       * a phone because the zoom column already owns the top-right corner.
+       */}
       {showMap ? (
-        <div className="pointer-events-none absolute inset-x-3 top-16 bottom-16 flex justify-end wide:inset-x-auto wide:top-4 wide:right-16 wide:bottom-14">
+        <div className="pointer-events-none absolute inset-0 flex wide:inset-auto wide:top-4 wide:right-16 wide:bottom-[88px] wide:justify-end">
           {discovering ? (
-            <div className="pointer-events-auto flex max-h-full w-full wide:w-auto">
+            <div className="pointer-events-auto flex h-full w-full p-2 wide:h-auto wide:max-h-full wide:w-auto wide:p-0">
               <Discover onClose={() => setDiscovering(false)} />
             </div>
           ) : (
             <button
               type="button"
               onClick={() => setDiscovering(true)}
-              className="glass pointer-events-auto flex h-9 items-center gap-1.5 self-start px-3 text-[12.5px] text-text-hi hover:text-accent-warm-text"
+              className="glass pointer-events-auto mt-4 ml-4 flex h-9 items-center gap-1.5 self-start px-3 text-[12.5px] text-text-hi hover:text-accent-warm-text wide:mt-0 wide:ml-0"
             >
               <SearchIcon size={14} className="text-text-lo" />
               Find imagery

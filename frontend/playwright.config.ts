@@ -16,7 +16,19 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        // The Maps stage is WebGL (maplibre). A GPU-less runner only gets a
+        // context through SwiftShader, which recent Chromium refuses unless
+        // asked for by name; without these the stage renders its no-WebGL
+        // notice and the globe test has nothing to toggle.
+        launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] },
+      },
+    },
+  ],
   webServer: {
     // `--host 127.0.0.1`: vite preview binds `localhost`, which resolves to ::1
     // here, and Playwright polls the IPv4 URL. Same gotcha as vite.config.ts.
