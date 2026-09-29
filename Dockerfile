@@ -39,7 +39,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 COPY configs ./configs
 COPY scripts ./scripts
-COPY openapi.json README.md ./
+COPY openapi.json README.md LICENSE NOTICE ./
 RUN uv sync --frozen --no-dev
 
 RUN useradd --create-home --uid 1000 satquery \
