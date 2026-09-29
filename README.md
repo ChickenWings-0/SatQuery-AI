@@ -2,8 +2,9 @@
 
 *From Space to Answers — geospatial intelligence that shows its work.*
 
-An agentic vision-language assistant for satellite imagery, built for Smart India
-Hackathon problem statement 26167 (ISRO / Space Applications Centre). A query is
+An agentic vision-language assistant for satellite imagery. It started as an entry
+for Smart India Hackathon problem statement 26167 (ISRO / Space Applications Centre)
+and is now a personal project. A query is
 parsed, the inputs are validated for compatibility, a deterministic policy table
 selects and sequences specialist tools from a registry, and the answer that comes
 back is **evidence-grounded** — every number is bound to a measured scalar or
@@ -142,3 +143,9 @@ make ci && git add -A && git commit && git push origin main
 3. `DOCS/FINAL_QA_CHECKLIST.md` and `DOCS/DEMO_LAPTOP_RUNBOOK.md` — the pre-final QA pass
    and the air-gapped laptop setup.
 4. `DOCS/API_CONTRACT.md` — the frozen wire contract (additive changes only).
+
+## License
+
+Apache License 2.0 — see [`LICENSE`](LICENSE). Third-party fonts, Copernicus Sentinel
+imagery and OpenStreetMap fixtures keep their own terms, listed in [`NOTICE`](NOTICE).
+Model weights are not in this repository.

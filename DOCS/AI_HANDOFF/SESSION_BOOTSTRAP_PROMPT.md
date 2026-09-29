@@ -45,13 +45,14 @@ Hard rules you must not break:
   `models/`, `*.log`, `.env`, `.claude/`, or a `sitemap.xml` that only changed its date.
 - Do not delete `models/` — it is the owner's backup of the exported weights.
 
-Known state you should not rediscover: the project is feature-complete for the SIH
-final (all phases, the remediation plan, the ML recovery plan and Tracks 1–4 landed).
+Known state you should not rediscover: the project began as an SIH entry and is now a
+personal, Apache-2.0 project; it is feature-complete (all phases, the remediation
+plan, the ML recovery plan and Tracks 1–4 landed).
 The v2 adapter scores 80.7 % accuracy / 48.9 % grounding R@0.5 / 100 % citation
 precision on a 500-sample held-out benchmark (`runs/eval/sq-lora-v2-full/results.md`);
 zero-shot → adapted answer-token accuracy is 26.4 % → 81.8 %. The raw data, rendered
 views, corpus, old runs and the HF base-model cache were **deleted on 2026-09-29**, so
-evaluation and training need the data pipeline rebuilt first. Open work is mainly
-manual QA sign-off and laptop rehearsal (`08`).
+evaluation and training need the data pipeline rebuilt first. Open work is optional
+verification and model-quality work (`08`).
 
 Task: <describe the task here>.
