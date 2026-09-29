@@ -5,15 +5,16 @@
 **SatQuery AI** — an agentic vision-language assistant for remote sensing. Tagline:
 *"From Space to Answers — geospatial intelligence that shows its work."*
 
-- **Competition:** Smart India Hackathon (SIH) 2026, problem statement **26167**,
+- **Origin:** built as an entry for Smart India Hackathon (SIH) 2026, problem statement **26167**,
   sponsor **ISRO / Space Applications Centre (SAC)**: "Agentic Vision-Language
   Assistant for Remote Sensing".
 - **Team shape:** one owner builds everything — backend, ML, data engine, frontend.
   Early plans mention "a teammate builds the frontend"; ignore that.
 - **Timeline:** work began 2026-09-05 (`ca22b20`). Feature work closed 2026-09-18
   (`1782163`); the GGUF export was produced 2026-09-22; on 2026-09-29 the training
-  data was deleted to free disk and the docs were consolidated. The project is in
-  **pre-final QA / rehearsal**.
+  data was deleted to free disk and the docs were consolidated. On 2026-09-29 the
+  owner stopped treating it as an SIH entry: it is now a **personal project** under
+  Apache-2.0. The rubric below still explains why the system is shaped as it is.
 - **Deployment target:** fully local, offline-capable. Two machines:
   1. the **24 GB ROCm dev box** (bf16 base + LoRA adapter via transformers), and
   2. an **8 GB RTX 4070 Windows laptop** (merged Q4_K_M GGUF via `llama-server`,

@@ -1,23 +1,19 @@
 # 08 — Open Issues and Next Steps
 
 The build is feature-complete. Everything the 2026-09-11 audit, the remediation plan,
-the ML recovery plan and the four pre-final tracks asked for has landed (`02`). What
-is left is ordered by what could embarrass the demo first.
+the ML recovery plan and the four pre-final tracks asked for has landed (`02`). Since
+2026-09-29 this is a personal project, not an SIH entry, so nothing below is urgent;
+it is ordered by value.
 
-## Tier 1 — before the SIH final (no code, just doing it)
+## Tier 1 — verification (no code; originally the pre-SIH-final checklist)
 
-1. **Run the manual QA and fill in the sign-off sheet** in
-   `DOCS/FINAL_QA_CHECKLIST.md §6`. It is empty. Every ❗ row must pass on the laptop
-   with Wi-Fi off, or the presentation opens in `?mock=1` and says so.
-2. **Rehearse the laptop stack twice with Wi-Fi off** (`DOCS/DEMO_LAPTOP_RUNBOOK.md`):
-   copy `models/*.gguf` + `SHA256SUMS`, `frontend/dist/`, `data/checkpoints/`;
-   verify checksums; `serve_vlm.ps1` listening < 30 s; < 7.4 GB VRAM with a 3-view
-   request; HealthStrip shows the VLM `ready`. Record the timings the checklist asks for.
-3. **Re-run `make ci` and `make e2e`** on the final tree (last e2e was 2026-09-15, before
-   the 09-16/09-18 commits). Note `make e2e` with `hf` will re-download the base model.
-4. **Commit the 2026-09-29 docs/gitignore reorganisation** (leave out
-   `frontend/public/sitemap.xml`).
-5. **Slide numbers come only from `runs/eval/sq-lora-v2-full/results.md`** and the
+1. **Manual QA:** `DOCS/FINAL_QA_CHECKLIST.md` has never been run end to end; its
+   sign-off sheet (§6) is empty. Useful as a regression pass before any showcase.
+2. **Laptop stack with Wi-Fi off** (`DOCS/DEMO_LAPTOP_RUNBOOK.md`): never rehearsed.
+   Targets: `serve_vlm.ps1` listening < 30 s, < 7.4 GB VRAM with a 3-view request.
+3. **Re-run `make e2e`** (last run 2026-09-15, before the 09-16/09-18 commits). With
+   `hf` it will re-download the base model.
+4. **Quote numbers only from `runs/eval/sq-lora-v2-full/results.md`** and the
    zero-shot → adapted answer-token accuracy in `run_manifest.json`. Do not quote the
    CD model as meeting its 0.88 gate.
 
@@ -32,7 +28,7 @@ is left is ordered by what could embarrass the demo first.
    (`SATQUERY_VLM_MODEL_PATH=models/sq-lora-v2-full-merged`) should decode the probe
    queries identically to adapter-over-base (Track 2 step 2). Not recorded.
 
-## Tier 3 — model quality (after the final, if the project continues)
+## Tier 3 — model quality
 
 9. **SCENE_CLASSIFY** (multi-label BigEarthNet) is 5 % exact / 50 % label-F1 and drags
    BEN to 53 %. Options: more SCENE_CLASSIFY share in the corpus, a label-set answer
@@ -62,9 +58,9 @@ is left is ordered by what could embarrass the demo first.
 
 ## Open questions
 
-- Which machine presents: the 24 GB box (bf16 + adapter) or the 8 GB laptop (Q4_K_M)?
-  The runbook assumes the laptop is the fallback "if the training box is not in the room".
-- Is the hosted static build (`frontend/.vercel/` link) part of the submission?
+- Should the hosted static build (`frontend/.vercel/` link, mock mode) become a public demo?
+- Publish the adapter (Hugging Face) so the repo is runnable by others? The weights
+  are not in git; Qwen3-VL is Apache-2.0, but check the training datasets' terms first.
 
 ## What *not* to do
 

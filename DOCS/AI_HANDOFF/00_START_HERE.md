@@ -39,7 +39,7 @@ ignored). **Remote:** `git@github.com:ChickenWings-0/SatQuery-AI.git`.
 | `05_ENVIRONMENT_AND_SETUP.md` | hardware, the hand-installed ROCm stack, env vars, commands | before running anything |
 | `06_DATA_AND_TRAINING.md` | corpus, the v1 → v2 story, the production run, CD, export | before ML work |
 | `07_CONVENTIONS_AND_GOTCHAS.md` | code style, one-source-of-truth rules, hard-won gotchas | before code changes |
-| `08_OPEN_ISSUES_AND_NEXT_STEPS.md` | what is left before/after the SIH final | before proposing work |
+| `08_OPEN_ISSUES_AND_NEXT_STEPS.md` | what is left, in priority order | before proposing work |
 | `09_DOC_INDEX.md` | index of all other docs | when you need a spec |
 | `SESSION_BOOTSTRAP_PROMPT.md` | paste-ready prompt for a new session | when starting a session |
 
@@ -62,14 +62,14 @@ fine-tuned Qwen3-VL-8B writes prose from the views and the sheet; a
 unit-aware) and flags what it cannot. The whole run is an `AuditTrace`, persisted
 and served as a first-class API object. A React console makes the audit visible.
 
-**State in one line:** feature-complete for the SIH final. Backend (623 pytest) and
+**State in one line:** feature-complete; no longer an SIH entry — a personal project since 2026-09-29. Backend (623 pytest) and
 frontend (356 vitest + 2 Playwright specs) green; CI, Docker, Makefile done; the
 production adapter **`runs/sq-lora-v2-full/adapter`** (53,098-sample multi-source
 corpus, loss-masked, answer-token accuracy 26.4 % zero-shot → 81.8 %) scores **80.7 %
 accuracy / 100 % citation precision** on a 500-sample held-out benchmark; merged +
-Q4_K_M GGUF exported to `models/` for the demo laptop. What remains is **manual QA
-sign-off and rehearsal** (`DOCS/FINAL_QA_CHECKLIST.md`), plus optional extra
-benchmark columns. See `02` and `08`.
+Q4_K_M GGUF exported to `models/` for the demo laptop. What remains is optional:
+a recorded manual QA pass (`DOCS/FINAL_QA_CHECKLIST.md`), extra benchmark columns,
+and model-quality work. See `02` and `08`.
 
 ## Non-negotiables (memorise these)
 

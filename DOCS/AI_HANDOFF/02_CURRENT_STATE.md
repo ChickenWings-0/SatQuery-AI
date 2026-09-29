@@ -157,7 +157,7 @@ SATQUERY_SEG_CHECKPOINT=data/checkpoints/seg/segformer-b5-loveda
 SATQUERY_CD_CHECKPOINT=data/checkpoints/cd/levircd_resnet18.ckpt.pt
 ```
 
-## Known gaps (full detail in `08`)
+## Known gaps (full detail in `08`; none urgent now that this is a personal project)
 
 1. Manual QA sign-off and the Wi-Fi-off laptop rehearsal are not recorded.
 2. No benchmark-level baseline column and no Q4_K_M column.

@@ -1,0 +1,23 @@
+SatQuery AI
+Copyright 2026 ChickenWings-0
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes third-party material that remains under its own terms:
+
+- Geist and Geist Mono typefaces (frontend/public/fonts/) — SIL Open Font
+  License 1.1; the licence texts travel with the files
+  (LICENSE-Geist.txt, LICENSE-GeistMono.txt).
+- Sentinel-1 and Sentinel-2 imagery, thumbnails and renders under
+  frontend/public/samples/ and frontend/public/mock-artifacts/ —
+  contains modified Copernicus Sentinel data (2019–2026), served via the
+  Microsoft Planetary Computer.
+- Place-search fixtures under frontend/public/samples/stac/places/ —
+  © OpenStreetMap contributors, Open Database License 1.0.
+- Coastline data under frontend/public/samples/globe/ — Natural Earth
+  (public domain).
+
+The fine-tuned adapter and exported weights are not part of this repository.
+They derive from Qwen/Qwen3-VL-8B-Instruct (Apache License 2.0), and the
+training datasets (BigEarthNet-v2, VRSBench, RSVQA-HR, CDVQA, LEVIR-CD) carry
+their own licences.
