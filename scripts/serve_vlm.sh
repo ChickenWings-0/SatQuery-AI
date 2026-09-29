@@ -36,7 +36,7 @@ IMAGE_MIN_TOKENS="${SATQUERY_VLM_IMAGE_MIN_TOKENS:-1024}"
 # KV-cache precision and flash attention. Defaults are the 24 GB box's (f16
 # cache, auto flash attention); the 8 GB laptop sets q8_0/q8_0/on to fit the
 # Q4_K_M model, its f16 projector and an 8192 context — see serve_vlm.ps1 and
-# scripts/demo_laptop/README.md, which are the same flags for Windows.
+# DOCS/DEMO_LAPTOP_RUNBOOK.md, which are the same flags for Windows.
 CACHE_TYPE_K="${SATQUERY_VLM_CACHE_TYPE_K:-f16}"
 CACHE_TYPE_V="${SATQUERY_VLM_CACHE_TYPE_V:-f16}"
 FLASH_ATTN="${SATQUERY_VLM_FLASH_ATTN:-auto}"

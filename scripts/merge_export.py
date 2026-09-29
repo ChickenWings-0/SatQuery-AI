@@ -201,7 +201,7 @@ def write_checksums(paths: Sequence[Path], out: Path) -> Path:
 
     Paths are recorded relative to *out*'s parent, which is where the file
     lives, so ``sha256sum -c SHA256SUMS`` (or ``Get-FileHash`` on Windows, see
-    ``scripts/demo_laptop/README.md``) works from that directory.
+    ``DOCS/DEMO_LAPTOP_RUNBOOK.md``) works from that directory.
     """
     lines = []
     for path in paths:

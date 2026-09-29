@@ -1,6 +1,9 @@
 # SatQuery AI — Frontend Blueprint (SIH 2026 presentation build)
 
-**Status:** design brief, produced by `/impeccable shape`. No code in this document is final; every
+> **Status (2026-09-29): implemented** in `662740a` and later — kept as the design-system
+> record. The code (`frontend/src/styles/theme.css`, `frontend/src/`) is the current truth.
+
+**Original status:** design brief, produced by `/impeccable shape`. No code in this document is final; every
 snippet is an interface contract for the build that follows. Companion to `PRODUCT.md` (product
 truth) and `frontend/src/styles/theme.css` (incumbent visual authority).
 

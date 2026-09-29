@@ -2,7 +2,7 @@
  * The curated investigations. Each row names a real `TaskType`, the tools the
  * policy table will select for it, and where its rasters live under
  * `public/samples/<slug>/`. The rasters are supplied by the team (see
- * `public/samples/README.md`); a row whose manifest is missing is shown with
+ * `DOCS/SAMPLE_SCENES.md`); a row whose manifest is missing is shown with
  * its plate but cannot be loaded, and says so.
  */
 import type { TaskType } from '@/api/types'

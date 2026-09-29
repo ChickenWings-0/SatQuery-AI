@@ -1,6 +1,11 @@
 # ML Pipeline Recovery Plan — Training Run v2
 
-**Status:** blueprint, awaiting review · **Date:** 2026-09-12 · **Scope:** the Qwen3-VL-8B QLoRA path (`src/satquery/training/vlm/qlora.py`, `scripts/train_vlm.py`, `src/satquery/models/hf_backend.py`, `scripts/build_corpus.py`) · **Stack this plan was verified against:** trl 1.12.0 · transformers 5.16.1 · peft 0.20.0 · bitsandbytes 0.50.2 · torch 2.9.1+rocm6.4 · datasets 5.0.1 (the versions in `.venv` today; every line number below refers to them).
+> **Status (2026-09-29): executed — design record.** Steps 0–5 landed in `0bada6e`; the
+> run it describes produced `runs/sq-lora-v2-full` (answer-token accuracy 26.4 % →
+> 81.8 %, see `DOCS/AI_HANDOFF/06_DATA_AND_TRAINING.md`). `project_audit.md`, cited
+> below, was deleted on 2026-09-29 (git history). Read this before any retrain.
+
+**Original status:** blueprint, awaiting review · **Date:** 2026-09-12 · **Scope:** the Qwen3-VL-8B QLoRA path (`src/satquery/training/vlm/qlora.py`, `scripts/train_vlm.py`, `src/satquery/models/hf_backend.py`, `scripts/build_corpus.py`) · **Stack this plan was verified against:** trl 1.12.0 · transformers 5.16.1 · peft 0.20.0 · bitsandbytes 0.50.2 · torch 2.9.1+rocm6.4 · datasets 5.0.1 (the versions in `.venv` today; every line number below refers to them).
 
 The previous run (`runs/full-epoch-v1`, 19.2 h, 1,159 steps) produced an adapter that cannot be shown to have learned anything: eval loss 3.935 → 3.930, eval token accuracy 0.4867 → 0.4879, flat from step ~90. This document is the plan for a run whose result can be defended. Nothing in it is a script yet; it is the blueprint the scripts will be written from, and every mechanism it relies on was checked against the installed library source rather than the documentation.
 

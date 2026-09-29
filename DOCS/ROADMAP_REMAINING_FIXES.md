@@ -1,7 +1,14 @@
 # SatQuery AI — Remaining Work Before the SIH 2026 Final
 
-*Planning document. Nothing in here is implemented yet; each track names the
-architecture, the files to touch, and the verification that makes it "done".*
+> **Status (2026-09-29): executed — design record.** All four tracks landed in
+> `91d8292` / `b2b87e9` (2026-09-16). Track 1 results: `runs/eval/sq-lora-v2-full/results.md`;
+> Track 2 outputs: `models/` (2026-09-22). Still open from the verification lists
+> below: the `make eval-baseline` column (Track 1 step 3), the merged-vs-adapter decode
+> check and the Q4_K_M eval column (Track 2 steps 2–3), and the Wi-Fi-off laptop
+> rehearsal. Current state lives in `DOCS/AI_HANDOFF/02_CURRENT_STATE.md`.
+
+*Originally a planning document: each track names the architecture, the files to
+touch, and the verification that makes it "done".*
 
 **Status as of 2026-09-15.** The full QLoRA run is complete and lives on `main`:
 
@@ -227,7 +234,7 @@ and let the rest run on CPU) — slower, but demo-safe. Document both in
 - `scripts/serve_vlm.ps1` — PowerShell twin of `serve_vlm.sh`, same env-var
   names, uses the official `llama-<build>-bin-win-cuda-12.4-x64.zip` +
   `cudart-llama-bin-win-cuda-12.4-x64.zip` (no CUDA toolkit install needed).
-- `scripts/demo_laptop/README.md` — the 10-line runbook: unzip llama.cpp, put
+- `DOCS/DEMO_LAPTOP_RUNBOOK.md` — the 10-line runbook: unzip llama.cpp, put
   the two GGUFs in `models/`, run `serve_vlm.ps1`, then `uv run --no-sync
   uvicorn satquery.api.app:app` with a `.env` that says `SATQUERY_VLM_BACKEND=llamacpp`.
   The Python side needs no `--extra vlm`; `uv sync --group dev` on Windows is
@@ -243,7 +250,7 @@ and let the rest run on CPU) — slower, but demo-safe. Document both in
 - `src/satquery/core/config.py`, `src/satquery/tools/vlm_runtime.py` —
   `SATQUERY_VLM_MAX_VIEWS`.
 - `scripts/serve_vlm.sh` — add `--cache-type-k/v`, `--flash-attn` flags via env.
-- `scripts/serve_vlm.ps1`, `scripts/demo_laptop/README.md` — new.
+- `scripts/serve_vlm.ps1`, `DOCS/DEMO_LAPTOP_RUNBOOK.md` — new.
 - `.gitignore` already ignores `*.gguf`, `/models/`; nothing to change.
 
 ### Verification

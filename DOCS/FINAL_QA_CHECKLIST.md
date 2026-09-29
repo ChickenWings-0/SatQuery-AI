@@ -305,7 +305,7 @@ Set up: Wi-Fi **off**, API **stopped**, frontend served from `dist` (`scripts/de
 
 ## 4. Laptop demo — GGUF `serve_vlm.ps1` on the air-gapped RTX 4070
 
-Reference: `scripts/serve_vlm.ps1`, `scripts/demo_laptop/README.md`, `.env.laptop`.
+Reference: `scripts/serve_vlm.ps1`, `DOCS/DEMO_LAPTOP_RUNBOOK.md`, `.env.laptop`.
 Machine: Windows 11, RTX 4070 Laptop (8 GB VRAM, ~7.2 GB usable). **Wi-Fi off for everything below.**
 
 ### 4.1 The stick

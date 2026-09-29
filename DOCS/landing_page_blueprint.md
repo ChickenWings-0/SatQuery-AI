@@ -1,6 +1,9 @@
 # SatQuery AI — Landing Page Blueprint (`/`)
 
-**Status:** design brief, produced by `/impeccable shape`. Extracted from `frontend_blueprint.md` §1
+> **Status (2026-09-29): implemented** (`frontend/src/pages/Landing.tsx`, `pages/landing/`) —
+> kept as the design record.
+
+**Original status:** design brief, produced by `/impeccable shape`. Extracted from `frontend_blueprint.md` §1
 and extended with the Odida display face and the interactive 3D globe. No code here is final; every
 snippet is an interface contract. The token system, router, primitives, motion durations and the
 anti-vibecoding checklist it depends on live in [`frontend_blueprint.md`](frontend_blueprint.md)

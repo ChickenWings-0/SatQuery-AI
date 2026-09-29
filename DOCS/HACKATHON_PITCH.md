@@ -45,12 +45,16 @@ template writes the answer from the measured evidence and says so. A judge can
 click any number in the demo and see the tool, the step and the raw scalar it
 came from.
 
-The corpus enforces it too. Of the 65,000 training samples, 3,000 are
+The corpus enforces it too. Of the 53,098 training samples, 2,700 are
 synthetic **evidence-QA** samples whose sole purpose is to teach the model to
 quote the fact sheet rather than improvise. And the corpus is deduplicated by
-SHA-256 and perceptual hash across all six sources with a hard assertion that
+SHA-256 and perceptual hash across every source with a hard assertion that
 no training image appears in any benchmark's test split — a leaked benchmark
 is worse than no benchmark, so it is a build error.
+
+It holds up when measured: on 500 held-out samples the fine-tuned model's
+citations bind to the right measurement **100 %** of the time, and **0 %** of the
+numbers it writes are unresolved (`runs/eval/sq-lora-v2-full/results.md`).
 
 ### 2. Spatial grounding — it doesn't just talk; it points
 
@@ -82,18 +86,20 @@ console. No cloud inference, no imagery leaves the machine.
 That took engineering, and some of it is worth telling:
 
 - **Fine-tuning fit in 24 GB** via QLoRA — NF4 base weights, r=16 LoRA, batch 1
-  with 16-step accumulation, one epoch over 65k samples in 19 hours.
+  with 16-step accumulation, one epoch over 53k samples from five sources in
+  41 hours at a 13.4 GiB peak. Answer-token accuracy on held-out data went from
+  26 % (base model) to 82 %.
 - **Serving in bf16, not NF4, on purpose.** We found that 4-bit *generation*
   is broken on this ROCm/bitsandbytes combination — the base model answers
   nonsense in NF4 and correctly in bf16 — while 4-bit *training* is fine,
-  which is why a 19-hour run finished without revealing it. The serving path
+  which is why a training run can finish without revealing it. The serving path
   therefore loads bf16 base weights (~16.4 GB) with the adapter over them,
   ~18.7 GiB peak with six evidence views, and puts a VRAM guard in front of
   the load so a warm llama.cpp server on the same card produces a clear
   refusal rather than a half-loaded model.
-- **A lightweight path for the worst day.** A Q4 GGUF under llama.cpp starts in
-  seconds at ~6 GB and survives a kernel update that breaks ROCm.
-  Same API, same UI, lower fidelity, honestly reported.
+- **A lightweight path for the worst day.** The fine-tuned model merged and
+  quantised to a 5 GB Q4_K_M GGUF runs under llama.cpp on an 8 GB laptop GPU with
+  no network and no Python ML stack. Same API, same UI, honestly reported.
 - **The GPU is never touched until it has to be.** Pre-flight — sensor, CRS,
   resolution, footprint, ten compatibility checks — runs on CPU before a
   question is typed, so an incompatible pair is refused for free.
@@ -126,9 +132,12 @@ collected.
 
 ## Why this is more than a wrapper around a model
 
-- A **frozen API contract** (OpenAPI 1.0) with 450+ backend tests and 194
-  frontend tests, including a WCAG contrast contract the design tokens must
-  pass to build.
+- A **frozen API contract** (OpenAPI 1.0) with 620+ backend tests, 350+
+  frontend tests and offline Playwright runs in CI, including a WCAG contrast
+  contract the design tokens must pass to build.
+- **Measured, not claimed:** a 500-sample held-out benchmark across five sources —
+  80.7 % accuracy, 48.9 % grounding recall at IoU 0.5, 100 % citation precision —
+  with the worst cases rendered for an honest-failure slide.
 - A **data engine** that reads three public benchmarks correctly where the
   standard loader silently does not (RSVQA-HR's `active` flag alone would have
   leaked 330,324 test rows into training).
@@ -140,12 +149,13 @@ collected.
 
 ## What is next
 
-- Phase 8 benchmark evaluation on the quarantined test splits (VRSBench VQA
-  accuracy, grounding mAP@0.5, CDVQA change accuracy) and an evidence-audit
-  metric: the fraction of answer numbers that resolve to a measurement.
 - Cartosat-2S / RISAT adaptation through the augmentation track already in
-  the data plan.
-- Saved analyses and shareable trace links (the UI is scaffolded for both).
+  the data plan — the sensors of the hidden evaluation set.
+- Multi-label scene classification, the benchmark's weakest task (50 % label
+  F1), and more referring-expression grounding data (DIOR-RSVG, once access is
+  granted).
+- A 10 m change-detection model (OSCD) beside the 0.5 m LEVIR-CD one, to
+  measure how change maps transfer across resolutions.
 
 ---
 

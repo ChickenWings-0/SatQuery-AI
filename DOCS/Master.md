@@ -1,6 +1,10 @@
 # SatQuery AI — Master Architecture & Implementation Plan
 **SIH Problem 26167 · ISRO / Space Applications Centre · Agentic Vision-Language Assistant for Remote Sensing**
 
+> **Status (2026-09-29): foundational design record.** Every phase in §8 is closed. §2's
+> environment facts (Windows 11, Python 3.14, "repo is empty") and "a teammate builds the
+> frontend" are historical. For the current state read `DOCS/AI_HANDOFF/00_START_HERE.md`.
+
 ---
 
 ## 1. Context

@@ -83,7 +83,7 @@ products cannot truthfully claim an auditable, tool-bound answer.
 ## Evidence on Hand
 
 - Recorded fixtures: `frontend/src/mocks/captured/*.json`, `frontend/public/mock-artifacts/`.
-- Trained adapter `runs/full-epoch-v1`, limitations documented in `DOCS/project_audit.md` §2.
+- Trained adapter `runs/sq-lora-v2-full`; benchmark table in `runs/eval/sq-lora-v2-full/results.md`.
 - Corpus sources: BigEarthNet-v2 (Sentinel-2 / Sentinel-1), VRSBench, CDVQA, RSVQA-HR.
 - **Absent, must not be fabricated:** customer logos, testimonials, benchmark leaderboard
   claims, Cartosat scenes, sample rasters for the Use Cases gallery (to be supplied).

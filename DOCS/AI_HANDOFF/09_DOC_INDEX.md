@@ -1,49 +1,79 @@
 # 09 — Index of All Documentation in the Repo
 
-Status legend: **FROZEN** = a contract; code must match it. **PLAN** = intended
-design; partly implemented; read with `02` in hand. **CURRENT** = written 2026-09-11
-against the current code. **STALE** = superseded; useful for history only.
+Status legend: **FROZEN** = a contract; code must match it. **CURRENT** = describes the
+tree as of 2026-09-18 or later. **RUNBOOK** = steps to follow. **DESIGN RECORD** = a
+plan that has been executed; read for the *why*, not for status. Everything lives in
+`DOCS/` except `README.md` and `PRODUCT.md`, which must stay at the root.
 
-## `DOCS/`
+## Root
 
-| File | Size | Status | What it contains |
-|---|---|---|---|
-| `Master.md` | 41 KB | PLAN (foundational) | the master architecture & 10-phase roadmap; SIH problem framing; hidden-eval gap; hardware constraints (**§2 environment facts are pre-migration and stale**); schema sketches; tool registry target; model/library selection; risk register; end-to-end verification (`make demo` four scenarios). Each phase ends with the "next prompt" that was used to drive the work |
-| `API_CONTRACT.md` | 28 KB | **FROZEN** | the wire contract, schema 1.0: conventions, all enums (§2), core objects (§3: InputManifest, CheckResult, CompatibilityReport, ArtifactRef, InputContract, ToolSpec, PlanStep, Execution, Answer, Confidence, AuditTrace), endpoints (§4), **SSE protocol (§5)**, **error taxonomy (§6)**, four worked examples (§7), frontend integration notes (§8), deltas from Master (§9) |
-| `AGENT_POLICY_DAG.md` | 26 KB | **FROZEN** | routing key; 4-stage classification cascade with the exact regex table and priorities; slot schemas; the full policy table; capability matching; executor semantics (scheduling, cache key, status propagation, FactSheet merge); CitationValidator and `weighted_tool_agreement_v1` rules; determinism guarantees; Phase 3 golden tests |
-| `DATA_ADAPTATION_PLAN.md` | 29 KB | **FROZEN** (spec) / PLAN (execution) | the frozen view catalogue, band alias map, normalisation, selection policy and label format (§2); unified sample schema (§3); per-source builders incl. the known loader failures (§4); 65k composition (§5); training Profiles A/B and OOM playbook (§6); run schedule and pre-rendering (§7); evaluation & ablation protocol (§8); disk/time budgets (§9) |
-| `OPEN_SOURCE_ASSETS.md` | 2 KB | reference | the external models/datasets/libs with their Hub/GitHub ids: Qwen3-VL-8B, GeoChat (reference), BigEarthNet.txt, VRSBench, CDVQA, LEVIR-CD, OSCD, DOFA, Open-CD/UCD, TorchGeo, rasterio |
-| `project_audit.md` | 28 KB | **CURRENT** (2026-09-11, HEAD 77bea25) | independent scorecard (Data 7, ML 4, Backend 8, Frontend 8, Testing 8 → overall 7/10) with measured evidence, per-area wins and "brutal truths", plan-vs-reality table, prioritised remediation. **The single most useful document for triage.** |
-| `FRONTEND_ROADMAP.md` | 31 KB | PLAN (executed) | the frontend build plan: Phase B backend prerequisites (jobs + SSE + traces) and F0–F6 frontend phases; stack; verification |
-| `FRONTEND_AUDIT.md` | 14 KB | CURRENT-ish (2026-09-07) | frontend technical audit with P0–P3 findings and health score; predates the mission-control overhaul |
-| `FRONTEND PLAN/frontendplan.md` | — | STALE | first mission-control overhaul plan |
-| `FRONTEND PLAN/updatedfrontendplan.md` | — | PLAN (executed) | v2 of the overhaul: token swap, layout shell, centre workspace, right sidebar, assets, polish; execution order and verification |
+| File | Status | What it contains |
+|---|---|---|
+| `README.md` | CURRENT | public README: current model, capabilities, quick start, gates, layout, one-branch policy |
+| `PRODUCT.md` | CURRENT | product brief (users, modes, what "done" means) read by the impeccable design plugin |
 
-## `repo documentation/` (all CURRENT, 2026-09-11)
+## Contracts
 
-| File | What it contains |
+| File | Status | What it contains |
+|---|---|---|
+| `API_CONTRACT.md` | **FROZEN** 1.0 (additive only) | wire contract: enums, core objects, endpoints (incl. imagery fetch, job cancel), SSE protocol, error taxonomy, examples |
+| `AGENT_POLICY_DAG.md` | **FROZEN** | routing key, classification cascade, slot schemas, policy table, capability matching, executor semantics, validator and confidence rules |
+| `DATA_ADAPTATION_PLAN.md` | **FROZEN** spec / executed | view catalogue, band aliases, label format, unified sample schema, source builders, composition, training profiles, eval protocol |
+
+## Using and running it
+
+| File | Status | What it contains |
+|---|---|---|
+| `USER_GUIDE.md` | CURRENT (2026-09-18) | for judges, testers, developers: local-first philosophy, sourcing imagery, every UI feature, shortcuts, troubleshooting |
+| `SETUP_GUIDE.md` | CURRENT | levels A (frontend mock) / B (API, no VLM) / C (full stack), llama.cpp path, rebuilding data and training |
+| `DEMO_LAPTOP_RUNBOOK.md` | RUNBOOK | air-gapped Windows RTX 4070 laptop: Q4_K_M GGUF via `llama-server`, API, built frontend, off one USB stick |
+| `FINAL_QA_CHECKLIST.md` | RUNBOOK (sign-off empty) | manual QA before the final, per network tier, with a sign-off sheet |
+| `HACKATHON_PITCH.md` | CURRENT | the SIH narrative, value props, demo script, measured numbers |
+
+## Architecture and design
+
+| File | Status | What it contains |
+|---|---|---|
+| `ARCHITECTURE.md` | CURRENT | long-form technical deep-dive: request flow, data engine, inference layer, frontend |
+| `Master.md` | DESIGN RECORD (foundational) | original master plan and 10-phase roadmap; SIH framing; hidden-eval gap; risk register. **§2 environment facts are pre-migration** |
+| `ML_PIPELINE_RECOVERY_PLAN.md` | DESIGN RECORD | why v1 learned nothing and exactly what v2 changed (loss masking, shared layout, fingerprint, probes); read before any retrain |
+| `ROADMAP_REMAINING_FIXES.md` | DESIGN RECORD | the four pre-final tracks (eval suite, merge/GGUF, e2e parity, UI) with their verification steps — some steps still open (`08`) |
+| `UI_TRACK_4_ARCHITECTURE.md` | DESIGN RECORD | SITREP / GeoJSON / STAC component tree, state, bundle boundaries, offline behaviour |
+| `frontend_blueprint.md` | DESIGN RECORD | app shell, sections, tokens, light theme, production-polish checklist |
+| `landing_page_blueprint.md` | DESIGN RECORD | the `/` page, display face, 3D globe |
+| `OPEN_SOURCE_ASSETS.md` | reference | external models/datasets/libraries with their Hub/GitHub ids |
+
+## Asset notes (moved from the folders they describe)
+
+| File | Describes |
 |---|---|
-| `README.md` | the public-facing README: problem, how it answers, features, tech stack table, repo map, status. **Overstates the corpus (65k) and training run** — see `02` |
-| `ARCHITECTURE.md` | the technical deep-dive: request flow; Data Engine (sources, dedup, profile); Inference layer (backends, bf16 memory safety, citation interceptor, confidence, API); Frontend (layout, state, citations, bbox overlay, design system tests). Accurate to code; file paths given |
-| `SETUP_GUIDE.md` | levels A/B/C setup, commands, env, training reproduction, troubleshooting table |
-| `HACKATHON_PITCH.md` | the SIH narrative: three value props (deterministic facts vs estimates, spatial grounding, single-GPU offline), demo script in order, "why more than a wrapper", what's next |
+| `FONTS.md` | `frontend/public/fonts/` — provenance, licences, `npm run fonts:sync` |
+| `SAMPLE_SCENES.md` | `frontend/public/samples/` — Use Cases gallery layout |
+| `STAC_FIXTURES.md` | `frontend/public/samples/stac/` — recorded `?mock=1` discovery fixtures and the re-record command |
 
-## `DOCS/AI_HANDOFF/` — this bundle (CURRENT)
+## `DOCS/AI_HANDOFF/` — this bundle
 
-`00`–`09` plus `SESSION_BOOTSTRAP_PROMPT.md`. Regenerate or amend whenever the phase
-status, the measured numbers, or the open-issue list changes.
+`00`–`09` plus `SESSION_BOOTSTRAP_PROMPT.md`, rewritten 2026-09-29. Amend whenever the
+state, the measured numbers or the open-issue list changes.
+
+## Deleted on 2026-09-29 (in git history if ever needed)
+
+`project_audit.md` (2026-09-11 audit of `77bea25`; every finding since fixed),
+`remediation_plan.md` (executed 2026-09-12), `FRONTEND_ROADMAP.md`,
+`FRONTEND_AUDIT.md`, `FRONTEND PLAN/` (superseded frontend plans),
+`landing_page_revamp_plan.md` (implemented 2026-09-13), `PROJECT_OVERVIEW.md` (the
+old README, replaced by the root `README.md`), `FRONTEND_VITE_TEMPLATE.md` (Vite
+boilerplate).
 
 ## Other in-repo documentation
 
 | Location | Content |
 |---|---|
-| module docstrings across `src/satquery/` | each cites its spec section; several (executor, hf_backend, corpus_builder, qlora, catalog, registry.yaml, policy_table.yaml, train YAMLs) carry long rationale comments that are the real design record |
-| `configs/*.yaml` header comments | why each table exists and the invariants it protects |
-| `scripts/*.py` module docstrings | usage and the failure each script guards against |
-| `runs/*/run_manifest.json` | exact profile, plan, VRAM estimate, peak, resolved target modules per run |
-| `runs/*/README.md` | trl auto-generated model cards (framework versions are the useful part) |
-| `data/checkpoints/cd/levircd_resnet18.ckpt.json` | CD metrics, threshold, provenance, the normalisation bug note, self-test |
-| `logs/overnight-*.log` | the overnight playbook runs; the last one ends with the open items that shaped the corpus decision |
-| `frontend/README.md` | Vite template boilerplate — not project docs |
-| `frontend/public/fonts/README.md` | font provenance and `fonts:sync` |
-| `openapi.json` | the machine-readable contract (68 KB) |
+| module docstrings across `src/satquery/` | each cites its spec section; executor, hf_backend, corpus_builder, qlora, catalog carry the real design rationale |
+| `configs/*.yaml` header comments | why each table exists and what it protects |
+| `scripts/*.py` docstrings | usage and the failure each script guards against |
+| `runs/sq-lora-v2-full/run_manifest.json`, `mask_audit.json`, `train.log` | exact profile, plan, VRAM, zero-shot and final metrics |
+| `runs/eval/sq-lora-v2-full/results.md` | the benchmark table for the slides |
+| `models/sq-lora-v2-full-merged/merge_manifest.json` | adapter SHA, GGUF files, laptop serving settings |
+| `data/checkpoints/cd/levircd_resnet18.ckpt.json` | CD metrics, threshold, provenance, normalisation note, self-test |
+| `openapi.json` | the machine-readable contract |

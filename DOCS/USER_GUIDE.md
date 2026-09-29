@@ -74,7 +74,7 @@ strict subset of the one above it and needs no code change to switch.
 | Tier | Network | VLM | What you get | How to start |
 |---|---|---|---|---|
 | **A — Cloud + Local VLM** | Internet available | Local (bf16 adapter or GGUF) | Everything: Maps-page STAC discovery over Planetary Computer, place search, optional basemap tiles, plus the full local pipeline. | `make demo` with `.env` pointing at the adapter/GGUF; enable **Settings → Imagery search on the Maps page**. |
-| **B — Air-gapped Local VLM** | None | Local (bf16 adapter or GGUF) | The full pipeline on your own files (dropzone or fixtures). Maps page discovery is gated off and says so; scene stage still renders your imagery in geo or pixel space. | `make demo` (or the demo-laptop runbook in `scripts/demo_laptop/README.md`). Leave *Imagery search* off. |
+| **B — Air-gapped Local VLM** | None | Local (bf16 adapter or GGUF) | The full pipeline on your own files (dropzone or fixtures). Maps page discovery is gated off and says so; scene stage still renders your imagery in geo or pixel space. | `make demo` (or the demo-laptop runbook in `DOCS/DEMO_LAPTOP_RUNBOOK.md`). Leave *Imagery search* off. |
 | **C — Zero-network rehearsal** | None | None (recorded fixtures) | The whole UI — plan, live DAG, evidence tray, citations, SITREP, GeoJSON, Maps shelf — driven by MSW from `frontend/src/mocks/captured/`. Backend can be down. | Open `http://localhost:5173/?mock=1`. |
 
 A fourth, partial mode exists for CPU-only machines: `make demo-cpu`
@@ -659,4 +659,4 @@ mode with the browser offline; `DOCS/FINAL_QA_CHECKLIST.md` §1 lists what must 
 **Where to read next:** `DOCS/AI_HANDOFF/00_START_HERE.md` (orientation),
 `DOCS/API_CONTRACT.md` (wire contract), `DOCS/AGENT_POLICY_DAG.md` (why each tool is
 planned), `DOCS/FINAL_QA_CHECKLIST.md` (the demo-day checklist),
-`scripts/demo_laptop/README.md` (the air-gapped runbook).
+`DOCS/DEMO_LAPTOP_RUNBOOK.md` (the air-gapped runbook).
