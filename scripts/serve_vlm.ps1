@@ -21,7 +21,7 @@
 
     Needs the official CUDA build of llama.cpp — llama-<build>-bin-win-cuda-12.4-x64.zip
     plus cudart-llama-bin-win-cuda-12.4-x64.zip from the same release, unzipped
-    into one folder — no CUDA toolkit install. See scripts/demo_laptop/README.md.
+    into one folder — no CUDA toolkit install. See DOCS/DEMO_LAPTOP_RUNBOOK.md.
 
     Point SatQuery at it with (in .env):
         SATQUERY_VLM_BACKEND=llamacpp

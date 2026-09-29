@@ -15,4 +15,3 @@ frontend/test-results/
 .mypy_cache/
 __pycache__/
 DOCS/
-repo documentation/

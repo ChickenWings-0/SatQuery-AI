@@ -18,13 +18,9 @@ Runs fully local on one 24 GB consumer GPU and survives the network being pulled
 |---|---|
 | Base | `Qwen/Qwen3-VL-8B-Instruct` · NF4 backbone during training · LoRA r=16, α=32 on all LLM projections + last 8 vision blocks |
 | Corpus | 53,098 train / 5,902 val from BigEarthNet-v2, VRSBench, RSVQA-HR, CDVQA and Evidence QA (`data/processed/corpus/v2-full/`) |
-| Epoch 1.0 | train loss 0.3025 · eval loss 0.1867 · answer-token accuracy 81.76 % |
-| Probes | 100 % resolution on the grounding and cross-modal fact-checking probes (`scripts/test_inference.py`) |
-| Served as | bf16 base + adapter through the transformers backend, or merged → Q4_K_M GGUF through `llama-server` (see `ROADMAP_REMAINING_FIXES.md`, Track 2) |
-
-Benchmark tables for the presentation are produced by the Track 1 suite and
-committed under `runs/eval/<name>/results.md`; until that lands, the numbers
-above come from the training run's own eval split.
+| Epoch 1.0 | train loss 0.3025 · eval loss 0.1867 · answer-token accuracy 81.76 % (zero-shot base: 26.4 %) |
+| Benchmark | 500 held-out samples: 80.7 % accuracy · 48.9 % grounding R@0.5 · 100 % citation precision · 0 % uncited numbers ([`runs/eval/sq-lora-v2-full/results.md`](runs/eval/sq-lora-v2-full/results.md)) |
+| Served as | bf16 base + adapter through the transformers backend, or merged → Q4_K_M GGUF (`models/`, 5.0 GB + 1.2 GB mmproj) through `llama-server` |
 
 ## What it does
 
@@ -65,7 +61,7 @@ The offline path — a Q4_K_M GGUF behind `scripts/serve_vlm.sh` (Linux) or
 `scripts/serve_vlm.ps1` (Windows) with `SATQUERY_VLM_BACKEND=llamacpp` — is the
 same interface and needs no Python ML stack at all; do not run both at once on a
 24 GB card. `scripts/merge_export.py` produces the GGUF pair from the adapter,
-and `scripts/demo_laptop/README.md` is the runbook for the air-gapped 8 GB
+and `DOCS/DEMO_LAPTOP_RUNBOOK.md` is the runbook for the air-gapped 8 GB
 demo laptop (`SATQUERY_VLM_MAX_VIEWS=3`, 8192 context, q8_0 KV cache).
 
 > On a ROCm box the lockfile's CUDA torch is replaced by hand — see
@@ -94,11 +90,11 @@ training/            data builders and configs for the QLoRA and CD runs
 runs/                training and eval outputs (git-ignored except runs/eval/*/results.*)
 frontend/            React 19 + Vite + Tailwind v4 console: landing, console, maps, projects, saved, report
 tests/               hermetic: synthetic rasters, no network, torch only where it is under test
-DOCS/                Master.md (plan) · API_CONTRACT.md (frozen 1.0) · AGENT_POLICY_DAG.md ·
-                     ML_PIPELINE_RECOVERY_PLAN.md · frontend_blueprint.md · AI_HANDOFF/ (start here)
+DOCS/                all documentation — AI_HANDOFF/ (start here), API_CONTRACT.md (frozen 1.0),
+                     USER_GUIDE.md, SETUP_GUIDE.md, DEMO_LAPTOP_RUNBOOK.md, FINAL_QA_CHECKLIST.md
 configs/             registry.yaml, policy_table.yaml, training profiles
+models/              merged + GGUF exports of the current adapter (git-ignored)
 PRODUCT.md           who this is for and what "done" means for the demo
-ROADMAP_REMAINING_FIXES.md   the four tracks left before the SIH final
 ```
 
 ## Data and training
@@ -116,10 +112,13 @@ The v2 corpus is rebuilt end-to-end by `scripts/rebuild_corpus_v2.sh`; the
 training profile is `configs/train/qlora_qwen3vl8b_rocm24g.yaml` and the run is
 launched with `scripts/train_vlm.py`. `scripts/preflight_train_serve_parity.py`
 proves the serving prompt is byte-identical to the training prompt before any
-adapter is trusted. The previous adapter (`runs/full-epoch-v1`) and its
-limitations remain documented in `DOCS/project_audit.md` §2 and
-`DOCS/AI_HANDOFF/06_DATA_AND_TRAINING.md`; `DOCS/ML_PIPELINE_RECOVERY_PLAN.md`
-is the record of what changed between v1 and v2.
+adapter is trusted. Why the first adapter (`full-epoch-v1`) learned nothing and
+what changed for v2 is recorded in `DOCS/ML_PIPELINE_RECOVERY_PLAN.md` and
+`DOCS/AI_HANDOFF/06_DATA_AND_TRAINING.md`.
+
+> The raw datasets, rendered views and corpus were deleted from the dev box on
+> 2026-09-29 to free disk. Rebuild them (`06_DATA_AND_TRAINING.md`, last section)
+> before running `make eval` or training again.
 
 ## Contributing
 
@@ -139,8 +138,7 @@ make ci && git add -A && git commit && git push origin main
 ## Where to read next
 
 1. `DOCS/AI_HANDOFF/00_START_HERE.md` — the 60-second summary and reading order.
-2. `ROADMAP_REMAINING_FIXES.md` — the four tracks left before the final: benchmark
-   suite, LoRA merge + GGUF for the air-gapped laptop, end-to-end parity, and the
-   SITREP / GeoJSON / STAC map features.
-3. `DOCS/API_CONTRACT.md` — the frozen wire contract (additive changes only).
-4. `DOCS/frontend_blueprint.md` — the console's information architecture and design system.
+2. `DOCS/USER_GUIDE.md` — every feature of the console, Maps and exports, and troubleshooting.
+3. `DOCS/FINAL_QA_CHECKLIST.md` and `DOCS/DEMO_LAPTOP_RUNBOOK.md` — the pre-final QA pass
+   and the air-gapped laptop setup.
+4. `DOCS/API_CONTRACT.md` — the frozen wire contract (additive changes only).

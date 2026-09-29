@@ -1,6 +1,9 @@
 # SatQuery AI — Rendering, Corpus & Domain-Adaptation Plan (FROZEN)
 
 **Status:** FROZEN as of Phase 0 (view catalogue + sample schema) / executed in Phase 7.
+**As built (2026-09-15):** the §5 composition minus DIOR-RSVG (gated) — 53,098 train /
+5,902 val across BigEarthNet-v2, VRSBench, RSVQA-HR, CDVQA and evidence_qa
+(`DOCS/AI_HANDOFF/06_DATA_AND_TRAINING.md`). The §7.3 Cartosat/RISAT augmentation was not done.
 **Authority:** Derived strictly from `DOCS/Master.md` §1, §2, §6.2, §6.3, §8-Phase-2, §8-Phase-7, §9.
 **Satisfies:** mandatory requirement 1 — "at least one visual or vision-language model must be fine-tuned or domain-adapted using BigEarthNet or open-source remote-sensing data."
 

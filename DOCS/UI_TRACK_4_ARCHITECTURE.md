@@ -1,6 +1,10 @@
 # Track 4 — High-Impact UI Features: Architectural Blueprint
 
-*Planning document. Nothing in here is implemented. This expands
+> **Status (2026-09-29): implemented — design record.** SITREP, GeoJSON export and the
+> STAC discovery HUD shipped in `91d8292`; Playwright `frontend/e2e/track4.spec.ts`
+> covers them offline. Read this for the *why*; the code is the current truth.
+
+*Originally a planning document. This expands
 `ROADMAP_REMAINING_FIXES.md` §Track 4 into the component tree, the state and
 data flow, the bundle boundaries, and the offline behaviour that code must
 follow. Where this document and the roadmap disagree, this document wins.*
@@ -528,7 +532,7 @@ frontend/src/geo/{nominatim,stac,planetary,collections,deadline}.ts
 frontend/src/geo/__tests__/{nominatim,stac,deadline}.test.ts
 frontend/src/state/stac.ts
 frontend/src/pages/maps/hud/{Discover,PlaceSearch,TimeSlider,CollectionPicker,SceneShelf,FetchBar}.tsx
-frontend/public/samples/stac/**                                               (fixtures + README.md with re-record command)
+frontend/public/samples/stac/**                                               (fixtures; re-record command in DOCS/STAC_FIXTURES.md)
 frontend/e2e/{sitrep,geojson,stac}.spec.ts
 src/satquery/api/routers/imagery.py · src/satquery/ingest/stac_fetch.py · tests/unit/test_stac_fetch.py
 ```

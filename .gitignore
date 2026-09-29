@@ -201,8 +201,15 @@ SHA256SUMS
 *.key
 .vscode/
 .idea/
-.claude/settings.local.json
-.claude/*.local.*
+# AI-assistant config and scratch (per-user plugin toggles, local memory,
+# browser-automation dumps). Nothing in here is project source.
+.claude/
+CLAUDE.local.md
+.playwright-mcp/
+.cursor/
+.aider*
+# Local disk-cleanup notes (machine-specific paths and sizes).
+cleanup_report_*.md
 
 # =========================
 # 8. OS Files

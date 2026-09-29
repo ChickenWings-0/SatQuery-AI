@@ -1,108 +1,78 @@
 # 08 — Open Issues and Next Steps
 
-Ordered by leverage. Items 1–3 are what the SIH rubric's "domain adaptation" score
-depends on; everything else is polish by comparison. Source for most items:
-`DOCS/project_audit.md §7` (2026-09-11), cross-checked against the code.
+The build is feature-complete. Everything the 2026-09-11 audit, the remediation plan,
+the ML recovery plan and the four pre-final tracks asked for has landed (`02`). What
+is left is ordered by what could embarrass the demo first.
 
-## Tier 1 — the ML result (do these first, in this order)
+## Tier 1 — before the SIH final (no code, just doing it)
 
-1. **Fix the training objective — follow `DOCS/ML_PIPELINE_RECOVERY_PLAN.md`.**
-   Do **not** reach for `assistant_only_loss=True` + `{% generation %}` markers, and do
-   not look for `DataCollatorForCompletionOnlyLM`: on the pinned stack (trl 1.12.0,
-   `pyproject.toml` `vlm-train`) the first raises
-   `ValueError("Assistant-only loss is not yet supported for vision datasets")` for any
-   dataset with an `images` key, and the second was removed in trl 0.20. The working
-   mechanism is the **prompt-completion record shape** with `completion_only_loss=True`
-   (plan §1): `sample_to_chat()` emits `{prompt, completion, images}`, the vision
-   collator masks everything up to and including `<|im_start|>assistant\n`, and
-   `audit_masks()` checks the collated labels equal the tokenised answer before the
-   weights load. The user turn is laid out by `satquery.models.prompts.layout` on
-   both the training and serving paths (plan §2) — label as a text part before each
-   image — with a fingerprint checked at model load. Then the Stage A memorisation
-   probe and Stage B descent probe (plan §3) **before** the epoch.
-2. **Run one honest ablation.** Base Qwen3-VL-8B bf16 vs adapter, same prompt, same
-   200 VRSBench VQA + BEN-val items, same CitationValidator. Metrics per
-   `DATA_ADAPTATION_PLAN §8`: BEN-v2 19-class micro-F1 (zero-shot vs adapted),
-   6-class replication, evidence-audit fraction (`strict` validator mode), VRSBench
-   VQA accuracy. Put the table in `DOCS/` even if the numbers are bad.
-3. **Rebuild the corpus properly.** Bind hashes for every source in
-   `scripts/build_corpus.py` (`hashes_for` / `bind_view_paths`) and add the test
-   that asserts a BEN row through `_iter_source_samples` has `image_sha256`. Include
-   VRSBench (29,615 tiles rendered) and CDVQA (271 pairs rendered) and RSVQA-HR;
-   resolve or drop DIOR-RSVG (gated). Generate an `evidence_qa` **val** split.
-   Re-budget `COMPOSITION` (65k at 0.265 samples/s ≈ 68–73 h) to the GPU window
-   actually available.
-4. **Re-export the GGUF from the served adapter** (`scripts/merge_export.py`) so the
-   offline llama.cpp path is not the PoC adapter.
+1. **Run the manual QA and fill in the sign-off sheet** in
+   `DOCS/FINAL_QA_CHECKLIST.md §6`. It is empty. Every ❗ row must pass on the laptop
+   with Wi-Fi off, or the presentation opens in `?mock=1` and says so.
+2. **Rehearse the laptop stack twice with Wi-Fi off** (`DOCS/DEMO_LAPTOP_RUNBOOK.md`):
+   copy `models/*.gguf` + `SHA256SUMS`, `frontend/dist/`, `data/checkpoints/`;
+   verify checksums; `serve_vlm.ps1` listening < 30 s; < 7.4 GB VRAM with a 3-view
+   request; HealthStrip shows the VLM `ready`. Record the timings the checklist asks for.
+3. **Re-run `make ci` and `make e2e`** on the final tree (last e2e was 2026-09-15, before
+   the 09-16/09-18 commits). Note `make e2e` with `hf` will re-download the base model.
+4. **Commit the 2026-09-29 docs/gitignore reorganisation** (leave out
+   `frontend/public/sitemap.xml`).
+5. **Slide numbers come only from `runs/eval/sq-lora-v2-full/results.md`** and the
+   zero-shot → adapted answer-token accuracy in `run_manifest.json`. Do not quote the
+   CD model as meeting its 0.88 gate.
 
-## Tier 2 — backend correctness and robustness
+## Tier 2 — extra evidence (needs the data pipeline rebuilt, `06` last section)
 
-5. **Key-aware citation check.** When the model emits `[key]`, require the adjacent
-   number to match *that* key's value; fall back to value search only for bare
-   numbers (`evidence/citation_validator.py::validate`, `strip_citation_markers`).
-6. **Unblock the event loop.** `asyncio.to_thread(ingest, …)` in
-   `api/routers/analyze.py` and `api/routers/jobs.py`.
-7. **Process-wide GPU semaphore** in the executor (currently created per
-   `DagExecutor` in `agent/pipeline.py`). Phase 9's "10 concurrent requests without
-   VRAM exhaustion" is not met.
-8. **`DELETE /v1/jobs/{id}`** so the UI's cancel actually stops the GPU; contract
-   bump + `openapi.json` + `schema.d.ts` regeneration.
-9. **Change detection:** train the OSCD (10 m) run and record cross-resolution
-   degradation; try to close the LEVIR-CD gap (F1 0.858 → ≥ 0.88).
-10. **Hygiene:** fill root `README.md` (copy `repo documentation/README.md` and fix the
-    65k/19-h claims); delete `src/satquery_ai/` and the `[project.scripts]` entry
-    pointing at it; fix the 1 mypy (`local_sources.py:132`) and 1 ruff
-    (`scripts/test_inference.py` import order) error; make `export_openapi.py` use
-    argparse; remove `.levircd.pid`; fix the hard-coded change legend
-    (`ImageViewer.tsx` ~line 361 always says "New built-up area").
+6. **Benchmark baseline column:** `make eval-baseline` on the same `sample_ids.json`.
+   The trainer's zero-shot eval already shows the gap (26.4 % → 81.8 % answer-token
+   accuracy), but a per-source table is stronger on a slide.
+7. **Q4_K_M column:** `make eval` with `SATQUERY_VLM_BACKEND=llamacpp` against the
+   exported GGUF; accept ≤ 2 pt VQA drop, ≤ 3 pt grounding drop (Track 2 step 3).
+8. **Merged-model parity check:** the merged bf16 model through `hf`
+   (`SATQUERY_VLM_MODEL_PATH=models/sq-lora-v2-full-merged`) should decode the probe
+   queries identically to adapter-over-base (Track 2 step 2). Not recorded.
 
-## Tier 3 — frontend
+## Tier 3 — model quality (after the final, if the project continues)
 
-11. **Reattach instead of re-run on SSE drop.** `thread/useRun.ts` currently marks
-    failed and `retry` re-submits the whole job (a fresh 20–60 s GPU run). Poll
-    `GET /v1/jobs/{id}` (already in `client.ts`) or reopen `/events` (server replays
-    the buffered stage sequence).
-12. **Consume the `BBOX_SET` artifact** from `text_grounding` (pixel + WGS84) instead
-    of re-parsing answer text; keep `bbox.ts` as the fallback for text-only answers.
-13. Stub `CSS.registerProperty` in `vitest.config.ts` to silence
-    `react-compare-slider` noise; add one Playwright test of the bbox overlay on a
-    non-square image (the highest-risk visual path); fix or replace oxlint.
+9. **SCENE_CLASSIFY** (multi-label BigEarthNet) is 5 % exact / 50 % label-F1 and drags
+   BEN to 53 %. Options: more SCENE_CLASSIFY share in the corpus, a label-set answer
+   format that scores partial credit, or route scene classification to a
+   deterministic classifier and let the VLM phrase it.
+10. **Grounding** R@0.5 48.9 % (BEN 40 %, VRSBench 56 %). DIOR-RSVG (gated) is the
+    obvious extra source.
+11. **Change detection:** close LEVIR-CD F1 0.858 → ≥ 0.88; run OSCD (10 m) to record
+    cross-resolution degradation.
+12. **Cartosat-2S / RISAT augmentation track** (`DATA_ADAPTATION_PLAN §7.3`) — the
+    hidden test set's sensors; nothing done yet.
 
-## Tier 4 — Phase 8 and Phase 9 as planned
+## Tier 4 — engineering debt
 
-14. **Phase 8 eval harness:** `src/satquery/eval/` with VRSBench (VQA acc, caption
-    BLEU-4/ROUGE-L/CIDEr, grounding mAP@0.5), RSVQA-HR (per-type + aggregate), CDVQA
-    accuracy, `metrics.py`, `report.py` (markdown + CSV), a synthetic Cartosat-2S /
-    RISAT proxy dry-run (resample VHR to 0.65 m, simulate single-pol SAR), and the
-    four-row ablation table from one `make eval`.
-15. **Phase 9 hardening:** CI workflow (`ruff`, `mypy`, `pytest -m "not gpu"`,
-    `tsc -b`, `vitest run`, `vite build`), `Dockerfile`/`docker-compose.yml` on a
-    `rocm/pytorch` base, `Makefile` with `make demo` running the four Master.md §10
-    scenarios (single optical, single SAR, cross-modal, bi-temporal), warm-start
-    preloading, request caching, cold start → first answer < 60 s, the
-    "unplug the network" test.
-16. Saved analyses and shareable trace links (UI is scaffolded for both).
-17. Cartosat-2S / RISAT augmentation track (`DATA_ADAPTATION_PLAN §7.3`).
+13. **Jobs are in-memory** (lost on restart); traces are SQLite and artifacts a local
+    filesystem — fine for one box, not for multi-process serving.
+14. **"11 compatibility checks"** in README / `USER_GUIDE.md` / the roadmap means the 10
+    `schemas/enums.CheckName` checks plus the pair-type classification. Harmless, but
+    say "10 checks + pair-type" if a judge asks to count them.
+15. **`run_manifest.json` records `run_name: sq-lora-v1`** for the v2 run — set
+    `run_name` in the profile before the next training run.
+16. **v1-era leftovers:** root `*.log`, `.levircd.pid`, `logs/`, `run_overnight.sh`
+    (superseded by `rebuild_corpus_v2.sh`), `scripts/eval_vrsbench_zeroshot.py`
+    (superseded by `eval_benchmark.py`), `runs/Sep13_*_fedora/`, `runs/sq-lora-v2/`.
+    All harmless; delete when convenient.
+17. `ruff format` drift (~58 files) — only if the owner wants formatting enforced.
 
-## Open questions nobody has answered yet
+## Open questions
 
-- How much GPU time is actually available before submission? This sets the corpus
-  size (item 3) — 65k is ~3 days at measured throughput.
-- Is DIOR-RSVG access obtainable, or is referring-expression grounding trained from
-  VRSBench boxes alone?
-- Will the demo run the `hf` bf16 path (adapter, 18.7 GiB) or the llama.cpp path
-  (no adapter, fast start)? The current `.env` says llama.cpp. Judging story depends on it.
-- The frontend has a `.vercel/` project link — is a hosted static build (mock mode)
-  part of the submission?
-- Is `openapi.json` schema `1.0` allowed to bump for `DELETE /v1/jobs/{id}`, or is
-  it additive without a version bump?
+- Which machine presents: the 24 GB box (bf16 + adapter) or the 8 GB laptop (Q4_K_M)?
+  The runbook assumes the laptop is the fallback "if the training box is not in the room".
+- Is the hosted static build (`frontend/.vercel/` link) part of the submission?
 
 ## What *not* to do
 
-- Do not re-run the 19-hour training with the current objective.
-- Do not quantise the serving path to NF4 to "match training".
-- Do not add a second implementation of labels, box format, number format, or
-  index maths anywhere (including the frontend beyond the existing tested port).
-- Do not let an LLM choose tools; extend `policy_table.yaml` instead.
-- Do not quote the CD checkpoint as meeting the 0.88 gate, or the corpus as 65k.
-- Do not commit `data/`, `runs/`, logs, or `.env`.
+- Do not run a bare `uv sync` on the dev box.
+- Do not quantise the `hf` serving path to NF4.
+- Do not serve an adapter without its `layout.json`, or with a processor from elsewhere.
+- Do not add a second implementation of labels, layout, box format, number format or
+  index maths.
+- Do not let an LLM choose tools; extend `policy_table.yaml`.
+- Do not delete `models/` — it is the owner's backup of the exported weights.
+- Do not commit `data/`, `runs/` (except eval results), `models/`, logs, `.env`, `.claude/`.

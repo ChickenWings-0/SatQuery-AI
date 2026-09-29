@@ -1,155 +1,179 @@
-# 02 — Current State (as of 2026-09-11, HEAD `2cb0348`)
+# 02 — Current State (as of 2026-09-29, HEAD `1782163`)
 
-Everything here was either measured on the dev box or read from the repo. Where a
-number comes from the independent audit (`DOCS/project_audit.md`, dated 2026-09-11,
-run against `77bea25`) it is marked *(audit)*.
+Everything here was measured on the dev box or read from the repo on the snapshot
+date.
 
-## Git history (complete)
+## Git history
 
 | Commit | Date | Subject |
 |---|---|---|
-| `ca22b20` | 2026-09-05 | Initial commit (only `.gitattributes`) |
-| `290d93a` | 2026-09-05 | doc files (Master.md, API_CONTRACT, AGENT_POLICY_DAG, DATA_ADAPTATION_PLAN, OPEN_SOURCE_ASSETS) |
+| `ca22b20` | 2026-09-05 | Initial commit |
+| `290d93a` | 2026-09-05 | doc files (Master, API_CONTRACT, AGENT_POLICY_DAG, DATA_ADAPTATION_PLAN, OPEN_SOURCE_ASSETS) |
 | `5b20b70` | 2026-09-06 | Phases 0–6 backend: API, ingestion, rendering, DAG controller, Siamese CD, DOFA fusion |
-| `44e6947` | 2026-09-06 | Phase 7: VRAM estimator recalibrated, hermetic tests, `evidence_qa` builder, overnight script |
-| `77bea25` | 2026-09-11 | "Phase 8": corpus dedup + local sources, bf16 serving backend, async jobs API, mission-control frontend |
-| `2cb0348` | 2026-09-11 | documentation update (`repo documentation/` + `DOCS/project_audit.md`) |
+| `44e6947` | 2026-09-06 | Phase 7: VRAM estimator, hermetic tests, `evidence_qa` builder, overnight script |
+| `77bea25` | 2026-09-11 | corpus dedup + local sources, bf16 serving, async jobs API, mission-control frontend |
+| `2cb0348` | 2026-09-11 | documentation update + independent audit |
+| `72a0da3` | 2026-09-12 | remediation plan: concurrency, key-aware citations, `DELETE /v1/jobs/{id}`, CI, Docker, Makefile |
+| `0bada6e` | 2026-09-12 | ML recovery plan steps 0–5 (loss masking, shared prompt layout, formatting) |
+| `662740a` | 2026-09-15 | frontend revamp (landing, router, sections), v2 corpus rebuild, full QLoRA profile |
+| `d10ca92` | 2026-09-15 | roadmap for the four pre-final tracks, README refresh |
+| `91d8292` | 2026-09-16 | Tracks 1–4: eval suite, GGUF export tooling, API parity, SITREP / GeoJSON / STAC UI |
+| `b2b87e9` | 2026-09-16 | NaN-weight scanner, degenerate-output tripwire, final QA checklist, first eval results |
+| `be14970` | 2026-09-16 | re-run eval (`results.*` updated) |
+| `bf0fbbe` | 2026-09-18 | user guide, sidebar history, Maps fixes, recorded S1 `.tif` fixtures |
+| `1782163` | 2026-09-18 | Playwright overlay spec fix |
 
-Working tree is clean. Only `main` exists. No tags, no CI, no remote configured
-in the snapshot (check `git remote -v`).
+**Uncommitted on 2026-09-29:** `.claude/` untracked + ignored; all Markdown moved into
+`DOCS/` (`repo documentation/` removed); this bundle rewritten; obsolete docs deleted
+(`09`). `frontend/public/sitemap.xml` is dirty only because a local build rewrote its
+`lastmod` — do not commit it.
 
-## Phase status vs `Master.md §8`
+## Phase / track status
 
-| Phase | Objective | Status | Evidence |
-|---|---|---|---|
-| −1 | Fedora + ROCm bring-up | ✅ | gfx1100 detected; torch 2.9.1+rocm6.4 in `.venv` |
-| 0 | Frozen contract, mocked API | ✅ | `openapi.json` and `schema.d.ts` regenerate byte-identical *(audit)* |
-| 1 | Ingestion + compatibility | ✅ | 56 tests in `test_ingest.py`; 10 named checks in `schemas/enums.CheckName` |
-| 2 | Rendering + artifact store | ✅ | 77 tests in `test_render.py`; content-addressed blob store under `data/artifacts/` |
-| 3 | Registry / planner / executor / trace | ✅ | 15 tools in `configs/registry.yaml`; 22 policy entries; SQLite trace store |
-| 4 | VLM serving (HF bf16 + llama.cpp) | ✅ | both backends; but the GGUF was exported from `poc-v1`, not `full-epoch-v1` |
-| 5 | Bi-temporal change detection | ⚠️ partial | LEVIR-CD ResNet-18 Siamese: **F1 0.858 vs 0.88 gate**; no OSCD run (data downloaded) |
-| 6 | Cross-modal + grounding | ✅ code | DOFA tool, physics agreement, text grounding, segmenter, counter; 62 tests. DIOR-RSVG training data unresolved (gated) |
-| 7 | Corpus + QLoRA | ⚠️ infra done, **result not** | 19 h run completed; loss flat from step ~90; BEN-only corpus; no ablation |
-| 8 | Benchmark evaluation | ❌ not started | no `src/satquery/eval/`; `scripts/eval_vrsbench_zeroshot.py` defaults to a 5-item mock |
-| 9 | Hardening / demo / Docker / CI | ❌ not started | no Dockerfile, Makefile, `.github/`, `make demo` |
-| FE | Frontend (originally a teammate track) | ✅ ahead of plan | mission-control console, SSE streaming, DAG dialog, swipe viewer, bbox overlay, offline MSW mock |
+| Stage | Status | Evidence |
+|---|---|---|
+| Phases −1 … 7 | ✅ | see `Master.md §8`; Phase 7 re-done as the v2 run |
+| Phase 8 — benchmark eval | ✅ | `src/satquery/eval/`, `scripts/eval_benchmark.py`, `make eval`; results committed under `runs/eval/sq-lora-v2-full/` |
+| Phase 9 — hardening | ✅ | `.github/workflows/ci.yml` (backend · frontend · e2e · docker), `Makefile` (`make ci`, `demo`, `eval`, `e2e`…), `Dockerfile` + `frontend/Dockerfile` + `docker-compose.yml`, pre-commit |
+| Remediation plan (non-ML audit findings) | ✅ | concurrency module, key-aware validator, `to_thread` ingest, cancel end-to-end, SSE reattach, `BBOX_SET` consumption |
+| ML recovery plan | ✅ | prompt-completion records + `completion_only_loss`, shared `layout.py`, mask audit, layout fingerprint check at load |
+| Track 1 — eval suite | ✅ | 500-sample run 2026-09-16 (numbers below) |
+| Track 2 — merge + GGUF | ✅ | `models/` produced 2026-09-22 (below); laptop runbook written |
+| Track 3 — e2e parity | ✅ | `scripts/e2e_parity.py`, `make e2e`; last run 2026-09-15 (below) |
+| Track 4 — UI | ✅ | SITREP PDF, RFC 7946 GeoJSON export, Maps STAC discovery HUD; Playwright `track4.spec.ts` offline |
+| Manual QA (`FINAL_QA_CHECKLIST.md`) | ❌ not recorded | sign-off sheet is empty |
 
 ## Measured numbers you can quote
 
-**Tests** *(audit, re-verified counts by grep)*:
-- Backend: **503 pytest cases**, all green, ~4 min wall (the `test_models.py` case
-  exercising real SDPA on ROCm is the long pole). Files: `test_vlm_training` 103,
-  `test_render` 77, `test_crossmodal_grounding` 62, `test_ingest` 56,
-  `test_change_detection` 44, `test_models` 41, `test_agent` 30, contract 39.
-- Frontend: **194 vitest cases** in 15 files, ~4.6 s. `tsc -b` clean. `vite build`
-  clean (~1.8 s). `npm run lint` (oxlint) crashes on this checkout — missing native
-  binding, not a code problem.
-- Hygiene *(audit)*: `mypy --strict` 1 error (`training/local_sources.py:132`,
-  `no-any-return`); `ruff` 1 error (import sort in `scripts/test_inference.py`).
+**Tests (2026-09-29):** backend **623** pytest cases in 17 files (collected);
+frontend **356** vitest cases in 37 files, all passing (4.6 s); Playwright
+`frontend/e2e/{overlay,track4}.spec.ts`. Gates are `make ci` (ruff check, mypy
+--strict, pytest, oxlint, tsc, vitest, vite build, contract both halves). Entry
+bundle 173.7 KB against a 180 KB budget (`npm run check:bundle`).
 
-**Training runs** (all under gitignored `runs/`, all Qwen3-VL-8B-Instruct, NF4 QLoRA
-r=16 α=32, last-8 ViT blocks + all LLM projections, effective batch 16, lr 1e-4
-cosine, seed 42):
+**Production adapter — `runs/sq-lora-v2-full/adapter`** (run finished
+2026-09-15 05:38 UTC):
 
-| Run | Corpus | Samples | Steps | Peak VRAM | Outcome |
+| | |
+|---|---|
+| Base | Qwen3-VL-8B-Instruct, NF4 double-quant backbone during training, bf16 compute |
+| LoRA | r=16, α=32, dropout 0.05; 7 LLM projections × 36 layers + `qkv,proj,fc1,fc2` of the last 8 ViT blocks; 44.5 M trainable params |
+| Corpus | 53,098 train / 5,902 val, `data/processed/corpus/v2-full/` (**deleted 2026-09-29**) |
+| Schedule | 1 epoch, 3,318 steps, batch 1 × 16, lr 1e-4 cosine, 3 % warmup, `paged_adamw_8bit`, seed 42 |
+| Wall / VRAM | 146,348 s (≈ 40.7 h), 0.363 samples/s; **peak 13.42 GiB** (estimate 17.1 GiB) |
+| Mask audit | 32/32 ok; prompt 694–2,192 tok, completion 3–97 tok, 0 truncated |
+| Layout | `label-before-image/v1`, 144 image tokens per 448 px view, fingerprint in `adapter/layout.json` |
+| Zero-shot (same val subset, 256 samples) | eval loss **8.466**, answer-token accuracy **26.4 %** |
+| Adapted, epoch 1.0 | train loss **0.3025**, eval loss **0.1867**, answer-token accuracy **81.8 %** |
+
+The zero-shot row is the base model scored by the trainer before step 1 on the same
+eval subset — that *is* the domain-adaptation ablation. The benchmark-level baseline
+(`make eval-baseline`) was never run.
+
+**Benchmark — `runs/eval/sq-lora-v2-full/results.md`** (2026-09-16, 500 held-out val
+samples, 100 per source, backend `hf`, bf16 + adapter, git `b2b87e9`, seed 42):
+
+| Source | Accuracy | Grounding R@0.5 | Mean IoU | Citation precision | Uncited-number rate |
 |---|---|---|---|---|---|
-| `sq-lora-v1-sanity` (2026-09-06) | `train.jsonl` truncated | 100 | 6 | 21.49 GiB | sanity check; `max_pixels` 200704 |
-| `throughput-probe-20260906-221333` | `probe.train.jsonl` | 2,853 | 178 | 18.42 GiB | first throughput probe |
-| `poc-v1` (2026-09-08) | `poc/train.jsonl` | 12,202 | 762 | 16.97 GiB | PoC; **this** adapter was merged and exported to GGUF (`runs/poc-v1/export*.gguf`) |
-| `throughput-probe` (2026-09-09) | `probe.train.jsonl` | 18,530 planned, stopped at epoch 0.17 | 200 | 16.77 GiB | **0.265 samples/s** → ~68–73 h per 65k epoch |
-| **`full-epoch-v1`** (finished 2026-09-10 11:46 UTC) | `full.train.jsonl` | **18,530** | **1,158** | **16.78 GiB** | the "production" adapter; ~19 h; flat loss (see below) |
+| BigEarthNet-v2 | 53.3 % | 40.0 % | 41.6 % | 100 % | 0 % |
+| CDVQA | 77.0 % | — | — | — | — |
+| Evidence QA | 87.0 % | — | — | 100 % | 0 % |
+| RSVQA-HR | 91.0 % | — | — | 100 % | 0 % |
+| VRSBench | 88.0 % | 56.0 % | 52.6 % | 100 % | 0 % |
+| **All** | **80.7 %** | **48.9 %** | **47.7 %** | **100 %** | **0 %** |
 
-**The flat loss** *(audit, from `full_training_run.log`)*:
+Per task: COUNT 100 %, VQA 83.4 %, CROSS_MODAL_VQA 81.4 % (fact recall 100 %),
+CHANGE_VQA 77 %, box format valid 100 %, captions BLEU-4 13.7 / ROUGE-L 36.7,
+**SCENE_CLASSIFY 5 % exact / 50.2 % label-F1** (multi-label BigEarthNet classes are
+the weak spot and drag the BEN row down). Mean latency 5.8 s/sample, 0 generation
+errors, 0 truncations. Worst cases rendered under `runs/eval/sq-lora-v2-full/confusion/`
+(gitignored).
 
-| epoch | train loss | grad_norm | mean_token_accuracy |
-|---:|---:|---:|---:|
-| 0.008 | 13.01 | 29.9 | 0.26 |
-| 0.078 | 3.82 | 0.08 | 0.50 |
-| 0.49 | 3.82 | 0.06 | 0.50 |
-| 0.99 | 3.76 | 0.05 | 0.51 |
+**Export — `models/`** (2026-09-22, `merge_manifest.json` records adapter SHA-256
+`7785f9eb…`):
 
-Eval loss 3.935 → 3.930 over the epoch. Root cause identified: **loss is computed over
-the whole sequence** — no `assistant_only_loss` / `completion_only_loss` in
-`training/vlm/qlora.py::sft_config_kwargs()`. The ~1,000-token system prompt plus a
-FactSheet of up to 30 unpredictable floats dominates the token count. See `08` #1.
+| File | Size |
+|---|---|
+| `sq-lora-v2-full-merged/` | bf16 merged safetensors, 17 GB, 8.77 B params |
+| `sq-lora-v2-full-merged-Q4_K_M.gguf` | 5.0 GB |
+| `sq-lora-v2-full-merged-mmproj-f16.gguf` | 1.16 GB (vision tower not quantised on purpose) |
+| `SHA256SUMS` | checksums for the three above |
 
-**Inference probe** (`runs/full-epoch-v1/inference_probe*.json`, one held-out BEN
-patch, bf16 + adapter, 18.67 GiB peak): grounding returned a single full-frame box
-`(0,0),(1000,1000)`; a discrete probe reports IoU 0.66. Smoke test, not a result.
+Laptop serving settings baked into the manifest: `SATQUERY_VLM_MAX_VIEWS=3`,
+`--image-min-tokens 1024`, context 8192. The Q4_K_M build has **not** been scored
+with `make eval` (Track 2 verification step 3 is open).
+
+**E2E parity** (`runs/e2e/latest.json`, 2026-09-15, gitignored): 5 scenarios against
+a live API — grounding (VHR PNG), bi-temporal change (S2 pair), cross-modal (S2 + S1),
+negative no-overlap pair (rejected `INSUFFICIENT_OVERLAP`), negative disabled tool
+(degrades, no error). Sync vs jobs+SSE traces identical except one run where the
+jobs path did not emit `LATENCY_BUDGET_EXCEEDED` (40.7 s DAG vs 30 s budget).
+The cross-modal run answered from the template (`vlm_vqa did not run`). Re-run
+`make e2e` before the final.
 
 **Change detector** (`data/checkpoints/cd/levircd_resnet18.ckpt.json`): ResNet-18
-Siamese, SSL4EO-S12 encoder init, 60 epochs @ 256 px, bf16-mixed. Test metrics:
-**F1 0.858, IoU 0.751, P 0.864, R 0.852**, F1@0.5 0.839; calibrated threshold 0.9.
-Below the 0.88 gate — the JSON says so in plain text. A normalisation bug (measured
-stats recorded but never applied) was found and corrected to identity. `.bak-*`
-files are the pre-fix checkpoints.
+Siamese, SSL4EO-S12 init, 60 epochs @ 256 px, bf16-mixed. Test **F1 0.858, IoU 0.751,
+P 0.864, R 0.852**, calibrated threshold 0.9. Below the 0.88 gate — say so if asked.
+No OSCD (10 m) run.
 
-**Corpus on disk** (`data/processed/corpus/`, gitignored):
+**Segmenter:** `data/checkpoints/seg/segformer-b5-loveda/` (downloaded HF snapshot,
+not trained here).
 
-| File | Lines | Sources | Notes |
-|---|---:|---|---|
-| `train.jsonl` | 15,530 | bigearthnet_v2 only | 0 rows carry `image_sha256` *(audit)* |
-| `val.jsonl` | 2,470 | bigearthnet_v2 only | |
-| `evidence_qa.train.jsonl` | 3,000 | synthetic | |
-| `evidence_qa.val.jsonl` | **0** | — | no held-out citation supervision |
-| `full.train.jsonl` | 18,530 | BEN + evidence_qa | **what `full-epoch-v1` trained on** |
-| `probe.train.jsonl` | 18,530 | same | throughput probe copy |
-| `poc/train.jsonl`, `poc/val.jsonl` | 12,202 / 3,915 | | PoC subset |
+**Serving:** bf16 base ~16.4 GB weights; ~18.7 GiB peak with six views + adapter;
+VRAM guard budget 22 GB. Laptop: Q4_K_M + mmproj ≈ 6.2 GB + KV cache, target
+< 7.4 GB with one 3-view request.
 
-Rendered views exist on disk for BEN (`data/processed/views/bigearthnet_v2/`),
-VRSBench (29,615 tiles, `views/vrsbench/rendered.jsonl`) and CDVQA (271 pairs,
-`views/cdvqa/`). VRSBench and CDVQA were rendered but **never entered any corpus**.
+## What is on disk after the 2026-09-29 cleanup
 
-**Serving** *(measured)*: bf16 base ~16.4 GB weights; ~18.7 GiB peak with six views
-and the adapter; VRAM guard budget 22 GB. llama.cpp Q4_K_M path ~6–9 GB.
+Deleted (≈ 595 GiB; full list in the untracked, ignored `cleanup_report_2026.md`):
+`data/raw/` (BigEarthNet, VRSBench, RSVQA-HR, DIOR-RSVG, CDVQA, LEVIR-CD, OSCD),
+`data/processed/` (rendered views + corpus), every non-final run
+(`poc-v1`, `full-epoch-v1`, `throughput-probe*`, `sq-lora-v1-sanity`,
+`sq-lora-v2-sanity`), the v2 intermediate checkpoints, and the HF cache for
+`Qwen/Qwen3-VL-8B-Instruct`.
 
-## What the current `.env` on the dev box says
+Kept: `runs/sq-lora-v2-full/{adapter,train.log,run_manifest.json,mask_audit.json,preflight}`,
+`runs/eval/`, `runs/e2e/`, `models/`, `data/checkpoints/`, `data/artifacts/`,
+`data/traces.sqlite3`.
+
+Consequences:
+- **`make eval` / `eval-baseline` cannot run** — the runner resolves views from
+  `data/processed/views/`. Re-fetch + re-render + rebuild first (`06`).
+- **Retraining** needs the whole data pipeline re-run (hundreds of GB, hours of CPU).
+- **Serving the adapter via `hf`** re-downloads the 17 GB base model on first load.
+  Alternative (untested): `SATQUERY_VLM_MODEL_PATH=models/sq-lora-v2-full-merged`
+  with `SATQUERY_VLM_ADAPTER_PATH` unset — the merged weights *are* base + adapter,
+  but `Answer.generator` will not carry the `+adapter:` suffix.
+- The llama.cpp / laptop path is unaffected.
+
+## Current `.env` on the dev box
 
 ```
-SATQUERY_VLM_BACKEND=llamacpp
-SATQUERY_VLM_SERVER_URL=http://127.0.0.1:8080
+SATQUERY_VLM_BACKEND=hf
+SATQUERY_VLM_ADAPTER_PATH=runs/sq-lora-v2-full/adapter
+SATQUERY_VLM_DTYPE=bfloat16
+SATQUERY_VLM_VRAM_BUDGET_GB=22
 SATQUERY_SEG_CHECKPOINT=data/checkpoints/seg/segformer-b5-loveda
+SATQUERY_CD_CHECKPOINT=data/checkpoints/cd/levircd_resnet18.ckpt.pt
 ```
 
-i.e. the box is currently configured for the **llama.cpp path (stock/PoC GGUF,
-no full-epoch adapter)** and the LoveDA SegFormer-B5. `SATQUERY_CD_CHECKPOINT` is not
-set in `.env`, so `siamese_change_detector` is *not servable* from `.env` alone and
-bi-temporal plans degrade to `image_diff_change` unless the env var is exported.
-(The CD checkpoint exists at `data/checkpoints/cd/levircd_resnet18.ckpt.pt`.)
+## Known gaps (full detail in `08`)
 
-## Known defects, ranked (full detail in `08`)
-
-1. **Training objective** — whole-sequence loss; flat curve; adapter effect unproven.
-2. **Train/serve prompt skew** — training put image labels in a non-text `label`
-   key (ignored by the chat template); serving inserts labels as text parts before
-   each image. The adapter was trained on a layout the serving code calls unreliable.
-3. **No ablation / no eval harness** — the rubric's headline claim is unmeasured.
-4. **Corpus is BEN-only and unhashed** — dedup ran on nothing for the trained
-   source; VRSBench/CDVQA/RSVQA-HR/DIOR-RSVG absent.
-5. **Citation match is by value, not key** — `0.75 [wrong.key]` passes.
-6. **`ingest()` blocks the event loop** in `/v1/analyze` and `/v1/jobs`.
-7. **GPU semaphore is per-request**, not per-process.
-8. **Jobs are in-memory; cancel is client-only** (no `DELETE /v1/jobs/{id}`).
-9. **Frontend re-runs the job on SSE drop** instead of reattaching.
-10. **CD below gate, single resolution** (no OSCD run).
-11. **No CI, no Docker, no Makefile; root `README.md` is 0 bytes;
-    `src/satquery_ai/` is a leftover scaffold.**
+1. Manual QA sign-off and the Wi-Fi-off laptop rehearsal are not recorded.
+2. No benchmark-level baseline column and no Q4_K_M column.
+3. SCENE_CLASSIFY (multi-label BigEarthNet) is weak: 5 % exact / 50 % F1.
+4. CD below its 0.88 gate; no OSCD run.
+5. Jobs are in-memory (lost on restart); SQLite/filesystem stores are single-process.
 
 ## What is genuinely strong (do not regress these)
 
-- The evidence/citation chain: FactSheet → CitationValidator (unit-aware, segment
-  matching, tolerance pivot at 10, year/index exclusions) → named confidence caps
-  → trace. Build-time citation audit of the corpus.
-- Contract chain: `API_CONTRACT.md` → `openapi.json` → `schema.d.ts`, byte-identical
-  on regeneration, locked by contract tests on both sides.
-- Deterministic planner + async executor with per-step timeouts, CPU/GPU
-  semaphores, content-hash cache, one-level fallbacks, honest `DEGRADED`.
-- bf16 serving with a VRAM guard that re-checks after load; box sentinels survive
-  decoding; stop sequences applied post-generation.
-- Training harness: pydantic profiles, name-based ViT block resolution, VRAM
-  estimator within 0.4 GiB of measured, resumable checkpoints with optimiser
-  state, graceful SIGINT, complete `run_manifest.json`.
-- Frontend: Tailwind v4 done idiomatically, contrast-tested tokens, letterbox-correct
-  SVG bbox overlay in Qwen's 0–1000 frame, pure SSE reducer tested on a recorded run,
-  MSW offline mode, self-hosted metric-matched fonts.
+- The evidence chain: FactSheet → key- and unit-aware CitationValidator → named
+  confidence caps → trace; 100 % citation precision on the benchmark.
+- Contract chain `API_CONTRACT.md` → `openapi.json` → `schema.d.ts`, locked in CI.
+- Train/serve parity: one `layout.py`, a mask audit before weights load, and a layout
+  fingerprint that refuses a mismatched adapter at load.
+- Deterministic planner + async executor with process-wide CPU/GPU semaphores,
+  content-hash cache, one-level fallbacks, honest `DEGRADED`.
+- bf16 serving with a VRAM guard, NaN-weight scanner and degenerate-output tripwire.
+- Frontend: contrast-tested tokens, letterbox-correct bbox overlay, pure SSE reducer
+  with reattach, offline MSW mode that covers the whole Maps/STAC flow.

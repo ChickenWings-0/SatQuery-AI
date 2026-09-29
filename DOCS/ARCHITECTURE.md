@@ -86,17 +86,17 @@ split leaking into training. `src/satquery/training/corpus_builder.py` and
 
 ### 2.1 Sources, and reading them correctly
 
-| Source | Samples | Role |
+| Source | Train / val (v2) | Role |
 |---|---|---|
-| BigEarthNet-v2 (Sentinel-1 + Sentinel-2, 10 m) | 18,000 | sensor-physics grounding — the mandated dataset |
-| VRSBench (VHR, 0.1–3 m) | 20,000 | VQA, captioning, grounding at the evaluation set's resolution |
-| RSVQA-HR | 10,000 | counting / presence / comparison |
-| CDVQA (bi-temporal pairs) | 8,000 | change VQA |
-| DIOR-RSVG | 6,000 | referring-expression grounding |
-| evidence_qa (synthetic) | 3,000 | citation behaviour: answers that quote a fact sheet |
-| **Total** | **65,000** | one merged corpus, one adapter |
+| BigEarthNet-v2 (Sentinel-1 + Sentinel-2, 10 m) | 16,200 / 1,800 | sensor-physics grounding — the mandated dataset |
+| VRSBench (VHR, 0.1–3 m) | 18,000 / 2,000 | VQA, captioning, grounding at the evaluation set's resolution |
+| RSVQA-HR | 9,000 / 1,000 | counting / presence / comparison |
+| CDVQA (bi-temporal pairs) | 7,198 / 802 | change VQA |
+| evidence_qa (synthetic) | 2,700 / 300 | citation behaviour: answers that quote a fact sheet |
+| DIOR-RSVG | — | referring-expression grounding; gated on Hugging Face, excluded until access is granted |
+| **Total** | **53,098 / 5,902** | one merged corpus, one adapter (`runs/sq-lora-v2-full`) |
 
-Three of the six do not ship as Hub tables, and reading them with
+Three of the sources do not ship as Hub tables, and reading them with
 `datasets.load_dataset` was silently wrong in three different ways.
 `training/local_sources.py` holds the readers that are right:
 
@@ -149,9 +149,17 @@ early for smoke runs.
 
 `configs/train/qlora_qwen3vl8b_rocm24g.yaml`: Qwen3-VL-8B-Instruct, base
 weights loaded in NF4 with double quantisation and bf16 compute, LoRA r=16
-α=32, max sequence 4,096, per-device batch 1 × 16 accumulation, one epoch,
-lr 1e-4 cosine, bf16 autocast. On a 24 GB ROCm card the full-epoch run took
-19 hours. A bf16 LoRA profile for the 4B model exists as the OOM fallback.
+α=32 on every LLM projection and the last 8 vision blocks, max sequence 4,096,
+per-device batch 1 × 16 accumulation, one epoch, lr 1e-4 cosine, bf16 autocast.
+Loss is computed on the answer only: each sample becomes a prompt-completion
+record with `completion_only_loss`, and `audit_masks()` checks the collated labels
+before the weights load. The user turn is laid out by `models/prompts/layout.py` —
+the same function serving uses — and its fingerprint is written beside the adapter
+and checked at load. On the 24 GB ROCm card the v2 run took 40.7 hours
+(3,318 steps, 13.4 GiB peak); answer-token accuracy on the eval split went from
+26.4 % zero-shot to 81.8 %. A bf16 LoRA profile for the 4B model exists as the OOM
+fallback. Why the first run (v1) learned nothing is recorded in
+`ML_PIPELINE_RECOVERY_PLAN.md`.
 
 ---
 
@@ -164,8 +172,10 @@ lr 1e-4 cosine, bf16 autocast. On a 24 GB ROCm card the full-epoch run took
 triggers a 16 GB load). Two backends implement the same interface:
 
 - **`hf`** — `transformers` in-process. The production path with the adapter.
-- **`llamacpp`** — an HTTP client to a `llama-server` holding a Q4_K_M GGUF.
-  Starts in seconds, ~6 GB, survives a broken ROCm install. No adapter.
+- **`llamacpp`** — an HTTP client to a `llama-server` holding the merged
+  (base + adapter) Q4_K_M GGUF and an f16 mmproj, exported by
+  `scripts/merge_export.py`. Starts in seconds, ~6 GB, survives a broken ROCm
+  install, and is what the 8 GB demo laptop runs.
 
 Both apply stop sequences *after* generation rather than trusting the engine;
 a fine-tuned checkpoint does not reliably emit EOS.
@@ -178,7 +188,7 @@ recorded in `models/hf_backend.py` because it cost a full training run to
 discover: on gfx1100 / ROCm 6.4 / torch 2.9.1, **bitsandbytes 4-bit
 generation is broken**. The base weights alone, adapter detached, answer
 nonsense under NF4 and answer correctly under bf16. 4-bit *training* is
-unaffected, which is why the 19-hour run completed without anyone noticing.
+unaffected, which is why a full training run completed without anyone noticing.
 
 So the serving path is deliberately unquantised: base weights in bf16
 (~16.4 GB), LoRA applied over them at load, ~18.7 GiB peak with six views.
@@ -209,8 +219,13 @@ it. The VLM is shown the sheet; it is *not* allowed to add to it.
 every numeric span in the answer is located by a regex that understands
 thousands separators, decimals and the units `% km² m² dB px m` — and refuses
 to read "2019" as three digits or "5 meters" as "5 m". Each span is resolved
-against the sheet under two rules:
+against the sheet under three rules:
 
+- **A `[key]` marker is binding.** When the model writes `0.82
+  [spectral_index_analyzer.ndvi_mean]`, the number must match *that* key's value;
+  an unknown key or a mismatched value is flagged (`UNKNOWN_KEY` /
+  `KEY_VALUE_MISMATCH`) rather than rescued by a coincidental match elsewhere in
+  the sheet. Bare numbers fall back to value search.
 - **Units must match, not just magnitude.** `7.4 %` may only cite a `*_pct`
   scalar. `7.4` matching `changed_area_km2` because the digits agree would
   manufacture a citation for something nobody measured. Matching is on
@@ -273,13 +288,18 @@ it, so a wire change fails `tsc` before it fails a demo).
 | `POST /v1/validate` | pre-flight: manifests, compatibility, supported tasks |
 | `POST /v1/analyze` | synchronous analysis (contract tests, scripting) |
 | `POST /v1/jobs` → 202 | queue an analysis |
-| `GET /v1/jobs/{id}` | poll |
-| `GET /v1/jobs/{id}/events` | SSE stream: `stage`, `plan`, `step_started/completed`, `artifact`, `result`, `error` |
+| `GET /v1/jobs/{id}` | poll / reattach |
+| `DELETE /v1/jobs/{id}` | cancel — stops the job on the server, not just in the UI |
+| `GET /v1/jobs/{id}/events` | SSE stream: `stage`, `plan`, `step_started/completed`, `artifact`, `result`, `error`; `id:` + `Last-Event-ID` replay |
+| `POST /v1/imagery/fetch` | clip one or two Planetary Computer STAC scenes to a bbox as GeoTIFFs (Maps page) |
+| `GET /v1/imagery/{fetch_id}/{name}` | download one fetched GeoTIFF |
 | `GET /v1/traces/{trace_id}` | the stored AuditTrace |
 | `GET /v1/artifacts/{trace}/{id}.{ext}` | raw bytes of one rendered view or mask |
 
 The job store (`api/jobs.py`) is deliberately in-process — one box, one demo,
-no broker — with oldest-first eviction past `MAX_JOBS` so memory is bounded.
+no broker — evicting only finished jobs past `MAX_JOBS` so memory is bounded,
+with a trace-store fallback for evicted results. Tools share process-wide CPU/GPU
+semaphores (`agent/concurrency.py`) so concurrent jobs cannot stack GPU models.
 Errors use one §6 envelope (`code`, `message`, `hint`) everywhere.
 
 ---
@@ -287,8 +307,14 @@ Errors use one §6 envelope (`code`, `message`, `hint`) everywhere.
 ## 4. The Frontend
 
 `frontend/` is a React 19 + Vite 6 + TypeScript 5.9 application styled with
-Tailwind v4 design tokens. It has no router: three sections and a session-only
-history do not need URLs yet.
+Tailwind v4 design tokens. It has no router library: `shell/router.ts` syncs a
+`section` in the UI store with the URL, and `App.tsx` switches between Landing
+(`/`, a three.js globe), the Console (below), Maps (MapLibre + STAC discovery),
+Projects, Saved (IndexedDB library), Use Cases and the printable Report
+(`/report/<trace>`). Heavy sections are lazy chunks; the console entry is held
+under 180 KB by `npm run check:bundle`. Exports — the one-page SITREP PDF
+(pdf-lib) and RFC 7946 GeoJSON — live in `src/export/`; `USER_GUIDE.md` walks
+through all of it. The rest of this section describes the Console.
 
 ### 4.1 Layout
 
@@ -313,7 +339,8 @@ bottom sheet capped at `min(55vh, 24rem)`.
 
 ### 4.2 Streaming and state
 
-Three Zustand stores, kept apart on purpose:
+Zustand stores are kept apart by responsibility; the three at the core of the
+Console are:
 
 - **`state/job.ts`** — a pure reducer over the SSE event stream. Every event
   type from the contract maps to one state transition; it is tested against
@@ -326,7 +353,8 @@ Three Zustand stores, kept apart on purpose:
   three columns without prop-drilling.
 
 `api/sse.ts` parses the stream with reconnect and last-event-id; `thread/useRun.ts`
-owns the job lifecycle (submit → stream → result / cancel / retry). MSW
+owns the job lifecycle (submit → stream → result / cancel via `DELETE` /
+bounded reattach via `thread/resume.ts` if the stream drops). MSW
 (`?mock=1`) replays the captured fixtures so the whole UI runs with the
 backend down.
 
