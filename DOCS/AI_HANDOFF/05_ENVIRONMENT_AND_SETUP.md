@@ -70,6 +70,7 @@ there (and it needs no ML extras at all).
 | `SATQUERY_ACCESS_CODE` | — | shared code(s), comma-separated; set → every `/v1` request needs `X-SatQuery-Code` (or `?code=`). Blanked in `tests/conftest.py` |
 | `SATQUERY_ACCESS_MAX_FAILURES` / `SATQUERY_ACCESS_LOCKOUT_S` | 10 / 900 | wrong codes per client IP before `429 ACCESS_LOCKED`, and the window |
 | `SATQUERY_MAX_CONCURRENT_JOBS` / `SATQUERY_MAX_ACTIVE_JOBS` | 1 / 4 | analyses on the GPU at once / running + waiting before `429 GPU_BUSY` |
+| `SATQUERY_RESOLUTION_TIERS` | true | **env only, not a Settings field** (read by the planner). false = never route ≥ 5 m inputs to the `:medium_res` plans; `tests/conftest.py` sets it false |
 | `SATQUERY_FAST_PATH_METRICS_URL` | — | `http://127.0.0.1:20241/quicktunnel` on the hosted box: `/v1/health` reports the quick tunnel as `fast_base_url` |
 | `SATQUERY_CD_CHECKPOINT` / `SATQUERY_SEG_CHECKPOINT` | — | **not Settings fields**; read by the tools from `os.environ`, which `load_env_file()` populates from `.env` at startup |
 

@@ -172,6 +172,13 @@ One per uploaded image. Produced by Phase 1.
 
 `gsd_ratio` and `size_ratio` are always computed as `max/min`, so they are `>= 1.0`.
 
+`coregistration_offset_px` (2026-11-25): a shift above 5 px recovered by a **weak**
+phase-correlation match (normalised error > 0.8) is reported as `WARN` with
+`value: null` — not `FAIL`. On an identical georeferenced grid such a shift is the
+correlation latching onto scene change (a reservoir that filled) or onto two
+sensors (optical vs SAR); genuine misregistration of the same content correlates
+strongly and still fails.
+
 ### 3.3 `CompatibilityReport`
 
 | Field | Type | Null? | Notes |

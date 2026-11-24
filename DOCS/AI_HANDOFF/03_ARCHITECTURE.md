@@ -39,7 +39,7 @@ GET /v1/registry                  live tool catalogue     GET /v1/health   devic
 `agent/pipeline.py` orchestrates (images + query → AuditTrace) for both routers;
 `agent/events.py` is the progress sink the jobs router plugs in.
 
-## 2. The tool registry (15 tools, `configs/registry.yaml`)
+## 2. The tool registry (16 tools, `configs/registry.yaml`)
 
 | Tool | Device | Needs | Fallback | Key scalars |
 |---|---|---|---|---|
@@ -48,14 +48,27 @@ GET /v1/registry                  live tool catalogue     GET /v1/health   devic
 | `spectral_index_analyzer` | cpu | red, nir (+green, swir1) | — | nd{vi,wi,bi}_{mean,std,…}, {vegetation,water,built_up}_fraction_pct |
 | `sar_backscatter_analyzer` | cpu | vv (+vh) | — | sigma0_{vv,vh}_db_*, vv_vh_ratio_db_*, speckle_cv, low_backscatter_fraction_pct |
 | `change_statistics` | cpu | CHANGE_MASK | — | changed_area_{pct,m2,km2}, component_count |
+| `class_outliner` | cpu | optical (green/nir/swir1) or SAR (vv) | — | {water,vegetation,built_up}_outline_{fraction_pct,area_m2}, _regions, _largest_region_{m2,location}; draws an OVERLAY_PNG outline over true colour / backscatter |
 | `object_counter` | cpu | BBOX_SET or SEGMENTATION | — | count, <class>_count |
 | `image_diff_change` | cpu | 2 images | — | CVA (optical) / log-ratio (SAR), Otsu |
 | `siamese_change_detector` | rocm:0 | `SATQUERY_CD_CHECKPOINT` | image_diff_change | tiled inference, calibrated threshold |
 | `semantic_segmenter` | rocm:0 | `SATQUERY_SEG_CHECKPOINT` | spectral_index_analyzer | <class>_fraction_pct, <class>_area_m2 |
-| `text_grounding` | rocm:0 | VLM | semantic_segmenter | n_boxes, mean_box_score; pixel → WGS84 via `ViewGeometry` (pixel-only when no CRS) |
+| `text_grounding` | rocm:0 | VLM | semantic_segmenter | n_boxes, mean_box_score; pixel → WGS84 via `ViewGeometry` (pixel-only when no CRS). `strategy: detect_all` (COUNT/GROUNDING plans) asks the base model — adapter bypassed via `use_adapter=False` — for every instance as JSON, over 1/2/3-per-side overlapping tiles by source size, and merges tile-edge duplicates |
 | `physics_agreement` | cpu | optical + SAR | — | agreement_pct, built_up_confirmed_pct, … |
 | `crossmodal_consistency` | rocm:0 | torchgeo DOFA | physics_agreement | agreement_mean, divergent_area_pct |
 | `vlm_vqa` / `vlm_caption` / `vlm_change_vqa` | rocm:0 | servable backend | — | none by design |
+
+**Plan selection notes (2026-11-25).** Outline questions (SEGMENTATION, incl.
+"find floods", "locate built-up areas") run `class_outliner` from fixed thresholds
+(water: MNDWI > 0 & NDVI < 0.1, NDWI without SWIR, VV < −18 dB on SAR). When every
+input is ≥ 5 m GSD, `planner.resolution_tier` tries `task|pair|modality:medium_res`
+first: change questions on 10 m pairs use `image_diff_change` (which excludes water
+present in both epochs) instead of the 0.5 m-trained Siamese detector.
+`SATQUERY_RESOLUTION_TIERS=false` disables it (the test suite does). Answers for
+outline, change, cross-modal and classification tasks lead with cited measured
+sentences (`aggregator.*_sentences`) before the synthesiser's prose, and
+`models/prompts/provenance.py` rewrites "sourced from GoogleEarth / high-resolution"
+claims from the ingest manifest.
 
 `available: true` in YAML is intent; `registry.default_registry` intersects it with
 `tools.catalog.runnable_tools()`, so `/v1/registry` is honest per machine. Tool
