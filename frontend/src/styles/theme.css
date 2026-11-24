@@ -602,27 +602,21 @@
     }
   }
 
-  /* React Flow's zoom controls ship white-on-white; give them the palette. */
+  /* React Flow's zoom controls ship white-on-white. v12 paints them from its
+     own --xy-* variables in an unlayered stylesheet, which outranks a class
+     rule here, so the palette goes in through those variables. */
+  .react-flow {
+    --xy-controls-button-background-color: var(--color-surface-elevated);
+    --xy-controls-button-background-color-hover: var(--color-surface-card);
+    --xy-controls-button-color: var(--color-text-lo);
+    --xy-controls-button-color-hover: var(--color-text-hi);
+    --xy-controls-button-border-color: var(--color-line);
+    --xy-controls-box-shadow: none;
+  }
   .sq-flow-controls {
-    box-shadow: none;
     border: 1px solid var(--color-line);
     border-radius: 0.5rem;
     overflow: hidden;
-  }
-  .sq-flow-controls .react-flow__controls-button {
-    background: var(--color-surface-elevated);
-    border-bottom: 1px solid var(--color-line);
-    color: var(--color-text-lo);
-    fill: currentColor;
-    width: 28px;
-    height: 28px;
-  }
-  .sq-flow-controls .react-flow__controls-button:hover {
-    color: var(--color-text-hi);
-    background: var(--color-accent-glow);
-  }
-  .sq-flow-controls .react-flow__controls-button svg {
-    fill: currentColor;
   }
 
   /* The honesty signal of API_CONTRACT §8.5, as a single reusable class:
