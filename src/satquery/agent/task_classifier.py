@@ -92,6 +92,16 @@ CLASS_TERM: Final[str] = _class_term_pattern()
 before "water"."""
 
 
+OUTLINABLE_TERM: Final[str] = (
+    r"\b(water ?bod(?:y|ies)|water|lakes?|rivers?|reservoirs?|ponds?|wetlands?|"
+    r"vegetation|vegetated|forests?|trees|green cover|mangroves?|crops?|farmland|"
+    r"built[- ]?up(?: areas?)?|urban(?: areas?)?|settlements?)\b"
+)
+"""The extents ``class_outliner`` can draw. Narrower than :data:`CLASS_TERM` on
+purpose: "locate the aircraft" names a vocabulary class too, but an aircraft is
+an object to box, not an extent to outline."""
+
+
 SECONDARY_TASKS: Final[dict[TaskType, list[TaskType]]] = {
     TaskType.CHANGE_VQA: [TaskType.CHANGE_MAP],
     TaskType.CHANGE_CAPTION: [TaskType.CHANGE_MAP],
@@ -167,11 +177,24 @@ RULES: Final[tuple[Rule, ...]] = (
     _rule(21, TaskType.SEGMENTATION, 0.88, COVERAGE_WORD, also=CLASS_TERM),
     _rule(22, TaskType.SEGMENTATION, 0.88,
           r"\b(segment\w*|delineate|outline|extent of|boundary of)\b"),
-    _rule(23, TaskType.GROUNDING, 0.88,
-          r"\b(where|locate|find|point to|point out|bounding box|highlight)\b"),
+    # Flood wording is a water-extent question whatever verb carries it: "find
+    # floods in my area" is answered by outlining open water, not by one box.
+    _rule(24, TaskType.SEGMENTATION, 0.88,
+          r"\b(flood\w*|inundat\w*|submerge\w*|waterlogg\w*|water ?logged)\b"),
+    # A sensor comparison precedes GROUNDING because it is usually phrased as
+    # "where do optical and SAR disagree": the "where" is about the disagreement,
+    # not an object to box. Over a single image Stage A gates it, and the
+    # cascade falls through to the rules below.
     _rule(30, TaskType.CROSS_MODAL_COMPARE, 0.91,
           r"\b(sar|radar|backscatter|microwave)\b",
           also=r"\b(optical|spectral|visible|multispectral)\b"),
+    # "Locate built-up areas" / "where is the water" name a land-cover class,
+    # which is an extent to outline; boxes are for objects ("locate the
+    # aircraft"), and one box around a whole city answers nothing.
+    _rule(25, TaskType.SEGMENTATION, 0.86,
+          r"\b(where|locate|find|highlight|show)\b", also=OUTLINABLE_TERM),
+    _rule(26, TaskType.GROUNDING, 0.88,
+          r"\b(where|locate|find|point to|point out|bounding box|highlight)\b"),
     _rule(31, TaskType.CROSS_MODAL_VQA, 0.86,
           r"\b(complement\w*|combin\w*|together|both sensors|fuse\w*)\b",
           pair_types=frozenset({PairType.CROSS_MODAL})),
