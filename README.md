@@ -65,6 +65,11 @@ same interface and needs no Python ML stack at all; do not run both at once on a
 and `DOCS/DEMO_LAPTOP_RUNBOOK.md` is the runbook for the air-gapped 8 GB
 demo laptop (`SATQUERY_VLM_MAX_VIEWS=3`, 8192 context, q8_0 KV cache).
 
+**Hosted demo.** The public demo runs the frontend on Vercel and the API on the
+home GPU box, reached through a Tailscale Funnel URL (stable) and a Cloudflare quick
+tunnel (fast), behind a shared access code and a one-at-a-time GPU queue — all
+free-tier, no domain. Setup, services and checks: `DOCS/PUBLIC_DEMO_HOSTING.md`.
+
 > On a ROCm box the lockfile's CUDA torch is replaced by hand — see
 > `DOCS/AI_HANDOFF/05_ENVIRONMENT_AND_SETUP.md`. **Do not run a bare `uv sync`
 > or a plain `uv run` in that environment**: both re-sync the lockfile and
@@ -143,6 +148,7 @@ make ci && git add -A && git commit && git push origin main
 3. `DOCS/FINAL_QA_CHECKLIST.md` and `DOCS/DEMO_LAPTOP_RUNBOOK.md` — the pre-final QA pass
    and the air-gapped laptop setup.
 4. `DOCS/API_CONTRACT.md` — the frozen wire contract (additive changes only).
+5. `DOCS/PUBLIC_DEMO_HOSTING.md` — how the hosted demo is served, secured and restarted.
 
 ## License
 

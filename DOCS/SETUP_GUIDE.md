@@ -104,6 +104,19 @@ SATQUERY_CD_CHECKPOINT=data/checkpoints/cd/levircd_resnet18.ckpt.pt   # siamese_
 Without a checkpoint the tool reports itself not servable, drops out of the registry,
 and plans degrade to spectral methods — by design, and visibly in the trace.
 
+For a deployment reachable from the internet, also set an access code and, if a
+Cloudflare quick tunnel runs alongside, its metrics URL (full walkthrough in
+`DOCS/PUBLIC_DEMO_HOSTING.md`):
+
+```bash
+SATQUERY_ACCESS_CODE=<code>                                        # every /v1 request needs it
+SATQUERY_FAST_PATH_METRICS_URL=http://127.0.0.1:20241/quicktunnel  # /v1/health reports the fast URL
+# SATQUERY_MAX_CONCURRENT_JOBS=1  SATQUERY_MAX_ACTIVE_JOBS=4       # the GPU line (defaults)
+```
+
+The test suite blanks `SATQUERY_ACCESS_CODE` in `tests/conftest.py`, so a code in
+your `.env` does not turn every API test into a 401.
+
 ### 4. Run it
 
 ```bash
@@ -250,3 +263,6 @@ DIOR-RSVG is gated: accept its terms on Hugging Face and `export HF_TOKEN=…` t
 | `npm run lint` crashes loading oxlint | Node < 22.12 on `PATH` |
 | fonts look like Arial | `npm run fonts:sync` |
 | `make eval` can't find views | `data/processed/` is missing — rebuild it (above) |
+| UI shows a code screen | `SATQUERY_ACCESS_CODE` is set in `.env`; enter it, or unset it for local work |
+| `429 GPU_BUSY` | four analyses already running or waiting; wait, or raise `SATQUERY_MAX_ACTIVE_JOBS` |
+| hosted site blocked with *Permission was denied … address space* | this device is in the tailnet; `sudo tailscale set --accept-dns=false` (`PUBLIC_DEMO_HOSTING.md`) |

@@ -1,7 +1,32 @@
-# 02 — Current State (as of 2026-09-29, HEAD `1782163`)
+# 02 — Current State (as of 2026-09-29, HEAD `1782163`; hosting update 2026-11-25)
 
 Everything here was measured on the dev box or read from the repo on the snapshot
 date.
+
+## Update 2026-11-25 — hosted public demo
+
+The demo is now served publicly from the dev box. Runbook: `DOCS/PUBLIC_DEMO_HOSTING.md`.
+
+| Commit | Subject |
+|---|---|
+| `5f9afe0` | `frontend/vercel.json`: Vite build + SPA rewrite for Vercel |
+| `42ba8d8` | shared access code (`src/satquery/api/access.py`, `AccessGate.tsx`) and the GPU line (`DeviceGates.admit`/`job_slot`, `429 GPU_BUSY`) |
+| `124d62d` | hosted build defaults *Online features* on; undecodable (GeoTIFF) thumbnails hidden |
+| `72e91dd` | fast path: `/v1/health.fast_base_url` from cloudflared metrics (`api/fast_path.py`), `?poll=true` short-poll events, client base switching with fallback |
+
+- **Topology:** Vercel frontend (`VITE_API_BASE` = Tailscale Funnel URL) → Funnel as the
+  stable signpost → Cloudflare quick tunnel as the fast path → uvicorn on
+  `127.0.0.1:8000`. Funnel ingress for this tailnet is in Paris (~0.4 s/request from
+  India, ~0.8 MB/s); the quick tunnel lands in Delhi (~0.1 s, 16 MB upload in 1.6 s).
+- **Services:** systemd user units `satquery-api`, `satquery-tunnel`, `satquery-awake`,
+  enabled with linger (start at boot without a login).
+- **Model weights:** the Qwen3-VL-8B HF snapshot deleted in the 2026-09-29 cleanup was
+  re-downloaded (17 GB, `~/.cache/huggingface/hub`), so the `hf` backend serves again.
+  First answer after an API restart ~26–30 s (model load); later ~3–10 s.
+- **Tests:** backend **648** passed; frontend **368** in 39 files.
+- **Git history:** `main` was rewritten on 2026-11-24 (commit messages only; trees,
+  authors and dates unchanged), so the hashes listed below for commits after
+  `44e6947` now differ: e.g. `77bea25` → `git log --oneline` on `main`.
 
 ## Git history
 

@@ -123,3 +123,18 @@
 29. **The bf16 HF backend needs the base weights** — after the 2026-09-29 cache wipe
     the first load re-downloads 17 GB unless `SATQUERY_VLM_MODEL_PATH` points at
     `models/sq-lora-v2-full-merged` (then leave the adapter unset).
+30. **`.env`'s `SATQUERY_ACCESS_CODE` would 401 every API test** — `Settings` reads `.env`
+    itself; `tests/conftest.py` sets it blank first. Tests of the guard pass their own
+    `Settings`; routes read `get_settings()`, so override that dependency too.
+31. **The access middleware must be added before `CORSMiddleware`** (`install_access_guard`
+    in `create_app`): the later-added middleware wraps the earlier one, and a 401 without
+    CORS headers reaches the browser as an opaque network error, not "enter your code".
+32. **Cloudflare quick tunnels buffer every streamed response** until it ends (tested
+    SSE, NDJSON, plain, octet-stream; it flushes only past ~256 KB). Job events go over
+    `?poll=true` there; never assume SSE works through `trycloudflare.com`.
+33. **A device logged into the tailnet cannot use the hosted site** unless it runs
+    `tailscale set --accept-dns=false`: MagicDNS resolves the Funnel name to `100.x`, and
+    Chrome blocks a public origin from calling a private address ("Permission was denied
+    … address space").
+34. **The `.tif` preview is an object URL no browser can decode**; `ManifestCard` drops
+    it on `onError` instead of showing a broken image.

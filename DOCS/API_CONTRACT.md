@@ -16,8 +16,8 @@
 |---|---|
 | Base URL | `http://localhost:8000` (dev). All paths below are relative to it. |
 | API prefix | `/v1` on every functional route. |
-| Auth | **None.** Hackathon scope. No `Authorization` header is read. Do not add one. |
-| CORS | `*` origins, methods `GET, POST, OPTIONS`, headers `*`, `expose_headers: ["X-Trace-Id"]`. |
+| Auth | No user accounts and no `Authorization` header. A deployment may require a shared **access code** (`SATQUERY_ACCESS_CODE`, §4.12): the `X-SatQuery-Code` header on every `/v1` request. Unset (the default), the API is open. |
+| CORS | `*` origins, methods `GET, POST, DELETE, OPTIONS`, headers `*`, `expose_headers: ["X-Trace-Id"]`. Preflights never need the access code. |
 | JSON casing | `snake_case` everywhere. No exceptions. |
 | Timestamps | ISO-8601 UTC with explicit `Z` suffix, e.g. `2026-09-05T12:00:00Z`. |
 | Durations | Integer **milliseconds**, field suffix `_ms`. |
@@ -387,6 +387,13 @@ Identical multipart body to `/v1/analyze`. Returns `202`:
 
 `Content-Type: text/event-stream`. See §5.
 
+**Short-poll form (added 2026-11-25, additive):** `?poll=true` answers with every
+event after the last id (`Last-Event-ID` or `?after=`) as soon as there is at least
+one — waiting up to 8 s, then answering with a bare `: ping` — and closes. The body
+is the same SSE frames, so one parser reads both forms. It exists for proxies that
+buffer a response until it ends (a Cloudflare quick tunnel does, whatever the content
+type); the client loops, resuming from the last `id`, until `done` or `error`.
+
 ### 4.5 `POST /v1/validate`
 
 Ingestion + compatibility only. No tools run, no GPU touched. Cheap pre-flight for the upload UI.
@@ -436,6 +443,8 @@ Drives the frontend "capabilities" panel. `available: false` entries must be sho
 ```
 
 `igpu_masked` asserts `HIP_VISIBLE_DEVICES=0` took effect (Master.md §9, risk row 2). A `false` here is a red flag before any demo.
+
+Added (additive, 2026-11-25): `fast_base_url` (string or `null`) — a faster public base URL the same API is also reachable at, read from a local `cloudflared` quick tunnel when `SATQUERY_FAST_PATH_METRICS_URL` is set. A client may move its traffic there after a successful health check against it; that mirror buffers streams, so read job events there with `?poll=true` (§4.4). See `DOCS/PUBLIC_DEMO_HOSTING.md`.
 
 Added (additive, 2026-09-12): `jobs_running`, `jobs_retained` and `leaked_gpu_permits` (all integers, default 0). `leaked_gpu_permits` counts GPU tool threads that overran their timeout and are still running; past the process limit `status` is `"degraded"`.
 
@@ -501,6 +510,26 @@ Clips one or two Planetary Computer scenes to a bbox and writes each as a small 
 
 ---
 
+### 4.12 Access code and GPU admission (added 2026-11-25, additive)
+
+**Access code.** With `SATQUERY_ACCESS_CODE` set (one or more comma-separated codes),
+every request under `/v1` must carry a matching code in the `X-SatQuery-Code` header,
+or as `?code=` on URLs the browser loads itself (`<img src>`, downloads). Comparison
+is constant-time. `OPTIONS` preflights and paths outside `/v1` (`/docs`,
+`/openapi.json`) are not gated. A missing code answers `401 ACCESS_CODE_REQUIRED`, a
+wrong one `401 ACCESS_CODE_INVALID`; after `access_max_failures` (default 10) wrong
+codes from one client IP within `access_lockout_s` (default 900 s) that IP gets
+`429 ACCESS_LOCKED` until the window passes. The 401/429 responses carry the CORS
+headers, so a browser can read them.
+
+**Admission.** `POST /v1/jobs` and `POST /v1/analyze` share one line for the GPU:
+`max_concurrent_jobs` (default 1) analyses run at once and the rest wait in arrival
+order — a waiting job stays `queued`. Past `max_active_jobs` (default 4) running or
+waiting, a new request is refused before anything is spooled with
+`429 GPU_BUSY`.
+
+---
+
 ## 5. SSE Event Protocol
 
 Each message: `id: <seq>` + `event: <type>` + `data: <json>`. Heartbeat comment `: ping` every 15 s.
@@ -553,6 +582,10 @@ Ordering guarantee: `queued` → `stage(ingesting…planning)` → `plan` → in
 | `JOB_ALREADY_FINISHED` | 409 | `DELETE /v1/jobs/{id}` on a terminal job |
 | `JOB_CANCELLED` | 499 | terminal `error` event of a cancelled job (never an HTTP response status) |
 | `TOO_MANY_JOBS` | 429 | every retained job is still running; nothing can be evicted (`POST /v1/jobs`) |
+| `ACCESS_CODE_REQUIRED` | 401 | the deployment requires an access code and none was sent (§4.12) |
+| `ACCESS_CODE_INVALID` | 401 | the access code sent does not match (§4.12) |
+| `ACCESS_LOCKED` | 429 | too many wrong access codes from this client IP; retry after the lockout window (§4.12) |
+| `GPU_BUSY` | 429 | `max_active_jobs` analyses are already running or waiting (`POST /v1/jobs`, `POST /v1/analyze`, §4.12) |
 
 Warning codes added 2026-09-12 (in `warnings[]`, never errors): `OPTION_IGNORED` (an accepted option this server does not act on was set off-default: `vlm_backend`, `adapter_version`, `artifact_format`), `LATENCY_BUDGET_EXCEEDED` (`options.max_latency_ms` overrun; nothing was cut short), `RUN_CANCELLED`, `TOOL_TIMEOUT_LEAKED_PERMIT`. `query` on `/v1/analyze` and `/v1/jobs` is now validated to 1-1000 characters (422 outside that range).
 
@@ -598,7 +631,7 @@ The canonical example. Full trace in Master.md §4.4, with these contract-level 
 
 1. **Start against the mock.** Phase 0 ships every endpoint returning schema-valid fixtures. `openapi.json` is committed — generate a typed client from it (`openapi-typescript`, `orval`).
 2. **Call `/v1/validate` on file select, before the user types.** It is fast and GPU-free, and `supported_tasks` tells you which questions to offer.
-3. **Prefer `/v1/jobs` + SSE for anything bi-temporal.** Change detection alone is ~1.8 s; a full VLM synthesis pushes past a comfortable sync wait.
+3. **Prefer `/v1/jobs` + SSE for anything bi-temporal.** Change detection alone is ~1.8 s; a full VLM synthesis pushes past a comfortable sync wait. Behind a proxy that buffers streams, read events with `?poll=true` (§4.4).
 4. **Draw the DAG from the `plan` SSE event.** The execution trace *is* the product — a visible tool graph filling in step by step is the single most persuasive thing on screen for the judges.
 5. **Render `uncited_numeric_spans` when non-empty.** It demonstrates the anti-hallucination guard is live rather than claimed.
 6. **Never hide `DEGRADED`.** Show the fallback badge and the reduced confidence.

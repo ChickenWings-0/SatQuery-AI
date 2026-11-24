@@ -26,6 +26,7 @@ plan that has been executed; read for the *why*, not for status. Everything live
 |---|---|---|
 | `USER_GUIDE.md` | CURRENT (2026-09-18) | for judges, testers, developers: local-first philosophy, sourcing imagery, every UI feature, shortcuts, troubleshooting |
 | `SETUP_GUIDE.md` | CURRENT | levels A (frontend mock) / B (API, no VLM) / C (full stack), llama.cpp path, rebuilding data and training |
+| `PUBLIC_DEMO_HOSTING.md` | RUNBOOK (2026-11-25) | the hosted demo: Vercel frontend, Tailscale Funnel signpost, Cloudflare quick-tunnel fast path, access code, GPU queue, systemd user units, restart and troubleshooting |
 | `DEMO_LAPTOP_RUNBOOK.md` | RUNBOOK | air-gapped Windows RTX 4070 laptop: Q4_K_M GGUF via `llama-server`, API, built frontend, off one USB stick |
 | `FINAL_QA_CHECKLIST.md` | RUNBOOK (sign-off empty) | manual QA before the final, per network tier, with a sign-off sheet |
 | `HACKATHON_PITCH.md` | CURRENT | the SIH narrative, value props, demo script, measured numbers |

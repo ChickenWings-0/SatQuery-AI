@@ -85,6 +85,19 @@ SSE stream, and citations can be checked without weights.
 Tier B for the demo, and only turn on Tier A if the venue Wi-Fi has been tested from that
 laptop that day.
 
+**The hosted demo** is Tier A served from the internet: the frontend on Vercel, the API
+and GPU on the home box (`DOCS/PUBLIC_DEMO_HOSTING.md`). Two things differ from a local
+run:
+
+- **An access code screen comes first.** Enter the code you were given; the browser
+  remembers it. A wrong code says so; too many wrong codes lock that network out for
+  15 minutes.
+- **Imagery search is already on** — the hosted build defaults it on, so the Maps page
+  works without visiting Settings.
+
+The GPU answers one question at a time. If several people ask at once, later questions
+wait their turn; past four in line, the newest gets *"The GPU is busy … ask again"*.
+
 ### 1.4 Getting the stack up
 
 ```bash
@@ -138,9 +151,10 @@ handled server-side (`src/satquery/ingest/stac_fetch.py`).
 **Prerequisites**
 
 1. Internet reachable from the machine running the *backend* (it does the clipping).
-2. **Settings (`⌘,`) → Imagery search on the Maps page → on.** This is off by default so
-   an air-gapped judging hall never sees a hanging request. In `?mock=1` it is always on
-   and answers from `frontend/public/samples/stac/`.
+2. **Settings (`⌘,`) → Imagery search on the Maps page → on.** This is off by default in
+   a local build so an air-gapped judging hall never sees a hanging request; the hosted
+   build (Vercel) turns it on by default. In `?mock=1` it is always on and answers from
+   `frontend/public/samples/stac/`.
 
 **Steps**
 

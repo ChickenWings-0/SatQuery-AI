@@ -67,6 +67,10 @@ there (and it needs no ML extras at all).
 | `SATQUERY_VLM_MAX_NEW_TOKENS` / `…_REQUEST_TIMEOUT_S` / `…_IDLE_UNLOAD_S` | 384 / 180 / 900 | |
 | `SATQUERY_VLM_ATTN_IMPLEMENTATION` | None | `sdpa` on ROCm |
 | `SATQUERY_VLM_PROMPT_VERSION` | `grounded_v1` | |
+| `SATQUERY_ACCESS_CODE` | — | shared code(s), comma-separated; set → every `/v1` request needs `X-SatQuery-Code` (or `?code=`). Blanked in `tests/conftest.py` |
+| `SATQUERY_ACCESS_MAX_FAILURES` / `SATQUERY_ACCESS_LOCKOUT_S` | 10 / 900 | wrong codes per client IP before `429 ACCESS_LOCKED`, and the window |
+| `SATQUERY_MAX_CONCURRENT_JOBS` / `SATQUERY_MAX_ACTIVE_JOBS` | 1 / 4 | analyses on the GPU at once / running + waiting before `429 GPU_BUSY` |
+| `SATQUERY_FAST_PATH_METRICS_URL` | — | `http://127.0.0.1:20241/quicktunnel` on the hosted box: `/v1/health` reports the quick tunnel as `fast_base_url` |
 | `SATQUERY_CD_CHECKPOINT` / `SATQUERY_SEG_CHECKPOINT` | — | **not Settings fields**; read by the tools from `os.environ`, which `load_env_file()` populates from `.env` at startup |
 
 The dev box `.env` (see `02`) serves the adapter via `hf` with both checkpoints set.

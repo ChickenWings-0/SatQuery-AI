@@ -7,7 +7,9 @@ open, and the conventions and machine gotchas that cost days to learn the first 
 
 **Snapshot date:** 2026-09-29 · **HEAD:** `1782163` (`check fix`) on `main`, plus an
 uncommitted docs/gitignore reorganisation (all Markdown moved into `DOCS/`, `.claude/`
-ignored). **Remote:** `git@github.com:ChickenWings-0/SatQuery-AI.git`.
+ignored). **Updated 2026-11-25** for the hosted public demo (access code, GPU queue,
+Vercel + Tailscale Funnel + Cloudflare quick tunnel) — see `02` (top section) and
+`DOCS/PUBLIC_DEMO_HOSTING.md`. **Remote:** `git@github.com:ChickenWings-0/SatQuery-AI.git`.
 **Repo root:** `/home/chickenwings/SatQuery-AI` · **Owner git identity:** `ChickenWings-0`.
 
 ---
