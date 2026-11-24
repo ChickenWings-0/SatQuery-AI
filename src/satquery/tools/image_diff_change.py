@@ -27,7 +27,7 @@ from typing import Any, Final
 import numpy as np
 from skimage.filters import threshold_otsu
 
-from satquery.render.indices import to_db
+from satquery.render.indices import ndwi, to_db
 from satquery.schemas.enums import Device, Modality, ToolStatus
 from satquery.tools.base import (
     Array,
@@ -85,6 +85,22 @@ def _log_ratio_magnitude(pre: Bands, post: Bands, channel: str) -> Array:
     return magnitude
 
 
+def _persistent_water(
+    ctx: ToolContext, pre: ImageBundle, post: ImageBundle, valid_shape: tuple[int, ...]
+) -> Mask:
+    """Pixels that are open water (NDWI > 0) in both epochs; none for SAR or no NIR."""
+    bands = ("green", "nir")
+    if pre.modality is Modality.SAR or not (pre.has(*bands) and post.has(*bands)):
+        return np.zeros(valid_shape, dtype=bool)
+    before = ctx.pixels.read(pre, list(bands))
+    after = ctx.pixels.read(post, list(bands))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        wet_before = ndwi(before.band("green"), before.band("nir")) > 0.0
+        wet_after = ndwi(after.band("green"), after.band("nir")) > 0.0
+    water: Mask = wet_before & wet_after
+    return water
+
+
 def _otsu(magnitude: Array, valid: Mask) -> float:
     """Otsu's threshold over the finite magnitudes, or 0 for a degenerate field."""
     finite = magnitude[valid & np.isfinite(magnitude)]
@@ -131,8 +147,14 @@ class ImageDiffChange:
             else _cva_magnitude(pre_stack, post_stack, bands)
         )
         valid = pre_stack.valid & post_stack.valid
-        threshold = max(_otsu(magnitude, valid) * sensitivity, min_threshold)
-        mask: Mask = valid & np.isfinite(magnitude) & (magnitude > threshold)
+        # Open water in both epochs is not land change: sea state, tide, turbidity
+        # and glint move its reflectance between any two dates, and in a coastal
+        # scene that swamps the change vector. Kept out of the threshold and the
+        # mask alike; water that appears or disappears still counts.
+        persistent_water = _persistent_water(ctx, pre, post, valid_shape=magnitude.shape)
+        threshold_domain = valid & ~persistent_water
+        threshold = max(_otsu(magnitude, threshold_domain) * sensitivity, min_threshold)
+        mask: Mask = threshold_domain & np.isfinite(magnitude) & (magnitude > threshold)
 
         finite = magnitude[valid & np.isfinite(magnitude)]
         valid_px = int(valid.sum())
@@ -160,6 +182,11 @@ class ImageDiffChange:
                 "method": method,
                 "magnitude_mean": round(float(finite.mean()), 6) if finite.size else 0.0,
                 "magnitude_std": round(float(finite.std()), 6) if finite.size else 0.0,
+                "persistent_water_excluded_pct": (
+                    round(100.0 * float((persistent_water & valid).sum()) / valid_px, 4)
+                    if valid_px
+                    else 0.0
+                ),
             },
             artifacts=drafts,
             data={"change_mask": payload},

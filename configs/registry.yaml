@@ -244,6 +244,7 @@ tools:
         changed_pixel_count: {type: integer}
         threshold: {type: number}
         method: {type: string}
+        persistent_water_excluded_pct: {type: number}
         magnitude_mean: {type: number}
         magnitude_std: {type: number}
     device: cpu

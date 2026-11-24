@@ -29,6 +29,13 @@ UPSAMPLE_FACTOR: Final[int] = 20
 +/-0.5 px recovery the plan requires."""
 
 REGISTRATION_MAX_PX: Final[int] = 512
+
+IMPLAUSIBLE_SHIFT_PX: Final[float] = 5.0
+WEAK_MATCH_ERROR: Final[float] = 0.8
+"""Above this normalised phase-correlation error the match is weak. Measured on
+real pairs: same-content Sentinel-2 epochs score 0.40-0.78; a reservoir that
+filled scores 0.94, optical against SAR 0.99. A shift beyond
+:data:`IMPLAUSIBLE_SHIFT_PX` from a weak match is not trusted."""
 """Longest edge of the grid the two images are resampled onto for correlation."""
 
 
@@ -285,6 +292,25 @@ def estimate_offset(
     dy, dx = dy * scale, dx * scale
     magnitude = math.hypot(dy, dx)
     error_value = float(error) if np.isfinite(error) else 1.0
+    if magnitude > IMPLAUSIBLE_SHIFT_PX and error_value > WEAK_MATCH_ERROR:
+        # A large shift found by a weak match is the correlation latching onto
+        # what changed — a reservoir that filled, a coast at another tide — or
+        # onto two sensors that do not image the same physics. Real
+        # misregistration of the same content correlates strongly. The pair is
+        # already on one georeferenced grid, so the georeferencing stands and
+        # the check says it could not confirm alignment rather than failing it.
+        return OffsetEstimate(
+            dy_px=round(dy, 4),
+            dx_px=round(dx, 4),
+            magnitude_px=round(magnitude, 4),
+            error=round(error_value, 4),
+            reliable=False,
+            detail=(
+                f"Phase correlation found no consistent match (error {error_value:.2f}); "
+                f"its {magnitude:.0f} px shift reflects scene change or differing sensors, "
+                "not misregistration. Alignment is taken from the georeferencing."
+            ),
+        )
     return OffsetEstimate(
         dy_px=round(dy, 4),
         dx_px=round(dx, 4),

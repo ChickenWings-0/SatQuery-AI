@@ -47,7 +47,13 @@ _CROSS_MODAL_TASKS: Final[frozenset[TaskType]] = frozenset(
 INDEX_SHIFT_THRESHOLD: Final[float] = 0.02
 
 _LEAD_TASKS: Final[frozenset[TaskType]] = frozenset(
-    {TaskType.SEGMENTATION, TaskType.CROSS_MODAL_COMPARE, TaskType.CROSS_MODAL_VQA}
+    {
+        TaskType.SEGMENTATION,
+        TaskType.CROSS_MODAL_COMPARE,
+        TaskType.CROSS_MODAL_VQA,
+        TaskType.CHANGE_VQA,
+        TaskType.CHANGE_CAPTION,
+    }
 )
 """Tasks whose answer opens with the measured summary before the model's prose."""
 """Below this an index has not meaningfully moved, and the answer says so."""
@@ -221,6 +227,18 @@ def _cross_modal_answer(writer: _Writer) -> None:
             f"The DOFA foundation-model embeddings of the two scenes diverge over "
             f"{writer.num(f'{dofa}.divergent_area_pct')}% of the area."
         )
+
+
+def change_sentences(sheet: FactSheet) -> str:
+    """The cited change summary (area, regions, index shifts); empty when none ran."""
+    writer = _Writer(sheet)
+    detector = (
+        "image_diff_change"
+        if sheet.number("image_diff_change.changed_area_pct") is not None
+        else "siamese_change_detector"
+    )
+    _change_answer(writer, detector)
+    return writer.text()
 
 
 def cross_modal_sentences(sheet: FactSheet) -> str:
@@ -435,11 +453,12 @@ def aggregate(
     # An outline or a sensor comparison leads with what the tools measured;
     # the synthesiser's prose follows it. Its markers move with it.
     if not templated and task in _LEAD_TASKS:
-        lead = (
-            outline_sentences(sheet)
-            if task is TaskType.SEGMENTATION
-            else cross_modal_sentences(sheet)
-        )
+        if task is TaskType.SEGMENTATION:
+            lead = outline_sentences(sheet)
+        elif task in _CHANGE_TASKS:
+            lead = change_sentences(sheet)
+        else:
+            lead = cross_modal_sentences(sheet)
         if lead:
             body = f"{lead} {body}"
             if markers:
