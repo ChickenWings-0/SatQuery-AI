@@ -8,15 +8,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from satquery.agent.concurrency import DeviceGates
-from satquery.agent.pipeline import AnalysisRequest
+from satquery.agent.pipeline import AnalysisRequest, AnalysisResult
 from satquery.agent.pipeline import analyze as run_analysis
+from satquery.api.access import gpu_busy_response
 from satquery.api.dependencies import get_artifact_store, get_device_gates, get_trace_store
 from satquery.api.uploads import parse_options, spooled_uploads_async
 from satquery.core.config import Settings, get_settings
 from satquery.evidence.citation_validator import CitationPolicy
 from satquery.ingest.pipeline import ingest
 from satquery.render.artifact_store import ArtifactStore
-from satquery.schemas.api import AnalyzeResponse
+from satquery.schemas.api import AnalyzeOptions, AnalyzeResponse
 from satquery.trace.store import TraceStore
 
 QUERY_FORM = Form(min_length=1, max_length=1000, description="1-1000 chars, UTF-8.")
@@ -50,6 +51,36 @@ async def analyze(
     """
     parsed = parse_options(options)
 
+    if not gates.admit():
+        return gpu_busy_response(gates.active_jobs)  # type: ignore[return-value]
+    try:
+        async with gates.job_slot():
+            analysis = await _run(settings, store, traces, gates, images, query, parsed)
+    finally:
+        gates.release_admission()
+
+    trace = analysis.trace
+    return AnalyzeResponse(
+        trace_id=trace.trace_id,
+        answer=trace.answer,
+        artifacts=trace.artifacts if parsed.include_rendered_views else [],
+        confidence=trace.confidence,
+        compatibility=trace.compatibility,
+        resolved_task=trace.resolved_task,
+        trace=trace if parsed.include_trace else None,
+    )
+
+
+async def _run(
+    settings: Settings,
+    store: ArtifactStore,
+    traces: TraceStore,
+    gates: DeviceGates,
+    images: list[UploadFile],
+    query: str,
+    parsed: AnalyzeOptions,
+) -> AnalysisResult:
+    """Spool, ingest and analyse one submission. Called holding a job slot."""
     async with spooled_uploads_async(images, max_bytes=settings.max_upload_mb << 20) as sources:
         # rasterio reads plus phase correlation, off the loop: one large GeoTIFF
         # pair used to stall every SSE heartbeat in the process.
@@ -77,14 +108,4 @@ async def analyze(
             traces=traces,
             gates=gates,
         )
-
-    trace = analysis.trace
-    return AnalyzeResponse(
-        trace_id=trace.trace_id,
-        answer=trace.answer,
-        artifacts=trace.artifacts if parsed.include_rendered_views else [],
-        confidence=trace.confidence,
-        compatibility=trace.compatibility,
-        resolved_task=trace.resolved_task,
-        trace=trace if parsed.include_trace else None,
-    )
+    return analysis

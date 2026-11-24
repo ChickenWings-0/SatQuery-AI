@@ -28,7 +28,8 @@ many are outstanding so ``/v1/health`` can say the box is degraded.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Final, TypeVar
 
@@ -40,6 +41,14 @@ MAX_PARALLEL_TOOLS: Final[int] = 3
 MAX_PARALLEL_GPU_TOOLS: Final[int] = 1
 """One GPU step at a time, process-wide. With 24 GB shared between an 8B VLM and
 the CV models, concurrent GPU steps are the shortest path to VRAM exhaustion."""
+
+MAX_CONCURRENT_JOBS: Final[int] = 1
+"""Whole analyses on the GPU at once. Tool-level gating alone still let N jobs
+interleave their steps, so each one's latency grew with every other visitor."""
+
+MAX_ACTIVE_JOBS: Final[int] = 4
+"""Running plus waiting analyses. Past this a new one is refused, not queued: a
+line nobody can see the end of is worse than a clear "busy, try again"."""
 
 MAX_LEAKED_PERMITS: Final[int] = 2
 """Past this many timed-out GPU threads still running, the process reports
@@ -66,13 +75,53 @@ class DeviceGates:
     max_parallel: int = MAX_PARALLEL_TOOLS
     max_parallel_gpu: int = MAX_PARALLEL_GPU_TOOLS
     leaked_gpu_permits: int = 0
+    max_concurrent_jobs: int = MAX_CONCURRENT_JOBS
+    max_active_jobs: int = MAX_ACTIVE_JOBS
+    active_jobs: int = 0
+    """Admitted analyses, running or waiting for a slot."""
     _cpu: asyncio.Semaphore = field(init=False, repr=False)
     _gpu: asyncio.Semaphore = field(init=False, repr=False)
+    _jobs: asyncio.Semaphore = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Create the semaphores. They bind to a loop lazily, on first contention."""
         self._cpu = asyncio.Semaphore(self.max_parallel)
         self._gpu = asyncio.Semaphore(self.max_parallel_gpu)
+        self._jobs = asyncio.Semaphore(self.max_concurrent_jobs)
+
+    # ------------------------------------------------------- job admission
+
+    def admit(self) -> bool:
+        """Reserve a place in line for one analysis. False when the line is full.
+
+        Synchronous on purpose: the check and the increment happen with no
+        await between them, so two requests cannot both take the last place.
+        Every True must be paired with exactly one :meth:`release_admission`.
+        """
+        if self.active_jobs >= self.max_active_jobs:
+            return False
+        self.active_jobs += 1
+        return True
+
+    def release_admission(self) -> None:
+        """Give back a place reserved by :meth:`admit`."""
+        self.active_jobs = max(0, self.active_jobs - 1)
+
+    @property
+    def jobs_waiting(self) -> int:
+        """Admitted analyses that have not yet started on the GPU."""
+        running = self.max_concurrent_jobs - self._jobs._value  # noqa: SLF001
+        return max(0, self.active_jobs - max(0, running))
+
+    @asynccontextmanager
+    async def job_slot(self) -> AsyncIterator[None]:
+        """Hold one of the ``max_concurrent_jobs`` slots for a whole analysis.
+
+        Waiters are served in arrival order (``asyncio.Semaphore`` is FIFO), so
+        the line behaves like one.
+        """
+        async with self._jobs:
+            yield
 
     def for_device(self, device: Device) -> asyncio.Semaphore:
         """The semaphore a tool declared for *device* must hold while it runs."""
@@ -147,6 +196,8 @@ class DeviceGates:
 
 
 __all__ = [
+    "MAX_ACTIVE_JOBS",
+    "MAX_CONCURRENT_JOBS",
     "MAX_LEAKED_PERMITS",
     "MAX_PARALLEL_GPU_TOOLS",
     "MAX_PARALLEL_TOOLS",

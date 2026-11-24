@@ -45,6 +45,7 @@ from satquery.agent.concurrency import DeviceGates
 from satquery.agent.events import STAGE_PCT
 from satquery.agent.pipeline import AnalysisRequest, refuse_if_incompatible
 from satquery.agent.pipeline import analyze as run_analysis
+from satquery.api.access import gpu_busy_response
 from satquery.api.dependencies import get_artifact_store, get_device_gates, get_trace_store
 from satquery.api.jobs import Job, JobEvent, JobStore, TooManyJobsError, get_job_store
 from satquery.api.uploads import parse_options, persist_uploads_async
@@ -114,13 +115,16 @@ async def _execute(
     no ``done``/``error`` at all and every subscriber waited for ever.
     """
     try:
-        analysis = await run_analysis(
-            spec.request,
-            store=store,
-            traces=traces,
-            emit=lambda event, data: jobs.publish(job, event, data),
-            gates=gates,
-        )
+        # One whole analysis on the GPU at a time; later jobs wait here, in
+        # arrival order, still reporting ``queued`` to anyone watching.
+        async with gates.job_slot():
+            analysis = await run_analysis(
+                spec.request,
+                store=store,
+                traces=traces,
+                emit=lambda event, data: jobs.publish(job, event, data),
+                gates=gates,
+            )
         trace = analysis.trace
         response = AnalyzeResponse(
             trace_id=trace.trace_id,
@@ -156,6 +160,7 @@ async def _execute(
         jobs.publish(job, "error", api_error.model_dump(mode="json"))
         log.debug("jobs.failure_detail", job_id=job.job_id, detail=str(error))
     finally:
+        gates.release_admission()
         shutil.rmtree(spec.directory, ignore_errors=True)
 
 
@@ -185,6 +190,11 @@ async def create_job(
     """
     parsed = parse_options(options)
 
+    # Refuse before spooling or ingesting anything: a full line should cost
+    # the caller nothing but the upload they already sent.
+    if not gates.admit():
+        return gpu_busy_response(gates.active_jobs)  # type: ignore[return-value]
+
     # Spooling and ingestion both happen here, inside the request, and for the
     # same reason: an input the pipeline cannot use must be reported the way
     # /v1/analyze reports it — a 400/413/415/422 with the §6 error envelope —
@@ -212,9 +222,11 @@ async def create_job(
         job_id = new_trace_id()
         job = jobs.create(job_id)
     except TooManyJobsError as error:
+        gates.release_admission()
         shutil.rmtree(directory, ignore_errors=True)
         raise HTTPException(status_code=429, detail=str(error)) from error
     except BaseException:
+        gates.release_admission()
         shutil.rmtree(directory, ignore_errors=True)
         raise
 

@@ -23,6 +23,10 @@ from pathlib import Path
 from typing import Any
 
 os.environ.setdefault("SATQUERY_VLM_DISABLED", "true")
+# The same reasoning for the access code: a demo box keeps one in its .env, which
+# Settings reads directly, and every API test would then answer 401. An empty
+# value disables the guard; tests of the guard pass their own Settings.
+os.environ.setdefault("SATQUERY_ACCESS_CODE", "")
 
 import pytest  # noqa: E402
 

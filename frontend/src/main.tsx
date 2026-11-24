@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import App from '@/App'
+import { AccessGate } from '@/components/shell/AccessGate'
 import { bindRouter } from '@/shell/router'
 import { bindTheme } from '@/state/theme'
 import '@/styles/theme.css'
@@ -17,7 +18,9 @@ function render() {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <App />
+        <AccessGate>
+          <App />
+        </AccessGate>
       </QueryClientProvider>
     </StrictMode>,
   )

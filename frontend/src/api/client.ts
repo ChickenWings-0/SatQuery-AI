@@ -6,6 +6,7 @@
  * :8000 (see `vite.config.ts`). Same-origin in dev means SSE and multipart
  * behave in development exactly as they will in the packaged build.
  */
+import { reportAccessRequired, withAccessCode, withAccessHeader } from '@/api/access'
 import { ContractViolation, parseJobEvent, type JobEvent } from '@/api/events'
 import { readFrames } from '@/api/sse'
 import type {
@@ -160,7 +161,14 @@ async function send(
   signal?.addEventListener('abort', forward, { once: true })
 
   try {
-    return await fetch(`${BASE}${path}`, { ...init, signal: controller.signal })
+    const response = await fetch(`${BASE}${path}`, {
+      ...withAccessHeader(init),
+      signal: controller.signal,
+    })
+    // A guarded API (satquery.api.access) answers 401 to a missing or stale
+    // code; the access gate takes it from here.
+    if (response.status === 401) reportAccessRequired()
+    return response
   } catch (caught) {
     // The caller aborting is not a failure: let it propagate untranslated so
     // `signal.aborted` still identifies it upstream.
@@ -308,12 +316,12 @@ export async function fetchImagery(body: ImageryFetchRequest, signal?: AbortSign
 
 /** Same-origin URL of a fetched GeoTIFF. */
 export function imageryUrl(file: { url: string }): string {
-  return `${BASE}${file.url}`
+  return withAccessCode(`${BASE}${file.url}`)
 }
 
 /** The URL of one artifact. Immutable and cacheable for ever (§4.6). */
 export function artifactUrl(ref: ArtifactRef): string | null {
-  return ref.url ? `${BASE}${ref.url}` : null
+  return ref.url ? withAccessCode(`${BASE}${ref.url}`) : null
 }
 
 // ----------------------------------------------------------------------- SSE
@@ -384,9 +392,10 @@ export async function streamJob(
     const headers: Record<string, string> = { accept: 'text/event-stream' }
     if (options.lastEventId) headers['Last-Event-ID'] = options.lastEventId
     const response = await fetch(`${BASE}/v1/jobs/${jobId}/events`, {
-      headers,
+      ...withAccessHeader({ headers }),
       signal: controller.signal,
     })
+    if (response.status === 401) reportAccessRequired()
     if (!response.ok) throw await toError(response)
 
     for await (const frame of readFrames(response, touch)) {

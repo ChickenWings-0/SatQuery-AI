@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from satquery.agent.concurrency import DeviceGates
+from satquery.api.access import install_access_guard
 from satquery.api.jobs import get_job_store
 from satquery.api.routers import (
     analyze,
@@ -65,7 +66,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # The one set of device gates every request's executor shares. Created
         # here, on the serving loop, rather than at import: see
         # satquery.agent.concurrency for why a module global is wrong.
-        app.state.gates = DeviceGates()
+        app.state.gates = DeviceGates(
+            max_concurrent_jobs=settings.max_concurrent_jobs,
+            max_active_jobs=settings.max_active_jobs,
+        )
         log.info(
             "app.startup",
             app_name=settings.app_name,
@@ -90,6 +94,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
     )
+
+    # Before CORS, so CORS wraps it and a 401 still carries the CORS headers
+    # the browser needs in order to show it (see install_access_guard).
+    install_access_guard(app, settings)
 
     app.add_middleware(
         CORSMiddleware,

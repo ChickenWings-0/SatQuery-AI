@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from satquery.schemas.version import SCHEMA_VERSION
@@ -69,6 +69,39 @@ class Settings(BaseSettings):
 
     api_prefix: str = "/v1"
     cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
+
+    # -- Access control and GPU admission -----------------------------------
+    #
+    # A public tunnel puts the GPU one URL away from anyone who finds it. The
+    # code is checked here, server side, on every /v1 request: a check that
+    # lived only in the frontend would be bypassed by calling the API directly.
+
+    access_code: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Shared access code(s), comma-separated. Set, every /v1 request must "
+            "carry one in the X-SatQuery-Code header (or ?code= for URLs an <img> "
+            "loads). Unset, the API is open, which is right only on localhost."
+        ),
+    )
+    access_max_failures: int = Field(
+        default=10, ge=1, description="Wrong codes one client IP may send before it is locked out."
+    )
+    access_lockout_s: float = Field(
+        default=900.0,
+        gt=0.0,
+        description="How long a lockout lasts, and the window failures count in.",
+    )
+    max_concurrent_jobs: int = Field(
+        default=1,
+        ge=1,
+        description="Analyses allowed on the GPU at once. The rest wait their turn in order.",
+    )
+    max_active_jobs: int = Field(
+        default=4,
+        ge=1,
+        description="Running plus waiting analyses. Past this, new ones are refused with a 429.",
+    )
 
     log_level: str = "INFO"
     log_json: bool = Field(default=True, description="False renders human-readable console logs.")
