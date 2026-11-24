@@ -96,6 +96,17 @@ export function roleOf(artifact: ArtifactRef): TemporalRole {
   return 'single'
 }
 
+/**
+ * Whether an artifact is something an `<img>` can show. GeoJSON exports carry
+ * a URL too, and in the tray they rendered as a broken image.
+ */
+function isPicture(artifact: ArtifactRef): boolean {
+  if (artifact.type === 'GEOJSON' || artifact.type === 'TEXT' || artifact.type === 'SCALARS') {
+    return false
+  }
+  return !/\.(geo)?json(\?|$)/i.test(artifact.url ?? '')
+}
+
 /** One entry in the evidence tray: a view, with whichever halves exist. */
 export interface ViewGroup {
   /** Stable id: view code plus a discriminator for same-code artifacts. */
@@ -127,7 +138,7 @@ export function groupViews(artifacts: ArtifactRef[]): ViewGroup[] {
   const groups = new Map<string, ViewGroup>()
 
   for (const artifact of artifacts) {
-    if (!artifact.url) continue
+    if (!artifact.url || !isPicture(artifact)) continue
 
     const code = viewCodeOf(artifact)
     const role = roleOf(artifact)

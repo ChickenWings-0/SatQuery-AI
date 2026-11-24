@@ -165,6 +165,7 @@ def _change_answer(writer: _Writer, detector: str) -> None:
     index = "spectral_index_analyzer"
     writer.index_shift(f"{index}.ndbi", "NDBI", "impervious surface")
     writer.index_shift(f"{index}.ndvi", "NDVI", "vegetation cover")
+    writer.index_shift(f"{index}.ndwi", "NDWI", "surface water")
 
 
 def _single_optical_answer(writer: _Writer) -> None:
