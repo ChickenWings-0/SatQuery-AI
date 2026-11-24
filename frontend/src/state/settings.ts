@@ -45,7 +45,15 @@ export interface Preferences {
   onlineFeatures: boolean
 }
 
-const DEFAULT: Preferences = { customInstructions: '', seed: 0, onlineFeatures: false }
+/**
+ * A hosted deployment (`VITE_ONLINE_FEATURES_DEFAULT=true`, set in
+ * `vercel.json`) has a route out by definition, and a judge should not have
+ * to find a settings toggle before the Maps search works. The offline build
+ * keeps the off default.
+ */
+const ONLINE_BY_DEFAULT = import.meta.env['VITE_ONLINE_FEATURES_DEFAULT'] === 'true'
+
+const DEFAULT: Preferences = { customInstructions: '', seed: 0, onlineFeatures: ONLINE_BY_DEFAULT }
 
 function read(): Preferences {
   const raw = safeStorage.getItem(SETTINGS_KEY)
@@ -58,7 +66,8 @@ function read(): Preferences {
           ? parsed.customInstructions.slice(0, INSTRUCTIONS_MAX)
           : DEFAULT.customInstructions,
       seed: Number.isInteger(parsed.seed) && (parsed.seed as number) >= 0 ? (parsed.seed as number) : DEFAULT.seed,
-      onlineFeatures: parsed.onlineFeatures === true,
+      onlineFeatures:
+        typeof parsed.onlineFeatures === 'boolean' ? parsed.onlineFeatures : DEFAULT.onlineFeatures,
     }
   } catch {
     return DEFAULT

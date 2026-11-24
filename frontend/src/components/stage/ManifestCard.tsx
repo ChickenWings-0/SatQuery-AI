@@ -6,6 +6,8 @@
  * renders `—` when absent, and the manifest's own `warnings[]` are shown
  * alongside — that is where the *reason* for an unknown value lives.
  */
+import { useState } from 'react'
+
 import { ABSENT, decimal, integer, percent, ratioAsPercent } from '@/format'
 import type { InputManifest } from '@/api/types'
 
@@ -34,6 +36,9 @@ export function ManifestCard({
   previewUrl?: string
 }) {
   const warnings = manifest.warnings ?? []
+  // A GeoTIFF is the normal input and no browser can decode one, so its
+  // object URL renders as a broken-image icon. Drop the thumbnail instead.
+  const [undecodable, setUndecodable] = useState(false)
 
   return (
     <article className="card-flush">
@@ -56,11 +61,12 @@ export function ManifestCard({
       </div>
 
       <div className="flex flex-col gap-4 p-4 min-[400px]:flex-row">
-        {previewUrl && (
+        {previewUrl && !undecodable && (
           <img
             src={previewUrl}
             alt=""
             aria-hidden
+            onError={() => setUndecodable(true)}
             className="size-24 shrink-0 rounded-lg border border-line object-cover [image-rendering:pixelated]"
           />
         )}
