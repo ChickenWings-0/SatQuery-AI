@@ -12,7 +12,7 @@
  */
 import { useEffect, useId, useRef } from 'react'
 
-import { CameraIcon, ChevronDownIcon, SendIcon } from '@/components/ui/icons'
+import { SendIcon } from '@/components/ui/icons'
 import { countOf } from '@/format'
 import { useFocusStore } from '@/state/focus'
 import { queryRoom, useSettingsStore } from '@/state/settings'
@@ -106,31 +106,6 @@ export function QueryComposer({
           className="w-full resize-none [overflow-wrap:anywhere] bg-transparent px-3.5 py-3 text-[13px] leading-relaxed outline-none placeholder:text-text-lo disabled:opacity-50"
         />
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-line-soft px-2.5 py-2">
-          {/* Imagery goes in through the Data Stage's dropzone; this control
-              is a scaffold for attaching it from here, and says so. */}
-          <button
-            type="button"
-            aria-label="Attach imagery (upload in the Data Stage for now)"
-            title="Attach imagery — upload in the Data Stage for now"
-            disabled
-            className="grid size-8 shrink-0 place-items-center rounded-lg text-text-lo transition-colors hover:bg-accent-glow hover:text-text-hi disabled:opacity-50"
-          >
-            <CameraIcon size={16} />
-          </button>
-          <button
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={false}
-            aria-label="Analysis mode: Auto"
-            onClick={() => {
-              /* Mode switching is not implemented yet. */
-            }}
-            className="flex h-8 shrink-0 items-center gap-1 rounded-lg border border-line px-2 text-[11px] font-medium text-text-lo transition-colors hover:border-accent-warm/40 hover:text-text-hi"
-          >
-            Auto
-            <ChevronDownIcon size={12} />
-          </button>
-
           <span
             id={hintId}
             className="flex min-w-0 items-center gap-1.5 text-[11px] text-text-lo"

@@ -29,6 +29,7 @@ export type ViewCode =
   | 'SARDB'
   | 'PAN'
   | 'CHANGE'
+  | 'OUTLINE'
   | 'OTHER'
 
 export const VIEW_NAMES: Record<ViewCode, string> = {
@@ -42,6 +43,7 @@ export const VIEW_NAMES: Record<ViewCode, string> = {
   SARDB: 'SAR backscatter',
   PAN: 'Panchromatic',
   CHANGE: 'Change',
+  OUTLINE: 'Outline',
   OTHER: 'Evidence',
 }
 
@@ -75,7 +77,11 @@ const VIEW_PATTERNS: ReadonlyArray<readonly [ViewCode, RegExp]> = [
 
 export type TemporalRole = 'pre' | 'post' | 'single'
 
+/** `class_outliner`'s overlay: "Water bodies outlined over true colour (img_0)". */
+const OUTLINE_LABEL = /\boutlined\b/i
+
 export function viewCodeOf(artifact: ArtifactRef): ViewCode {
+  if (artifact.type === 'OVERLAY_PNG' && OUTLINE_LABEL.test(artifact.label)) return 'OUTLINE'
   if (artifact.type === 'CHANGE_MASK' || artifact.type === 'OVERLAY_PNG') return 'CHANGE'
   for (const [code, pattern] of VIEW_PATTERNS) {
     if (pattern.test(artifact.label)) return code
@@ -128,7 +134,8 @@ export function groupViews(artifacts: ArtifactRef[]): ViewGroup[] {
 
     // CHANGE_MASK and OVERLAY_PNG are both "CHANGE" but are different pictures,
     // so they get their own entries rather than fighting over one slot.
-    const key = code === 'CHANGE' || code === 'OTHER' ? `${code}:${artifact.id}` : code
+    const key =
+      code === 'CHANGE' || code === 'OTHER' || code === 'OUTLINE' ? `${code}:${artifact.id}` : code
 
     let group = groups.get(key)
     if (!group) {
@@ -138,11 +145,13 @@ export function groupViews(artifacts: ArtifactRef[]): ViewGroup[] {
         // Two CHANGE artifacts land in two entries, so they need two names —
         // a tray showing "Change" twice tells the viewer nothing.
         name:
-          artifact.type === 'CHANGE_MASK'
-            ? 'Change mask'
-            : artifact.type === 'OVERLAY_PNG'
-              ? 'Change overlay'
-              : VIEW_NAMES[code],
+          code === 'OUTLINE'
+            ? (artifact.label.split(/ over /i)[0] ?? VIEW_NAMES.OUTLINE)
+            : artifact.type === 'CHANGE_MASK'
+              ? 'Change mask'
+              : artifact.type === 'OVERLAY_PNG'
+                ? 'Change overlay'
+                : VIEW_NAMES[code],
         pre: null,
         post: null,
         single: null,
@@ -161,7 +170,13 @@ export function groupViews(artifacts: ArtifactRef[]): ViewGroup[] {
     group.comparable = Boolean(group.pre && group.post)
   }
 
-  return order.map((key) => groups.get(key)!).filter((group) => primaryOf(group) !== null)
+  // An outline is the answer to the question that produced it, so it leads the
+  // tray and is what the viewer opens on.
+  const outlinesFirst = [
+    ...order.filter((key) => key.startsWith('OUTLINE:')),
+    ...order.filter((key) => !key.startsWith('OUTLINE:')),
+  ]
+  return outlinesFirst.map((key) => groups.get(key)!).filter((group) => primaryOf(group) !== null)
 }
 
 /** Find the tray entry that holds a given artifact id. */

@@ -106,9 +106,19 @@ entries:
          params: {size_px: 448}}
       - {tool: spectral_index_analyzer, inputs: [single], depends_on: [1],
          params: {indices: [ndvi, ndwi, ndbi]}}
-      - {tool: semantic_segmenter, inputs: [single], depends_on: [1],
-         params: {taxonomy: loveda, min_region_px: 32}}
-      - {tool: vlm_vqa, inputs: ["@1", "@3:SEGMENTATION"], depends_on: [1, 2, 3],
+      - {tool: class_outliner, inputs: [single], depends_on: [1],
+         params: {min_region_px: 12}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2, 3],
+         params: {mode: segmentation, max_new_tokens: 320, temperature: 0.0}}
+  - key: "SEGMENTATION|SINGLE|sar"
+    steps:
+      - {tool: spectral_renderer, inputs: [single], optional: false,
+         params: {size_px: 448}}
+      - {tool: sar_backscatter_analyzer, inputs: [single], depends_on: [1],
+         params: {water_threshold_db: -18.0}}
+      - {tool: class_outliner, inputs: [single], depends_on: [1],
+         params: {min_region_px: 12}}
+      - {tool: vlm_vqa, inputs: ["@1"], depends_on: [1, 2, 3],
          params: {mode: segmentation, max_new_tokens: 320, temperature: 0.0}}
 
   - key: "SEGMENTATION|SINGLE|*"

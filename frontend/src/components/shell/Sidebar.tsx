@@ -87,6 +87,13 @@ const PREFETCH: Partial<Record<NavSection, () => Promise<unknown>>> = {
 
 const prefetchLanding = () => import('@/pages/Landing')
 
+/**
+ * Sections the rail does not link to yet. Datasets has no backend route to
+ * list local scenes, so the page has nothing to show; its URL still resolves.
+ */
+const RAIL_HIDDEN: ReadonlySet<NavSection> = new Set(['datasets'])
+const RAIL_SECTIONS = NAV_SECTIONS.filter((item) => !RAIL_HIDDEN.has(item))
+
 export function Sidebar() {
   const section = useUiStore((state) => state.section)
   const setSection = useUiStore((state) => state.setSection)
@@ -225,7 +232,7 @@ export function Sidebar() {
             ) : null}
           </div>
 
-          {NAV_SECTIONS.map((item) => {
+          {RAIL_SECTIONS.map((item) => {
             const Glyph = ICONS[item]
             const active = item === section
             return (

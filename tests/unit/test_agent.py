@@ -363,10 +363,13 @@ def test_18_unavailable_tool_is_substituted_by_capability_matching(
         "s2_pre",
         registry=registry.with_availability({"semantic_segmenter": False}),
     )
-    segmenter = next(e for e in trace.executions if e.step == 3)
-    assert segmenter.tool == "spectral_index_analyzer"
-    assert segmenter.fallback_of == "semantic_segmenter"
-    assert segmenter.status is ToolStatus.DEGRADED
+    # The outline plan no longer routes through the segmenter at all: water is
+    # outlined from fixed index thresholds by class_outliner, which needs no
+    # checkpoint, so the step runs clean whatever the segmenter's availability.
+    outliner = next(e for e in trace.executions if e.step == 3)
+    assert outliner.tool == "class_outliner"
+    assert outliner.status is ToolStatus.OK
+    assert all(e.tool != "semantic_segmenter" for e in trace.executions)
 
 
 def test_19_a_second_identical_request_hits_the_cache(

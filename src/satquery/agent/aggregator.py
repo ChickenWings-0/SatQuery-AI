@@ -206,6 +206,45 @@ def _cross_modal_answer(writer: _Writer) -> None:
             writer.say(f"For {label} the two sensors concur on {writer.num(key)}% of pixels.")
 
 
+_OUTLINE_NOUNS: Final[dict[str, tuple[str, str]]] = {
+    "water": ("Open water", "water bodies"),
+    "vegetation": ("Vegetation", "vegetated patches"),
+    "built_up": ("Built-up land", "built-up patches"),
+}
+
+
+def outline_sentences(sheet: FactSheet) -> str:
+    """What ``class_outliner`` measured, as cited sentences; empty when it did not run.
+
+    Outline questions are answered by the overlay first and the prose second,
+    so the prose leads with the measured extent rather than leaving it to the
+    synthesiser to restate (or misstate) it.
+    """
+    writer = _Writer(sheet)
+    tool = "class_outliner"
+    for name, (noun, plural) in _OUTLINE_NOUNS.items():
+        fraction = f"{tool}.{name}_outline_fraction_pct"
+        if not writer.has(fraction):
+            continue
+        regions = writer.sheet.number(f"{tool}.{name}_regions") or 0.0
+        if regions < 1:
+            writer.say(f"No {plural} large enough to outline were found in this scene.")
+            continue
+        area = f"{tool}.{name}_outline_area_m2"
+        extent = (
+            f" ({writer.num(area)} m2)" if writer.has(area) else ""
+        )
+        writer.say(
+            f"{noun} covers {writer.num(fraction)}% of the scene{extent}, outlined as "
+            f"{writer.num(f'{tool}.{name}_regions')} separate {plural}."
+        )
+        largest = f"{tool}.{name}_largest_region_m2"
+        where = writer.sheet.value(f"{tool}.{name}_largest_region_location")
+        if writer.has(largest) and isinstance(where, str):
+            writer.say(f"The largest covers {writer.num(largest)} m2, in the {where} of the scene.")
+    return writer.text()
+
+
 def _count_answer(writer: _Writer) -> None:
     """State the count, and only the count."""
     if writer.has("object_counter.count"):
@@ -242,6 +281,8 @@ def compose(task: TaskType, pair_type: PairType, sheet: FactSheet) -> str:
         _sar_answer(writer)
     elif task is TaskType.COUNT:
         _count_answer(writer)
+    elif task is TaskType.SEGMENTATION and outline_sentences(sheet):
+        writer.say(outline_sentences(sheet))
     else:
         _single_optical_answer(writer)
         _sar_answer(writer)
@@ -366,6 +407,15 @@ def aggregate(
     """
     templated = text is None
     body = text if text is not None else compose(task, pair_type, sheet)
+
+    # An outline question leads with what the outliner measured; the
+    # synthesiser's prose follows it. Its markers move with it.
+    if not templated and task is TaskType.SEGMENTATION:
+        lead = outline_sentences(sheet)
+        if lead:
+            body = f"{lead} {body}"
+            if markers:
+                markers = [(offset + len(lead) + 1, key) for offset, key in markers]
 
     if templated:
         skipped = vlm_unavailable(executions)

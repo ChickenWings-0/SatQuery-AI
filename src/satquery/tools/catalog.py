@@ -23,6 +23,7 @@ from typing import Final
 from satquery.tools.base import Tool
 from satquery.tools.change_detect import SiameseChangeDetector
 from satquery.tools.change_statistics import ChangeStatistics
+from satquery.tools.class_outliner import ClassOutliner
 from satquery.tools.crossmodal_dofa import CrossModalConsistency
 from satquery.tools.image_diff_change import ImageDiffChange
 from satquery.tools.object_counter import ObjectCounter
@@ -44,6 +45,7 @@ BUILTIN_TOOLS: Final[Mapping[str, Tool]] = {
         RasterStatistics(),
         SpectralIndexAnalyzer(),
         SarBackscatterAnalyzer(),
+        ClassOutliner(),
         ImageDiffChange(),
         ChangeStatistics(),
         ObjectCounter(),
