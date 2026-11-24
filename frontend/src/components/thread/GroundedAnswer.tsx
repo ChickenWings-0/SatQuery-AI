@@ -19,6 +19,7 @@
  * not read as prose. Stripping is safe for the citations because a claim is
  * located by substring, not by offset — see `annotate.ts`.
  */
+import { WarnIcon } from '@/components/ui/icons'
 import { Fragment, useId, useMemo } from 'react'
 
 import { countOf } from '@/format'
@@ -144,11 +145,9 @@ export function GroundedAnswer({
         // is something to disclaim.
         <div
           role="note"
-          className="mt-3.5 flex gap-2.5 rounded-lg border-l-2 border-warn bg-warn/10 px-3 py-2.5 text-[12px] leading-relaxed text-warn-text"
+          className="mt-3.5 flex gap-2.5 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2.5 text-[12px] leading-relaxed text-warn-text"
         >
-          <span aria-hidden className="shrink-0 text-[11px]">
-            ▲
-          </span>
+          <WarnIcon size={14} className="mt-px shrink-0 text-warn" />
           <p>
             {uncited.length === 1 ? 'One value' : `${uncited.length} values`} in this answer{' '}
             {uncited.length === 1 ? 'is' : 'are'} model-derived estimates the citation validator

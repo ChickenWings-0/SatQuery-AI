@@ -171,6 +171,11 @@ function layout(nodes: StepNode[]): Map<number, { x: number; y: number }> {
   return positions
 }
 
+/** The one method the canvas calls on React Flow's instance. */
+interface FitsView {
+  fitView: (options?: { padding?: number; duration?: number }) => unknown
+}
+
 export default function DagCanvas({
   nodes,
   executions,
@@ -243,8 +248,24 @@ export default function DagCanvas({
 
   useEffect(() => {
     // Nothing to do — the effect exists so a future "pan to focusedStep" has an
-    // obvious home. fitView already frames the whole graph on open.
+    // obvious home. The graph is framed on init, below.
   }, [focusedStep])
+
+  // `fitView` alone frames the graph against the container's size at mount,
+  // and inside the dialog that is mid-animation — the graph landed small in a
+  // corner. Frame again once layout has settled, and whenever the canvas
+  // changes size (the dialog resizing with the window).
+  const onInit = useCallback((instance: FitsView) => {
+    const frame = () => void instance.fitView({ padding: 0.2, duration: 0 })
+    requestAnimationFrame(() => requestAnimationFrame(frame))
+    window.setTimeout(frame, 260)
+    const pane = document.querySelector('.react-flow')
+    if (pane && typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(frame)
+      observer.observe(pane)
+      window.setTimeout(() => observer.disconnect(), 5000)
+    }
+  }, [])
 
   return (
     <ReactFlow
@@ -254,12 +275,13 @@ export default function DagCanvas({
       onNodeClick={onNodeClick}
       fitView
       fitViewOptions={{ padding: 0.2 }}
+      onInit={onInit}
       proOptions={{ hideAttribution: false }}
       nodesConnectable={false}
       className="bg-bg-main"
     >
       <Background color="#2a1f1a" gap={22} size={1} />
-      <Controls showInteractive={false} />
+      <Controls showInteractive={false} className="sq-flow-controls" />
     </ReactFlow>
   )
 }

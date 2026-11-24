@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends
 from satquery.agent.concurrency import DeviceGates
 from satquery.api.dependencies import get_device_gates
 from satquery.api.fast_path import fast_base_url
-from satquery.api.fixtures import mock_registry
 from satquery.api.jobs import JobStore, get_job_store
 from satquery.core.config import Settings, get_settings
 from satquery.models.loader import (
@@ -24,6 +23,7 @@ from satquery.models.loader import (
     resolve_torch_device,
     vram_snapshot,
 )
+from satquery.registry.registry import default_registry
 from satquery.schemas.api import DeviceInfo, HealthResponse, ModelInfo
 from satquery.schemas.enums import HealthStatus
 
@@ -78,10 +78,9 @@ def _models(settings: Settings) -> list[ModelInfo]:
             name=name,
             backend=kind.value,
             loaded=bool(backend is not None and backend.is_loaded),
-            # Nothing in Settings names the adapter, so there is nothing honest
-            # to report: `null` says "unknown", where the fixture's "sq-lora-v3"
-            # would name a specific adapter this process may not be serving.
-            adapter=None,
+            # The configured adapter's run name; null when the base model is
+            # served bare. Never the fixture's name.
+            adapter=settings.adapter_name,
         )
     ]
 
@@ -98,7 +97,9 @@ async def health(
     ``false`` there is a red flag before any demo. ``leaked_gpu_permits`` is the
     other one: a timed-out GPU tool whose thread is still on the card.
     """
-    registry = mock_registry()
+    # The live catalogue, as /v1/registry serves it: the proof strip and the
+    # Tools page must report the same count.
+    registry = default_registry()
     # The device probe is torch on first call — ~10 s of ROCm initialisation —
     # and the frontend polls this every 15 s. Off the loop, so the first poll
     # after a restart does not freeze every job's SSE stream for its duration.
@@ -111,7 +112,7 @@ async def health(
         schema_version=settings.schema_version,
         device=device,
         models=models,
-        tools_available=sum(1 for tool in registry.tools if tool.available),
+        tools_available=sum(1 for tool in registry.tools.values() if tool.available),
         tools_total=len(registry.tools),
         jobs_running=jobs.running,
         jobs_retained=len(jobs),

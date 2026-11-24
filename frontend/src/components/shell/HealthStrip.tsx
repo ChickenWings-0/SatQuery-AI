@@ -101,7 +101,7 @@ export function HealthStrip() {
               ? `${label}. Device ${data.device.name}${data.device.igpu_masked ? '' : ', integrated GPU not masked'}`
               : label
           }
-          className="flex h-9 items-center gap-2 rounded-full border border-line bg-surface-card px-3 text-[12px] font-medium text-text-hi transition-colors hover:border-accent-warm/40"
+          className="flex h-9 shrink-0 items-center gap-2 rounded-full whitespace-nowrap border border-line bg-surface-card px-3 text-[12px] font-medium text-text-hi transition-colors hover:border-accent-warm/40"
         >
           <DotIcon className={dot} />
           <span>{label}</span>

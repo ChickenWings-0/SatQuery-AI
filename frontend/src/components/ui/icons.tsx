@@ -175,6 +175,14 @@ export function BellIcon(props: IconProps) {
   )
 }
 
+export function WarnIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 3.5 17.5 16.5h-15L10 3.5ZM10 8.5v3.5M10 14.25v.01" />
+    </Icon>
+  )
+}
+
 export function SendIcon(props: IconProps) {
   return (
     <Icon {...props}>

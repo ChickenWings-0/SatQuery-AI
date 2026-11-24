@@ -160,7 +160,7 @@ export function Sidebar() {
             <SatelliteIcon size={18} />
           </span>
           <span className="min-w-0">
-            <span className="block text-[15px] leading-tight font-semibold tracking-[-0.01em]">
+            <span className="sr-only block text-[15px] leading-tight font-semibold tracking-[-0.01em] min-[480px]:not-sr-only">
               SatQuery AI
             </span>
             <span className="mt-0.5 hidden text-[11px] leading-snug text-sidebar-text-lo wide:block">
@@ -170,9 +170,9 @@ export function Sidebar() {
         </button>
 
         {/*
-         * Horizontally scrollable on a phone. Seven items do not fit at 390px
-         * and a nav that silently clips its last item is worse than one that
-         * scrolls, so the bar scrolls and every item stays reachable.
+         * Horizontally scrollable on a phone as a last resort; the items are
+         * icon-only below `wide`, so at 390px every section fits on the bar
+         * and nothing is clipped mid-word.
          */}
         <nav
           className="-mx-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1 wide:mx-0 wide:mt-5 wide:flex-none wide:flex-col wide:items-stretch wide:space-y-0.5 wide:overflow-visible wide:px-0"
@@ -191,7 +191,7 @@ export function Sidebar() {
             className="btn-primary flex min-h-10 shrink-0 items-center gap-2 !px-3 !py-2 wide:mb-4 wide:w-full"
           >
             <PlusIcon size={16} />
-            <span className="flex-1 text-left">New Query</span>
+            <span className="sr-only flex-1 text-left min-[480px]:not-sr-only">New Query</span>
             <kbd className="kbd hidden !border-white/25 !bg-transparent !text-white/80 wide:inline-flex">
               ⌘K
             </kbd>
@@ -243,7 +243,8 @@ export function Sidebar() {
                 onPointerEnter={() => void PREFETCH[item]?.()}
                 onFocus={() => void PREFETCH[item]?.()}
                 aria-current={active ? 'page' : undefined}
-                className={`flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left text-[13px] transition-colors wide:w-full wide:gap-3 ${
+                title={LABELS[item]}
+                className={`flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-2 rounded-lg px-2.5 text-left text-[13px] transition-colors wide:w-full wide:justify-start wide:gap-3 ${
                   active
                     ? 'nav-active font-medium text-sidebar-text'
                     : 'text-sidebar-text-lo hover:bg-sidebar-hi hover:text-sidebar-text'
@@ -253,7 +254,10 @@ export function Sidebar() {
                   size={18}
                   className={`shrink-0 ${active ? 'text-accent-warm-text' : ''}`}
                 />
-                {LABELS[item]}
+                {/* Icon-only on a phone, so every section fits one 390 px
+                    bar instead of scrolling out of sight; the label stays for
+                    assistive tech and returns at the `wide` breakpoint. */}
+                <span className="sr-only wide:not-sr-only">{LABELS[item]}</span>
               </button>
             )
           })}

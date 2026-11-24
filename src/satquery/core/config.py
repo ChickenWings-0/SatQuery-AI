@@ -226,6 +226,19 @@ class Settings(BaseSettings):
     )
 
     @property
+    def adapter_name(self) -> str | None:
+        """The served adapter's run name, or None.
+
+        ``runs/sq-lora-v2-full/adapter`` → ``sq-lora-v2-full``. None when the base
+        model is served bare or the VLM is off.
+        """
+        path = self.vlm_adapter_path
+        if path is None or self.vlm_disabled or self.vlm_backend == "none":
+            return None
+        parts = [part for part in Path(path).parts if part not in {"adapter", "."}]
+        return parts[-1] if parts else None
+
+    @property
     def is_dev(self) -> bool:
         """True when running in the local development environment."""
         return self.environment == "dev"
