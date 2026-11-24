@@ -23,7 +23,40 @@ import type {
   ValidateResponse,
 } from '@/api/types'
 
-const BASE = import.meta.env['VITE_API_BASE'] ?? ''
+/** The API origin this build was pointed at. Stable, so it is also the signpost. */
+const HOME_BASE: string = import.meta.env['VITE_API_BASE'] ?? ''
+
+/**
+ * Where requests go right now. Starts at the build's origin; the access gate
+ * moves it to a faster mirror when `/v1/health` reports one (`fast_base_url`,
+ * a Cloudflare quick tunnel), and any transport failure there moves it back.
+ */
+let base = HOME_BASE
+
+/** True while `base` is a mirror that buffers streams until they end. */
+let buffered = false
+
+/** Send traffic to a faster mirror of the API. It buffers streams, so job events are short-polled. */
+export function switchToFastBase(url: string): void {
+  base = url.replace(/\/+$/, '')
+  buffered = true
+}
+
+/** Back to the build's own API origin. */
+export function switchToHomeBase(): void {
+  base = HOME_BASE
+  buffered = false
+}
+
+/** The API origin requests are currently sent to. */
+export function currentApiBase(): string {
+  return base
+}
+
+/** A mirror that just failed is abandoned for the rest of the page's life. */
+function abandonFastBase(): void {
+  if (base !== HOME_BASE) switchToHomeBase()
+}
 
 /**
  * Deadlines, in milliseconds.
@@ -161,7 +194,7 @@ async function send(
   signal?.addEventListener('abort', forward, { once: true })
 
   try {
-    const response = await fetch(`${BASE}${path}`, {
+    const response = await fetch(`${base}${path}`, {
       ...withAccessHeader(init),
       signal: controller.signal,
     })
@@ -173,6 +206,9 @@ async function send(
     // The caller aborting is not a failure: let it propagate untranslated so
     // `signal.aborted` still identifies it upstream.
     if (signal?.aborted) throw caught
+    // The request never reached the API. If it went to the fast mirror, that
+    // tunnel may be down or restarting: later requests use the stable origin.
+    abandonFastBase()
     if (fired.timeout) {
       throw new SatQueryError(
         0,
@@ -316,12 +352,12 @@ export async function fetchImagery(body: ImageryFetchRequest, signal?: AbortSign
 
 /** Same-origin URL of a fetched GeoTIFF. */
 export function imageryUrl(file: { url: string }): string {
-  return withAccessCode(`${BASE}${file.url}`)
+  return withAccessCode(`${base}${file.url}`)
 }
 
 /** The URL of one artifact. Immutable and cacheable for ever (§4.6). */
 export function artifactUrl(ref: ArtifactRef): string | null {
-  return ref.url ? withAccessCode(`${BASE}${ref.url}`) : null
+  return ref.url ? withAccessCode(`${base}${ref.url}`) : null
 }
 
 // ----------------------------------------------------------------------- SSE
@@ -387,27 +423,41 @@ export async function streamJob(
   }
 
   let terminated = false
+  // Behind a mirror that buffers streams the same endpoint is short-polled:
+  // each reply ends as soon as there is news, and the next request resumes
+  // after the last id. One open stream otherwise.
+  const polling = buffered
+  let lastId = options.lastEventId ?? null
   try {
-    touch()
-    const headers: Record<string, string> = { accept: 'text/event-stream' }
-    if (options.lastEventId) headers['Last-Event-ID'] = options.lastEventId
-    const response = await fetch(`${BASE}/v1/jobs/${jobId}/events`, {
-      ...withAccessHeader({ headers }),
-      signal: controller.signal,
-    })
-    if (response.status === 401) reportAccessRequired()
-    if (!response.ok) throw await toError(response)
-
-    for await (const frame of readFrames(response, touch)) {
-      // A contract violation is surfaced, not swallowed: §2 is explicit that an
-      // unknown value must be reported rather than silently coerced.
-      const event = parseJobEvent(frame.event, frame.data)
-      handlers.onEvent(event, frame.id)
-      if (event.type === 'done' || event.type === 'error') {
-        terminated = true
-        break
+    do {
+      touch()
+      const headers: Record<string, string> = { accept: 'text/event-stream' }
+      if (lastId) headers['Last-Event-ID'] = lastId
+      let response: Response
+      try {
+        response = await fetch(`${base}/v1/jobs/${jobId}/events${polling ? '?poll=true' : ''}`, {
+          ...withAccessHeader({ headers }),
+          signal: controller.signal,
+        })
+      } catch (caught) {
+        if (!controller.signal.aborted) abandonFastBase()
+        throw caught
       }
-    }
+      if (response.status === 401) reportAccessRequired()
+      if (!response.ok) throw await toError(response)
+
+      for await (const frame of readFrames(response, touch)) {
+        // A contract violation is surfaced, not swallowed: §2 is explicit that an
+        // unknown value must be reported rather than silently coerced.
+        const event = parseJobEvent(frame.event, frame.data)
+        if (frame.id !== null) lastId = frame.id
+        handlers.onEvent(event, frame.id)
+        if (event.type === 'done' || event.type === 'error') {
+          terminated = true
+          break
+        }
+      }
+    } while (polling && !terminated)
 
     if (!terminated) {
       throw new SatQueryError(

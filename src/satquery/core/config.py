@@ -92,6 +92,14 @@ class Settings(BaseSettings):
         gt=0.0,
         description="How long a lockout lasts, and the window failures count in.",
     )
+    fast_path_metrics_url: str | None = Field(
+        default=None,
+        description=(
+            "cloudflared metrics endpoint for a quick tunnel, e.g. "
+            "http://127.0.0.1:20241/quicktunnel. Set, /v1/health reports the "
+            "tunnel's current public URL as fast_base_url."
+        ),
+    )
     max_concurrent_jobs: int = Field(
         default=1,
         ge=1,

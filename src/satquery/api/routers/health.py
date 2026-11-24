@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 
 from satquery.agent.concurrency import DeviceGates
 from satquery.api.dependencies import get_device_gates
+from satquery.api.fast_path import fast_base_url
 from satquery.api.fixtures import mock_registry
 from satquery.api.jobs import JobStore, get_job_store
 from satquery.core.config import Settings, get_settings
@@ -103,6 +104,7 @@ async def health(
     # after a restart does not freeze every job's SSE stream for its duration.
     device = await asyncio.to_thread(_device_info, settings)
     models = await asyncio.to_thread(_models, settings)
+    fast_base = await asyncio.to_thread(fast_base_url, settings.fast_path_metrics_url)
     return HealthResponse(
         status=HealthStatus.DEGRADED if gates.degraded else HealthStatus.OK,
         version=settings.version,
@@ -114,4 +116,5 @@ async def health(
         jobs_running=jobs.running,
         jobs_retained=len(jobs),
         leaked_gpu_permits=gates.leaked_gpu_permits,
+        fast_base_url=fast_base,
     )

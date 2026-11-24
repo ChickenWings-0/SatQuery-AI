@@ -310,6 +310,18 @@
             "description": "Resume after this event id; the query form of Last-Event-ID."
           },
           {
+            "name": "poll",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Short-poll: answer with every event after the last id as soon as there is at least one (or a bare ping after a few seconds), then close. For clients behind a proxy that buffers streams.",
+              "default": false,
+              "title": "Poll"
+            },
+            "description": "Short-poll: answer with every event after the last id as soon as there is at least one (or a bare ping after a few seconds), then close. For clients behind a proxy that buffers streams."
+          },
+          {
             "name": "Last-Event-ID",
             "in": "header",
             "required": false,
@@ -1645,6 +1657,18 @@
             "title": "Jobs Retained",
             "description": "Jobs the in-memory store still holds, running or finished.",
             "default": 0
+          },
+          "fast_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fast Base Url",
+            "description": "A faster public base URL this API is also reachable at (a Cloudflare quick tunnel), or null. It buffers streamed responses, so read job events there with ?poll=true."
           },
           "leaked_gpu_permits": {
             "type": "integer",

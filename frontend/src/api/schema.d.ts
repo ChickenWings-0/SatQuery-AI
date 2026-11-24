@@ -765,6 +765,11 @@ export interface components {
              */
             jobs_retained: number;
             /**
+             * Fast Base Url
+             * @description A faster public base URL this API is also reachable at (a Cloudflare quick tunnel), or null. It buffers streamed responses, so read job events there with ?poll=true.
+             */
+            fast_base_url?: string | null;
+            /**
              * Leaked Gpu Permits
              * @description GPU tool threads that overran their timeout and are still running. Non-zero means the card is busy with work nobody is waiting for; past the process's limit, status is 'degraded'.
              * @default 0
@@ -1568,6 +1573,8 @@ export interface operations {
             query?: {
                 /** @description Resume after this event id; the query form of Last-Event-ID. */
                 after?: string | null;
+                /** @description Short-poll: answer with every event after the last id as soon as there is at least one (or a bare ping after a few seconds), then close. For clients behind a proxy that buffers streams. */
+                poll?: boolean;
             };
             header?: {
                 "Last-Event-ID"?: string | null;

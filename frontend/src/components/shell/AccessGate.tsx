@@ -12,8 +12,9 @@
  */
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
-import { onAccessRequired, setAccessCode, clearAccessCode } from '@/api/access'
-import { health, SatQueryError } from '@/api/client'
+import { onAccessRequired, setAccessCode, clearAccessCode, withAccessHeader } from '@/api/access'
+import { health, SatQueryError, switchToFastBase } from '@/api/client'
+import type { HealthResponse } from '@/api/types'
 import { Graticule } from '@/components/ui/Graticule'
 
 type GateState = 'checking' | 'open' | 'locked'
@@ -22,13 +23,41 @@ function isAccessDenied(error: unknown): boolean {
   return error instanceof SatQueryError && error.status === 401
 }
 
+const FAST_PROBE_MS = 4_000
+
+/**
+ * Move traffic to the faster mirror `/v1/health` reported, but only once it
+ * has answered a health check itself, with the code, in time. A mirror that
+ * is down or still starting leaves everything on the stable origin.
+ */
+async function preferFastBase(report: HealthResponse): Promise<void> {
+  const fast = report.fast_base_url?.replace(/\/+$/, '')
+  if (!fast) return
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FAST_PROBE_MS)
+  try {
+    const response = await fetch(`${fast}/v1/health`, {
+      ...withAccessHeader({ headers: { accept: 'application/json' } }),
+      signal: controller.signal,
+    })
+    if (response.ok) switchToFastBase(fast)
+  } catch {
+    // Stay on the stable origin.
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function AccessGate({ children }: { children: ReactNode }) {
   const [state, setState] = useState<GateState>('checking')
 
   useEffect(() => {
     const controller = new AbortController()
     health(controller.signal)
-      .then(() => setState('open'))
+      .then(async (report) => {
+        await preferFastBase(report)
+        if (!controller.signal.aborted) setState('open')
+      })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         setState(isAccessDenied(error) ? 'locked' : 'open')
@@ -65,7 +94,8 @@ function AccessForm({ onUnlocked }: { onUnlocked: () => void }) {
     setMessage(null)
     setAccessCode(trimmed)
     try {
-      await health()
+      const report = await health()
+      await preferFastBase(report)
       onUnlocked()
     } catch (error) {
       clearAccessCode()

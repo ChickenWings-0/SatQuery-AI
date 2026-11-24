@@ -283,6 +283,12 @@ class HealthResponse(BaseModel):
     jobs_retained: int = Field(
         default=0, ge=0, description="Jobs the in-memory store still holds, running or finished."
     )
+    fast_base_url: str | None = Field(
+        default=None,
+        description="A faster public base URL this API is also reachable at (a "
+        "Cloudflare quick tunnel), or null. It buffers streamed responses, so read "
+        "job events there with ?poll=true.",
+    )
     leaked_gpu_permits: int = Field(
         default=0,
         ge=0,

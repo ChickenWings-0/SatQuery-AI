@@ -39,7 +39,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from satquery.agent.concurrency import DeviceGates
 from satquery.agent.events import STAGE_PCT
@@ -47,7 +47,14 @@ from satquery.agent.pipeline import AnalysisRequest, refuse_if_incompatible
 from satquery.agent.pipeline import analyze as run_analysis
 from satquery.api.access import gpu_busy_response
 from satquery.api.dependencies import get_artifact_store, get_device_gates, get_trace_store
-from satquery.api.jobs import Job, JobEvent, JobStore, TooManyJobsError, get_job_store
+from satquery.api.jobs import (
+    TERMINAL_EVENTS,
+    Job,
+    JobEvent,
+    JobStore,
+    TooManyJobsError,
+    get_job_store,
+)
 from satquery.api.uploads import parse_options, persist_uploads_async
 from satquery.core.config import Settings, get_settings
 from satquery.core.logging import get_logger
@@ -82,6 +89,15 @@ CANCELLED_ERROR: Final[ApiError] = ApiError(
 )
 """The terminal event a cancelled job publishes. 499 is nginx's 'client closed
 request' — the closest standard reading of 'the caller asked us to stop'."""
+
+POLL_WAIT_SECONDS: Final[float] = 8.0
+"""How long a ``?poll=true`` request waits for the next event before answering
+with a bare ping. Well under the client's 60 s stall watchdog and any proxy's
+idle timeout, and long enough that an idle job costs one request per 8 s."""
+
+POLL_BATCH_SECONDS: Final[float] = 0.05
+"""After the first new event, how long to wait for the burst that usually
+follows it (step_completed, artifact, step_started) so it ships in one reply."""
 
 _RUNNING: Final[set[asyncio.Task[None]]] = set()
 """Strong references to in-flight jobs, so the loop cannot garbage-collect them."""
@@ -384,6 +400,34 @@ def _last_seen(header: str | None, query: str | None) -> int | None:
     return int(raw.strip())
 
 
+async def _poll_once(jobs: JobStore, job: Job, after: int | None) -> str:
+    """Every event past *after*, waiting up to :data:`POLL_WAIT_SECONDS` for one.
+
+    The short-poll form exists for proxies that buffer a response until it
+    ends (Cloudflare quick tunnels do, whatever the content type): a stream
+    reaches the client only when the job is over, while a reply that ends as
+    soon as there is news arrives at once. The body is ordinary SSE frames, so
+    the client parses both forms with the same reader and resumes with the
+    last ``id`` it saw.
+    """
+    start = 0 if after is None else after + 1
+    if len(job.events) <= start:
+        events = jobs.subscribe(job, after=after)
+        try:
+            await asyncio.wait_for(anext(events), timeout=POLL_WAIT_SECONDS)
+            await asyncio.sleep(POLL_BATCH_SECONDS)
+        except (TimeoutError, StopAsyncIteration):
+            pass
+        finally:
+            await events.aclose()
+    frames: list[str] = []
+    for message in job.events[start:]:
+        frames.append(_sse(message))
+        if message.event in TERMINAL_EVENTS:
+            break
+    return "".join(frames) or ": ping\n\n"
+
+
 async def _stream(
     jobs: JobStore, job: Job, http_request: Request, after: int | None = None
 ) -> AsyncIterator[str]:
@@ -439,7 +483,15 @@ async def job_events(
         str | None,
         Query(description="Resume after this event id; the query form of Last-Event-ID."),
     ] = None,
-) -> StreamingResponse:
+    poll: Annotated[
+        bool,
+        Query(
+            description="Short-poll: answer with every event after the last id as soon "
+            "as there is at least one (or a bare ping after a few seconds), then close. "
+            "For clients behind a proxy that buffers streams."
+        ),
+    ] = False,
+) -> Response:
     """Stream the job's events, replaying everything that already happened.
 
     A subscriber that connects late — the normal case, since the client needs the
@@ -455,6 +507,9 @@ async def job_events(
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }
+    if poll:
+        body = await _poll_once(jobs, job, _last_seen(last_event_id, after))
+        return Response(content=body, media_type="text/event-stream", headers=headers)
     return StreamingResponse(
         _stream(jobs, job, http_request, after=_last_seen(last_event_id, after)),
         media_type="text/event-stream",
