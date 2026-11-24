@@ -41,6 +41,21 @@ def _fetch_dir(settings: Settings, fetch_id: str) -> Path:
     return Path(settings.artifact_root) / SUBDIR / fetch_id
 
 
+MIN_EXTENT_DEG = 0.04
+"""About 4 km. A place search that resolves to a point (a street, a building, a
+typed coordinate) arrives as a zero-area bbox and clipped to a 1 x 1 px
+raster the renderer cannot use; such a bbox is widened around its centre."""
+
+
+def _with_min_extent(bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    """Widen *bbox* around its centre to at least :data:`MIN_EXTENT_DEG` per side."""
+    west, south, east, north = bbox
+    cx, cy = (west + east) / 2.0, (south + north) / 2.0
+    half_w = max(east - west, MIN_EXTENT_DEG) / 2.0
+    half_h = max(north - south, MIN_EXTENT_DEG) / 2.0
+    return (cx - half_w, max(-90.0, cy - half_h), cx + half_w, min(90.0, cy + half_h))
+
+
 @router.post(
     "/imagery/fetch",
     response_model=ImageryFetchResponse,
@@ -59,7 +74,7 @@ async def fetch_imagery(
     fetch_id = secrets.token_hex(8)
     out_dir = _fetch_dir(settings, fetch_id)
     max_px = min(body.max_px or settings.imagery_max_px, settings.imagery_max_px)
-    bbox = (body.bbox[0], body.bbox[1], body.bbox[2], body.bbox[3])
+    bbox = _with_min_extent((body.bbox[0], body.bbox[1], body.bbox[2], body.bbox[3]))
     pc = _client(settings)
 
     fetched = await asyncio.gather(
