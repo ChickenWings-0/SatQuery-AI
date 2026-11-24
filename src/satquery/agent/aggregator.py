@@ -53,6 +53,7 @@ _LEAD_TASKS: Final[frozenset[TaskType]] = frozenset(
         TaskType.CROSS_MODAL_VQA,
         TaskType.CHANGE_VQA,
         TaskType.CHANGE_CAPTION,
+        TaskType.SCENE_CLASSIFY,
     }
 )
 """Tasks whose answer opens with the measured summary before the model's prose."""
@@ -173,7 +174,9 @@ def _single_optical_answer(writer: _Writer) -> None:
     for fraction, label in (
         ("vegetation_fraction_pct", "vegetated"),
         ("water_fraction_pct", "open water"),
-        ("built_up_fraction_pct", "built-up"),
+        # NDBI > 0 is also true of bare soil and salt flats; only SAR separates
+        # them (physics_agreement), so a single optical scene says both.
+        ("built_up_fraction_pct", "built-up or bare land"),
     ):
         key = f"{index}.{fraction}"
         if writer.has(key):
@@ -229,6 +232,14 @@ def _cross_modal_answer(writer: _Writer) -> None:
         )
 
 
+def cover_sentences(sheet: FactSheet) -> str:
+    """The measured land-cover fractions of a single scene; empty when none ran."""
+    writer = _Writer(sheet)
+    _single_optical_answer(writer)
+    _sar_answer(writer)
+    return writer.text()
+
+
 def change_sentences(sheet: FactSheet) -> str:
     """The cited change summary (area, regions, index shifts); empty when none ran."""
     writer = _Writer(sheet)
@@ -251,7 +262,7 @@ def cross_modal_sentences(sheet: FactSheet) -> str:
 _OUTLINE_NOUNS: Final[dict[str, tuple[str, str]]] = {
     "water": ("Open water", "water bodies"),
     "vegetation": ("Vegetation", "vegetated patches"),
-    "built_up": ("Built-up land", "built-up patches"),
+    "built_up": ("Built-up or bare land", "built-up or bare patches"),
 }
 
 
@@ -457,6 +468,8 @@ def aggregate(
             lead = outline_sentences(sheet)
         elif task in _CHANGE_TASKS:
             lead = change_sentences(sheet)
+        elif task is TaskType.SCENE_CLASSIFY:
+            lead = cover_sentences(sheet)
         else:
             lead = cross_modal_sentences(sheet)
         if lead:

@@ -91,7 +91,7 @@ COLOURS: Final[dict[str, tuple[int, int, int]]] = {
 NOUNS: Final[dict[str, str]] = {
     "water": "Water bodies",
     "vegetation": "Vegetation",
-    "built_up": "Built-up areas",
+    "built_up": "Built-up or bare areas",
 }
 
 CONFIDENCE: Final[dict[str, float]] = {
