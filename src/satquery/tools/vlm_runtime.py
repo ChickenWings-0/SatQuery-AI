@@ -39,6 +39,7 @@ from satquery.models.prompts.builder import (
     build_prompt,
     strip_citation_markers,
 )
+from satquery.models.prompts.provenance import correct_provenance
 from satquery.schemas.enums import ArtifactType, Device, PairType, TaskType, ToolStatus
 from satquery.tools.base import (
     ArtifactDraft,
@@ -270,7 +271,12 @@ def synthesise(
         mode=settings.mode,
     )
     generated = generate(prompt, settings, ctx, backend)
-    marked = strip_citation_markers(generated.text, ctx.facts)
+    # The adapter learned "sourced from GoogleEarth, high-resolution" from its
+    # captions; where the image came from is ingestion's to say, not the model's.
+    text = correct_provenance(
+        generated.text, [image.manifest for image in (ctx.images or ctx.scene)]
+    )
+    marked = strip_citation_markers(text, ctx.facts)
 
     # The tool checks its own output against the same validator the pipeline will
     # run over the final answer. Doing it here is what lets a badly grounded

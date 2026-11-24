@@ -594,6 +594,7 @@ class DagExecutor:
             facts=fact_sheet_module.build(report.executions, self.registry),
             seed=seed,
             store=self.store,
+            scene=list(by_id.values()),
         )
         input_hashes = [image.manifest.sha256 for image in images]
         input_hashes += [artifact_hashes.get(a.id, a.id) for a in upstream]

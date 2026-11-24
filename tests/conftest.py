@@ -27,6 +27,10 @@ os.environ.setdefault("SATQUERY_VLM_DISABLED", "true")
 # Settings reads directly, and every API test would then answer 401. An empty
 # value disables the guard; tests of the guard pass their own Settings.
 os.environ.setdefault("SATQUERY_ACCESS_CODE", "")
+# Resolution tiers route 10 m pairs away from the Siamese detector. The synthetic
+# corpus is 10 m, and most change tests exist to exercise that detector's path,
+# so the suite runs untiered; tests/unit/test_resolution_tier.py turns it on.
+os.environ.setdefault("SATQUERY_RESOLUTION_TIERS", "false")
 
 import pytest  # noqa: E402
 

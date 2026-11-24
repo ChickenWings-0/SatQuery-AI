@@ -161,9 +161,30 @@ class DofaEmbedder:
         model, torch = self._load()
         with torch.no_grad():
             tensor = torch.from_numpy(np.ascontiguousarray(stack)).unsqueeze(0).to(self.device)
-            tokens = model.forward_features(tensor, wavelengths=list(wavelengths))
+            tokens = _patch_tokens(model, torch, tensor, wavelengths)
         array = tokens[0].float().cpu().numpy()
         return _as_grid(array)
+
+
+def _patch_tokens(model: Any, torch: Any, x: Any, wavelengths: Sequence[float]) -> Any:
+    """The encoder's per-patch tokens, normalised, before any pooling.
+
+    ``DOFA.forward_features`` ends by pooling — the mean of the patch tokens
+    (``global_pool``) or the class token — so it returns one 768-vector per
+    image, and an agreement *map* needs the grid. This is the same computation
+    up to that point, with the same final norm applied per token: patch
+    embedding from the band wavelengths, positional embedding, class token,
+    transformer blocks.
+    """
+    waves = torch.tensor(list(wavelengths), device=x.device).float()
+    tokens, _ = model.patch_embed(x, waves)
+    tokens = tokens + model.pos_embed[:, 1:, :]
+    cls = (model.cls_token + model.pos_embed[:, :1, :]).expand(tokens.shape[0], -1, -1)
+    tokens = torch.cat((cls, tokens), dim=1)
+    for block in model.blocks:
+        tokens = block(tokens)
+    norm = model.fc_norm if getattr(model, "global_pool", False) else model.norm
+    return norm(tokens)
 
 
 def _dofa_weights() -> Any:

@@ -72,6 +72,13 @@ _ALL_UNIT_TOKENS: Final[frozenset[str]] = frozenset(
 
 _YEAR: Final[re.Pattern[str]] = re.compile(r"^\d{4}$")
 _IMAGE_INDEX: Final[re.Pattern[str]] = re.compile(r"\bimage\s*$", re.IGNORECASE)
+_PLATFORM: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:sentinel|landsat|risat|cartosat|resourcesat|oceansat|worldview|spot|pl[eé]iades|"
+    r"gaofen|kompsat|alos|terrasar|cosmo-skymed|rcm|radarsat)[- ]?$",
+    re.IGNORECASE,
+)
+"""A platform name ends in a number — Sentinel-2, Landsat 8, RISAT-1. The digit
+names the satellite; it is not a claim about the scene."""
 _LIST_MARKER_BEFORE: Final[re.Pattern[str]] = re.compile(r"(?:^|\n)\s*$")
 _LIST_MARKER_AFTER: Final[re.Pattern[str]] = re.compile(r"^[.)]\s")
 _QUOTED_SOURCE: Final[re.Pattern[str]] = re.compile(r"(step:\d+/scalars\.[\w.]+)")
@@ -138,6 +145,8 @@ def _is_excluded(text: str, span: NumericSpan) -> bool:
     if span.unit is None and _YEAR.match(raw) and 1900 <= int(raw) <= 2100:
         return True
     if _IMAGE_INDEX.search(text[max(0, span.start - 8) : span.start]):
+        return True
+    if span.unit is None and _PLATFORM.search(text[max(0, span.start - 14) : span.start]):
         return True
     # A list marker is a bare integer that *opens a line and is punctuated as a
     # marker* ("3) ..."). Excluding every line-initial integer would also excuse

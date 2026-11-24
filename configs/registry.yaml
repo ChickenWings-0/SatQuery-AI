@@ -283,7 +283,7 @@ tools:
     available: true
 
   - name: semantic_segmenter
-    version: "1.0.0+ckpt:pending"
+    version: "1.0.0+segformer-b5-loveda"
     category: cv
     description: SegFormer land-cover segmentation trained on LoveDA and OpenEarthMap.
     accepts:
@@ -390,7 +390,7 @@ tools:
     available: true
 
   - name: crossmodal_consistency
-    version: "1.0.0+ckpt:pending"
+    version: "1.0.0+dofa-mae-base16"
     category: fusion
     description: DOFA embedding agreement map between an optical and a SAR acquisition.
     accepts:

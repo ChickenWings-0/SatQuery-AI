@@ -305,6 +305,11 @@ class ToolContext:
     facts: FactSheet = field(default_factory=FactSheet)
     seed: int = 0
     store: ArtifactStore | None = None
+    scene: list[ImageBundle] = field(default_factory=list)
+    """Every input of the analysis, whatever this step's own inputs are. For
+    provenance only — a synthesiser reading ``@1`` views has no ``images`` but
+    still must not call a 10 m Sentinel-2 scene a high-resolution Google Earth
+    image. A tool measures :attr:`images`, never this."""
 
     def by_role(self, *roles: ImageRole) -> list[ImageBundle]:
         """Return the input images holding any of *roles*, in input order."""

@@ -17,6 +17,7 @@ file. New behaviour arrives as a registry entry plus one or more table rows.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -283,10 +284,51 @@ def modality_key(pair_type: PairType, manifests: Sequence[InputManifest]) -> tup
     return (modalities[0].value if modalities else Modality.UNKNOWN.value), pair_type
 
 
+MEDIUM_RES_MIN_GSD_M: Final[float] = 5.0
+"""At or above this ground sample distance every input is "medium resolution":
+Sentinel-2 and Sentinel-1 at 10 m, Landsat at 30 m. Below it, aerial and VHR."""
+
+MEDIUM_RES_TIER: Final[str] = "medium_res"
+
+
+def tiers_enabled() -> bool:
+    """Whether resolution tiers apply: ``SATQUERY_RESOLUTION_TIERS``, default on.
+
+    The test suite turns it off so its 10 m synthetic scenes keep exercising the
+    untiered plans; the tier itself has tests of its own.
+    """
+    raw = os.environ.get("SATQUERY_RESOLUTION_TIERS", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def resolution_tier(manifests: Sequence[InputManifest]) -> str | None:
+    """``"medium_res"`` when every input's measured GSD is 5 m or coarser, else None.
+
+    Some tools are only meaningful at one scale: the Siamese change detector is
+    trained on 0.5 m aerial imagery (LEVIR-CD), and over a 10 m pair it reports a
+    few stray pixels as the whole of three years' change. A tier lets the table
+    route such inputs to a method that works at their scale, as an ordinary plan
+    rather than as a substitution the trace would have to call degraded. An input
+    whose GSD is unknown keeps the untiered plan.
+    """
+    if not manifests or not tiers_enabled():
+        return None
+    gsds = [manifest.gsd_m for manifest in manifests]
+    if all(gsd is not None and gsd >= MEDIUM_RES_MIN_GSD_M for gsd in gsds):
+        return MEDIUM_RES_TIER
+    return None
+
+
 def resolve_key(
-    table: PolicyTable, task: TaskType, pair_type: PairType, modality: str
+    table: PolicyTable,
+    task: TaskType,
+    pair_type: PairType,
+    modality: str,
+    tier: str | None = None,
 ) -> tuple[str, PolicyEntry, str]:
     """Resolve the routing key, first hit wins.
+
+    With a *tier*, ``task|pair|modality:tier`` is tried before everything else.
 
     Returns:
         ``(key, entry, planner)``. A key that only resolves at the generic entry
@@ -294,6 +336,12 @@ def resolve_key(
         router's uncertainty visible — and self-limiting, since the
         ``generic_plan`` confidence cap keys off exactly that string.
     """
+    if tier is not None:
+        tiered = f"{task.value}|{pair_type.value}|{modality}:{tier}"
+        entry = table.get(tiered)
+        if entry is not None:
+            return tiered, entry, PLANNER_VERSION
+
     exact = f"{task.value}|{pair_type.value}|{modality}"
     entry = table.get(exact)
     if entry is not None:
@@ -406,7 +454,9 @@ def plan_for(
             )
         )
 
-    key, entry, planner = resolve_key(policy, task, effective_pair_type, modality)
+    key, entry, planner = resolve_key(
+        policy, task, effective_pair_type, modality, resolution_tier(manifests)
+    )
     if planner == GENERIC_PLANNER:
         warnings.append(
             (

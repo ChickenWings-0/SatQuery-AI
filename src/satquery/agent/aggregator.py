@@ -45,6 +45,11 @@ _CROSS_MODAL_TASKS: Final[frozenset[TaskType]] = frozenset(
 )
 
 INDEX_SHIFT_THRESHOLD: Final[float] = 0.02
+
+_LEAD_TASKS: Final[frozenset[TaskType]] = frozenset(
+    {TaskType.SEGMENTATION, TaskType.CROSS_MODAL_COMPARE, TaskType.CROSS_MODAL_VQA}
+)
+"""Tasks whose answer opens with the measured summary before the model's prose."""
 """Below this an index has not meaningfully moved, and the answer says so."""
 
 NO_EVIDENCE: Final[str] = (
@@ -204,6 +209,25 @@ def _cross_modal_answer(writer: _Writer) -> None:
         key = f"{physics}.{rule}"
         if writer.has(key):
             writer.say(f"For {label} the two sensors concur on {writer.num(key)}% of pixels.")
+    confirmed = f"{physics}.built_up_confirmed_pct"
+    if writer.has(confirmed):
+        writer.say(
+            f"Where the optical built-up index is ambiguous, SAR backscatter confirms built-up "
+            f"surface on {writer.num(confirmed)}% of those pixels."
+        )
+    dofa = "crossmodal_consistency"
+    if writer.has(f"{dofa}.divergent_area_pct"):
+        writer.say(
+            f"The DOFA foundation-model embeddings of the two scenes diverge over "
+            f"{writer.num(f'{dofa}.divergent_area_pct')}% of the area."
+        )
+
+
+def cross_modal_sentences(sheet: FactSheet) -> str:
+    """The cited optical-vs-SAR summary; empty when neither fusion tool ran."""
+    writer = _Writer(sheet)
+    _cross_modal_answer(writer)
+    return writer.text()
 
 
 _OUTLINE_NOUNS: Final[dict[str, tuple[str, str]]] = {
@@ -408,10 +432,14 @@ def aggregate(
     templated = text is None
     body = text if text is not None else compose(task, pair_type, sheet)
 
-    # An outline question leads with what the outliner measured; the
-    # synthesiser's prose follows it. Its markers move with it.
-    if not templated and task is TaskType.SEGMENTATION:
-        lead = outline_sentences(sheet)
+    # An outline or a sensor comparison leads with what the tools measured;
+    # the synthesiser's prose follows it. Its markers move with it.
+    if not templated and task in _LEAD_TASKS:
+        lead = (
+            outline_sentences(sheet)
+            if task is TaskType.SEGMENTATION
+            else cross_modal_sentences(sheet)
+        )
         if lead:
             body = f"{lead} {body}"
             if markers:

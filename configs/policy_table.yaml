@@ -263,6 +263,72 @@ entries:
       - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
          params: {min_component_px: 25, emit_geojson: true}}
 
+  # ------------------------------------------- change at medium resolution
+  # Every input 5 m or coarser (planner.resolution_tier). The Siamese detector is
+  # trained on 0.5 m aerial imagery; at 10 m it sees almost nothing. Spectral
+  # differencing (optical) and log-ratio (SAR), Otsu-thresholded, are the
+  # methods that work at this scale.
+  - key: "CHANGE_VQA|BI_TEMPORAL|optical:medium_res"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: image_diff_change, inputs: [pre, post], depends_on: [1], params: {}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25}}
+      - {tool: spectral_index_analyzer, inputs: [pre, post], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi], suffixes: ["_pre", "_post"]}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3, 4],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+  - key: "CHANGE_CAPTION|BI_TEMPORAL|optical:medium_res"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: image_diff_change, inputs: [pre, post], depends_on: [1], params: {}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25}}
+      - {tool: spectral_index_analyzer, inputs: [pre, post], depends_on: [1],
+         params: {indices: [ndvi, ndwi, ndbi], suffixes: ["_pre", "_post"]}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3, 4],
+         params: {mode: caption, max_new_tokens: 320, temperature: 0.0}}
+  - key: "CHANGE_MAP|BI_TEMPORAL|optical:medium_res"
+    caps_waived: [template_fallback]
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: image_diff_change, inputs: [pre, post], depends_on: [1], params: {}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25, emit_geojson: true}}
+  - key: "CHANGE_VQA|BI_TEMPORAL|sar:medium_res"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: image_diff_change, inputs: [pre, post], depends_on: [1], params: {}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25}}
+      - {tool: sar_backscatter_analyzer, inputs: [pre, post], depends_on: [1],
+         params: {water_threshold_db: -18.0, suffixes: ["_pre", "_post"]}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3, 4],
+         params: {mode: vqa, max_new_tokens: 384, temperature: 0.0}}
+  - key: "CHANGE_CAPTION|BI_TEMPORAL|sar:medium_res"
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: image_diff_change, inputs: [pre, post], depends_on: [1], params: {}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25}}
+      - {tool: sar_backscatter_analyzer, inputs: [pre, post], depends_on: [1],
+         params: {water_threshold_db: -18.0, suffixes: ["_pre", "_post"]}}
+      - {tool: vlm_change_vqa, inputs: ["@1", "@2:CHANGE_MASK"], depends_on: [1, 3, 4],
+         params: {mode: caption, max_new_tokens: 320, temperature: 0.0}}
+  - key: "CHANGE_MAP|BI_TEMPORAL|sar:medium_res"
+    caps_waived: [template_fallback]
+    steps:
+      - {tool: spectral_renderer, inputs: [pre, post], optional: false,
+         params: {size_px: 448}}
+      - {tool: image_diff_change, inputs: [pre, post], depends_on: [1], params: {}}
+      - {tool: change_statistics, inputs: ["@2:CHANGE_MASK"], depends_on: [2],
+         params: {min_component_px: 25, emit_geojson: true}}
+
   # -------------------------------------------------------- 16-21  CROSS_MODAL
 
   - key: "CROSS_MODAL_VQA|CROSS_MODAL|mixed"

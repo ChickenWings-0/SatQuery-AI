@@ -34,6 +34,10 @@ classes:
     - pond
     - flooding
     - flooded area
+    - flood
+    - floods
+    - flooded
+    - inundation
   vegetation:
     - vegetation
     - vegetated
