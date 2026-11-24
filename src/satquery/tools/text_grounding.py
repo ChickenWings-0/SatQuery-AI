@@ -31,7 +31,13 @@ from typing import Any, Final
 import numpy as np
 from pyproj import Transformer
 
-from satquery.models.loader import VlmBackend
+from satquery.models.loader import (
+    CHAT_STOP_STRINGS,
+    GenerationRequest,
+    ModelLoadError,
+    PromptImage,
+    VlmBackend,
+)
 from satquery.models.prompts import ViewInput, build_prompt
 from satquery.models.prompts.box_format import BOX_SCALE, NormalisedBox, parse
 from satquery.render.tiling import ViewGeometry
@@ -42,9 +48,10 @@ from satquery.tools.base import (
     ImageBundle,
     MissingInputError,
     ToolContext,
+    ToolError,
     ToolResult,
 )
-from satquery.tools.vlm_runtime import SynthesisParams, collect_views, generate
+from satquery.tools.vlm_runtime import SynthesisParams, acquire_backend, collect_views, generate
 
 NAME: Final[str] = "text_grounding"
 
@@ -63,6 +70,37 @@ BBOX_LABEL: Final[str] = "Grounded boxes"
 GEOJSON_LABEL: Final[str] = "Grounded boxes (EPSG:4326)"
 
 _VIEW_BANDS: Final[tuple[str, ...]] = ("red", "green", "blue")
+
+DETECT_ALL: Final[str] = "detect_all"
+"""``strategy`` value for "find every instance". The adapter was tuned on
+single-target grounding (VRSBench) and answers "every aircraft" with one box;
+the base model, asked for a JSON list, enumerates them. So detect-all runs with
+the adapter bypassed, over tiles when the source is large enough that small
+objects would vanish at the 448 px input."""
+
+DETECT_TILE_PX: Final[int] = 448
+DETECT_TOKENS_PER_TILE: Final[int] = 600
+DETECT_STOP: Final[tuple[str, ...]] = ("\n]", "}]")
+"""The end of the JSON list. Without it a tile with nothing left to report can
+spend its whole token budget restating boxes it already listed."""
+DETECT_OVERLAP: Final[float] = 0.2
+"""Tiles overlap by a fifth so an object cut by one tile's edge is whole in its
+neighbour; the merge then keeps the whole one."""
+
+_NOUNS: Final[dict[str, str]] = {
+    "built_up": "building",
+    "buildings": "building",
+    "aircraft": "aircraft",
+    "airplanes": "aircraft",
+    "planes": "aircraft",
+    "ships": "ship",
+    "boats": "boat",
+    "vehicles": "vehicle",
+    "cars": "car",
+    "trees": "tree",
+    "houses": "house",
+    "storage_tank": "storage tank",
+}
 
 
 # ------------------------------------------------------------------ coordinates
@@ -259,8 +297,12 @@ class TextGrounding:
         max_boxes = int(params.get("max_boxes", MAX_BOXES))
         score_threshold = float(params.get("score_threshold", SCORE_THRESHOLD))
 
-        text = self._generate(ctx, params, bands)
-        parsed = parse(text, width=bands.geometry.width, height=bands.geometry.height)
+        strategy = str(params.get("strategy", "")).lower()
+        if strategy == DETECT_ALL:
+            parsed = self._detect_all(ctx, image, params)
+        else:
+            text = self._generate(ctx, params, bands)
+            parsed = parse(text, width=bands.geometry.width, height=bands.geometry.height)
         selected = _select(parsed, max_boxes, score_threshold)
         records, collection = build_box_records(selected, bands.geometry)
 
@@ -329,12 +371,56 @@ class TextGrounding:
                 "max_boxes": max_boxes,
                 "score_threshold": score_threshold,
                 "boxes_parsed": len(parsed),
+                "strategy": strategy or "single",
                 "georeferenced": georeferenced,
             },
             confidence=0.88 if records else 0.60,
             device=Device.ROCM_0,
             notes=notes,
         )
+
+    def _detect_all(
+        self, ctx: ToolContext, image: ImageBundle, params: Mapping[str, Any]
+    ) -> list[NormalisedBox]:
+        """Enumerate every instance of the target object, tile by tile.
+
+        Raises:
+            ToolError: No backend could be reached.
+        """
+        noun = target_noun(ctx.slots, ctx.question)
+        grid = detect_grid(image.manifest.width, image.manifest.height)
+        canvas = ctx.pixels.read(image, list(_VIEW_BANDS), size=DETECT_TILE_PX * grid)
+        rgb = _as_rgb(canvas)
+        side = rgb.shape[0]
+        backend = acquire_backend(self.backend)
+        prompt = (
+            f"Locate every {noun} in the image. Output a JSON list with one entry per "
+            f'{noun}: [{{"bbox_2d": [x1, y1, x2, y2], "label": "{noun}"}}]. '
+            "Output only the JSON."
+        )
+        found: list[NormalisedBox] = []
+        for x0, y0, extent in tile_origins(side, grid):
+            window = canvas.valid[y0 : y0 + extent, x0 : x0 + extent]
+            if not window.any():
+                continue
+            tile = rgb[y0 : y0 + extent, x0 : x0 + extent]
+            request = GenerationRequest(
+                system="You are a helpful assistant.",
+                user=prompt,
+                images=(PromptImage(label="True colour", rgb=_resize(tile, DETECT_TILE_PX)),),
+                max_new_tokens=int(params.get("max_new_tokens", DETECT_TOKENS_PER_TILE)),
+                temperature=0.0,
+                seed=ctx.seed,
+                stop=(*CHAT_STOP_STRINGS, *DETECT_STOP),
+                use_adapter=False,
+            )
+            try:
+                text = backend.generate(request).text
+            except ModelLoadError as error:
+                raise ToolError(f"{backend.kind.value} backend failed: {error}") from error
+            for box in parse(text):
+                found.append(_to_frame(box, x0, y0, extent, side, noun))
+        return merge_boxes(found)
 
     def _image(self, ctx: ToolContext) -> ImageBundle:
         """The image to ground on.
@@ -382,6 +468,95 @@ class TextGrounding:
             max_views=synthesis.max_views,
         )
         return generate(prompt, synthesis, ctx, self.backend).text
+
+
+def target_noun(slots: Mapping[str, Any], question: str) -> str:
+    """The singular object noun to ask the detector for."""
+    for key in ("object_class", "target_class", "referring_expression"):
+        value = slots.get(key)
+        if isinstance(value, str) and value.strip():
+            raw = value.strip().lower()
+            raw = raw.removeprefix("the ").strip()
+            key_form = raw.replace(" ", "_").replace("-", "_")
+            return _NOUNS.get(key_form, raw.replace("_", " "))
+    return "object"
+
+
+def detect_grid(width: int | None, height: int | None) -> int:
+    """Tiles per side: 1 up to 1000 px, 2 up to 2000 px, 3 beyond.
+
+    Smaller tiles are also faster: each holds fewer objects, so each answer is a
+    shorter list, and the generation time is in the list, not the image.
+    """
+    longest = max(width or 0, height or 0)
+    if longest <= 1000:
+        return 1
+    if longest <= 2000:
+        return 2
+    return 3
+
+
+def tile_origins(side: int, grid: int) -> list[tuple[int, int, int]]:
+    """``(x0, y0, extent)`` of overlapping square tiles covering a *side* canvas."""
+    if grid <= 1:
+        return [(0, 0, side)]
+    extent = min(side, int(round(side / grid * (1.0 + DETECT_OVERLAP))))
+    step = (side - extent) / (grid - 1)
+    starts = [int(round(index * step)) for index in range(grid)]
+    return [(x, y, extent) for y in starts for x in starts]
+
+
+def _resize(tile: np.ndarray, size: int) -> np.ndarray:
+    from PIL import Image
+
+    return np.asarray(Image.fromarray(tile).resize((size, size), Image.Resampling.BILINEAR))
+
+
+def _to_frame(
+    box: NormalisedBox, x0: int, y0: int, extent: int, side: int, noun: str
+) -> NormalisedBox:
+    """Map a box normalised to one tile onto the whole canvas' 0-1000 frame."""
+
+    def axis(value: int, origin: int) -> int:
+        return int(round((origin + value / BOX_SCALE * extent) / side * BOX_SCALE))
+
+    return NormalisedBox(
+        x_min=axis(box.x_min, x0),
+        y_min=axis(box.y_min, y0),
+        x_max=axis(box.x_max, x0),
+        y_max=axis(box.y_max, y0),
+        label=box.label or noun,
+        score=box.score,
+    )
+
+
+def merge_boxes(boxes: Sequence[NormalisedBox]) -> list[NormalisedBox]:
+    """Drop the duplicates overlapping tiles produce.
+
+    A box mostly inside a larger kept one (an object cut at a tile edge) or
+    overlapping it heavily is the same object, seen twice.
+    """
+
+    def area(b: NormalisedBox) -> int:
+        return max(0, b.x_max - b.x_min) * max(0, b.y_max - b.y_min)
+
+    kept: list[NormalisedBox] = []
+    for box in sorted(boxes, key=area, reverse=True):
+        own = area(box)
+        if own <= 0:
+            continue
+        duplicate = False
+        for other in kept:
+            ix = max(0, min(box.x_max, other.x_max) - max(box.x_min, other.x_min))
+            iy = max(0, min(box.y_max, other.y_max) - max(box.y_min, other.y_min))
+            inter = ix * iy
+            union = own + area(other) - inter
+            if inter / own > 0.6 or (union and inter / union > 0.4):
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(box)
+    return sorted(kept, key=lambda b: (b.y_min, b.x_min))
 
 
 def _as_rgb(bands: Bands) -> np.ndarray:

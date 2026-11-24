@@ -179,6 +179,11 @@ class GenerationRequest:
     """Defaulted, not left empty, because the field is read by both backends and
     filled by exactly one caller. An empty default made every generation in the
     system unstoppable while looking configurable."""
+    use_adapter: bool = True
+    """False runs the base model with the LoRA adapter bypassed (PEFT's
+    ``disable_adapter``). The adapter was tuned on single-target grounding and
+    answers "find every aircraft" with one box; the base model lists them all.
+    Ignored by a backend serving merged weights, which has no adapter to bypass."""
 
     @property
     def greedy(self) -> bool:

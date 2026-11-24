@@ -94,7 +94,8 @@ entries:
       - {tool: spectral_renderer, inputs: [single], optional: false,
          params: {size_px: 448}}
       - {tool: text_grounding, inputs: [single], depends_on: [1],
-         params: {max_boxes: 20, score_threshold: 0.30}}
+         params: {max_boxes: 50, score_threshold: 0.30, strategy: detect_all,
+                 timeout_ms: 240000}}
       - {tool: vlm_vqa, inputs: ["@1", "@2:BBOX_SET"], depends_on: [1, 2],
          params: {mode: grounding, max_new_tokens: 384, temperature: 0.0}}
 
@@ -136,7 +137,8 @@ entries:
       - {tool: spectral_renderer, inputs: [single], optional: false,
          params: {size_px: 448}}
       - {tool: text_grounding, inputs: [single], depends_on: [1],
-         params: {max_boxes: 200, score_threshold: 0.25}}
+         params: {max_boxes: 200, score_threshold: 0.25, strategy: detect_all,
+                 timeout_ms: 240000}}
       - {tool: object_counter, inputs: ["@2:BBOX_SET"], depends_on: [2],
          params: {min_component_px: 16}}
       - {tool: vlm_vqa, inputs: ["@1", "@2:BBOX_SET"], depends_on: [1, 2, 3],
@@ -394,7 +396,8 @@ entries:
       - {tool: spectral_renderer, inputs: [optical, sar], optional: false,
          params: {size_px: 448}}
       - {tool: text_grounding, inputs: [optical], depends_on: [1],
-         params: {max_boxes: 20, score_threshold: 0.30}}
+         params: {max_boxes: 50, score_threshold: 0.30, strategy: detect_all,
+                 timeout_ms: 240000}}
       - {tool: crossmodal_consistency, inputs: [optical, sar], depends_on: [2],
          params: {embedding: dofa_base_patch16_224, patch_px: 16}}
       - {tool: vlm_vqa, inputs: ["@1", "@2:BBOX_SET"], depends_on: [1, 2, 3],

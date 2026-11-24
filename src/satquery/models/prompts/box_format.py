@@ -51,6 +51,10 @@ _TAGGED = re.compile(
 )
 _BODY = re.compile(_BOX_BODY)
 _JSON_BLOCK = re.compile(r"\[\s*\{.*?\}\s*\]", re.DOTALL)
+_JSON_ENTRY = re.compile(r"\{[^{}]*?\"bbox_2d\"\s*:\s*\[[^\]]*\][^{}]*?\}", re.DOTALL)
+"""One detection object on its own. A long "every aircraft" list routinely runs
+into the token budget, and a list with no closing bracket is not JSON — but every
+object before the cut still is."""
 
 NONE_ANSWER: Final[str] = "NONE"
 """The one non-box grounding answer the system prompt allows."""
@@ -345,6 +349,7 @@ def _parse_json(
     only detectable by them exceeding the normalised frame — hence the frame
     size being needed to interpret them at all.
     """
+    found = False
     for block in _JSON_BLOCK.finditer(text):
         try:
             entries = json.loads(block.group(0))
@@ -355,7 +360,18 @@ def _parse_json(
         for entry in entries:
             box = _from_json_entry(entry, width, height)
             if box is not None:
+                found = True
                 yield box
+    if found:
+        return
+    for match in _JSON_ENTRY.finditer(text):
+        try:
+            entry = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            continue
+        box = _from_json_entry(entry, width, height)
+        if box is not None:
+            yield box
 
 
 def _from_json_entry(

@@ -33,6 +33,7 @@ nothing.
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import json
 import time
@@ -477,7 +478,12 @@ class HuggingFaceBackend(LazyBackend):
         tokenizer = getattr(processor, "tokenizer", None)
         pad_id = getattr(tokenizer, "pad_token_id", None)
         started = time.perf_counter()
-        with torch.inference_mode():
+        bypass = (
+            model.disable_adapter()
+            if not request.use_adapter and hasattr(model, "disable_adapter")
+            else contextlib.nullcontext()
+        )
+        with torch.inference_mode(), bypass:
             produced = model.generate(
                 **inputs,
                 max_new_tokens=request.max_new_tokens,
