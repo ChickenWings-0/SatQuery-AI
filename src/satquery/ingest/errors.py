@@ -120,6 +120,23 @@ class ImageTooLargeError(IngestError):
         )
 
 
+class ImageTooSmallError(IngestError):
+    """An image too small for any tool to analyse (every tool needs 32 px)."""
+
+    def __init__(self, width: int, height: int, minimum: int, ref: str | None = None) -> None:
+        """Build the error naming the size received and the size required."""
+        super().__init__(
+            code="IMAGE_TOO_SMALL",
+            http_status=422,
+            message=(
+                f"The image is {width} x {height} px; analysis needs at least "
+                f"{minimum} px on each side."
+            ),
+            hint="Select a larger area, or upload a larger crop of the scene.",
+            ref=ref,
+        )
+
+
 class MissingGeoreferenceError(IngestError):
     """Exactly one image of a pair is georeferenced — an unresolvable mix."""
 

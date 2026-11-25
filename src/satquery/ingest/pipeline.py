@@ -12,6 +12,7 @@ from pathlib import Path
 from satquery.ingest.capabilities import supported_tasks
 from satquery.ingest.compatibility import assess
 from satquery.ingest.errors import (
+    ImageTooSmallError,
     MissingGeoreferenceError,
     NoImagesError,
     TooManyImagesError,
@@ -25,6 +26,8 @@ from satquery.schemas.manifest import InputManifest
 from satquery.schemas.trace import WarningItem
 
 MAX_IMAGES = 2
+MIN_ANALYSABLE_PX = 32
+"""The smallest edge any registered tool accepts (``min_size_px`` in the registry)."""
 """API_CONTRACT §4.1: analyses relate at most two images."""
 
 
@@ -93,6 +96,14 @@ def ingest(
         raise TooManyImagesError(count=len(images), maximum=max_images)
 
     rasters = [open_raster(image.path, ref=f"img_{index}") for index, image in enumerate(images)]
+    # Every tool declares min_size_px: 32. An image below it would pass every
+    # compatibility check and then fail the renderer mid-run as an internal
+    # error; refusing it here gives the caller the reason and the remedy.
+    for index, raster in enumerate(rasters):
+        if min(raster.width, raster.height) < MIN_ANALYSABLE_PX:
+            raise ImageTooSmallError(
+                raster.width, raster.height, MIN_ANALYSABLE_PX, ref=f"img_{index}"
+            )
     verdicts = [classify(raster) for raster in rasters]
     report = assess(rasters, verdicts, pair_type_hint=pair_type_hint)
 

@@ -574,6 +574,7 @@ Ordering guarantee: `queued` → `stage(ingesting…planning)` → `plan` → in
 | `TOO_MANY_IMAGES` | 400 | more than 2 images |
 | `EMPTY_QUERY` | 400 | `query` missing or blank on `/v1/analyze` |
 | `IMAGE_TOO_LARGE` | 413 | exceeds `max_upload_mb` (default 512) or `max_size_px` |
+| `IMAGE_TOO_SMALL` | 422 | an image's shortest edge is under 32 px, the smallest any tool accepts (added 2026-11-25) |
 | `UNSUPPORTED_FORMAT` | 415 | driver not in the allow-list |
 | `MISSING_GEOREFERENCE` | 422 | exactly one image is georeferenced (mixed pair is unresolvable) |
 | `CRS_MISMATCH_UNRESOLVABLE` | 422 | reprojection failed |
