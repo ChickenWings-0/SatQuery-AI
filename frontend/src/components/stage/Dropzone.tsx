@@ -65,6 +65,7 @@ export function Dropzone() {
   // `selectFiles` replaces the drop target with the manifest list, so this
   // component is gone long before `/v1/validate` answers.
   const selectFiles = useUiStore((state) => state.selectFiles)
+  const setSection = useUiStore((state) => state.setSection)
 
   function accept(list: FileList | null) {
     if (!list || list.length === 0) return
@@ -111,13 +112,24 @@ export function Dropzone() {
           GeoTIFF preferred; PNG and JPEG accepted, up to {bytes(MAX_BYTES)} each. Two images
           unlock bi-temporal and cross-modal questions.
         </p>
-        <button
-          type="button"
-          onClick={() => input.current?.click()}
-          className="mt-5 min-h-11 rounded-lg border border-accent-warm-text px-4 py-2 text-sm font-medium text-accent-warm-text transition-colors hover:bg-accent-warm-strong hover:text-white"
-        >
-          Choose files
-        </button>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+          <button
+            type="button"
+            onClick={() => input.current?.click()}
+            className="min-h-11 rounded-lg border border-accent-warm-text px-4 py-2 text-sm font-medium text-accent-warm-text transition-colors hover:bg-accent-warm-strong hover:text-white"
+          >
+            Choose files
+          </button>
+          {/* The fastest honest demo path: a real scene with its question
+              already written, one click from an empty console. */}
+          <button
+            type="button"
+            onClick={() => setSection('usecases')}
+            className="min-h-11 px-1 text-sm font-medium text-text-lo underline decoration-line underline-offset-4 transition-colors hover:text-text-hi hover:decoration-accent-warm"
+          >
+            Try a sample scene
+          </button>
+        </div>
         <input
           ref={input}
           type="file"

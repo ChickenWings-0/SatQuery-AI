@@ -1427,7 +1427,38 @@
   }
   .cap-tab[data-state='off']:hover {
     border-color: var(--color-line);
-    box-shadow: inset 3px 0 0 0 var(--color-line);
+    background: var(--color-surface-card);
+  }
+
+  /* The scroll sequence's tracks: one hairline per capability, beside the
+     row rather than drawn on it, filling top-down as the pinned section's
+     scroll passes through that step (--cap-progress is written by
+     usePinnedSteps; three steps). Scroll-linked, so it needs no transition
+     and nothing to switch off for reduced motion. */
+  .cap-track {
+    position: relative;
+    width: 2px;
+    flex: none;
+    margin-block: 0.875rem;
+    border-radius: 999px;
+    background: var(--color-line);
+    overflow: hidden;
+  }
+  .cap-fill {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--color-accent-warm);
+    transform-origin: top;
+    transform: scaleY(clamp(0, calc(var(--cap-progress, 0) * 3 - var(--i, 0)), 1));
+  }
+
+  /* Pinned, the whole stage must fit one laptop viewport: the preview's
+     width is capped so its 16:10 height leaves room for the heading, the
+     tools row and the nav. */
+  [data-pinned] .cap-stage {
+    max-width: min(100%, calc((100svh - 17rem) * 1.6));
+    margin-inline-start: auto;
   }
   .cap-tab[data-state='on'] {
     border-color: oklch(from var(--color-accent-warm) l c h / 0.5);

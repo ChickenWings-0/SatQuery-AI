@@ -9,14 +9,21 @@
  * a switch, the outgoing HUD slides out and the incoming one slides in, both
  * stacked in one grid cell so the outgoing side can animate at all (a `key`
  * remount could only animate the new one). The slide follows the list order.
+ *
+ * On a laptop-sized screen the section is also a scroll sequence: the stage
+ * pins to the viewport and the page's scroll position walks it from the first
+ * capability to the third (`usePinnedSteps`), each step's track filling as it
+ * goes. A click or a key scrolls to that step, so the two never disagree. On a
+ * phone it stays a plain tab list.
  */
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 
 import { ArrowRightIcon } from '@/components/ui/icons'
 import { CAPABILITIES, type Capability } from '@/pages/landing/capabilities'
 import { ChangeHud } from '@/pages/landing/hud/ChangeHud'
 import { CrossModalHud } from '@/pages/landing/hud/CrossModalHud'
 import { GroundingHud } from '@/pages/landing/hud/GroundingHud'
+import { usePinnedSteps } from '@/pages/landing/usePinnedSteps'
 import { useCursorLight } from '@/pages/landing/useScrollProgress'
 import { useFocusStore } from '@/state/focus'
 import { CAPABILITY_ORDER, useLandingStore, type CapabilityId } from '@/state/landing'
@@ -63,6 +70,23 @@ export function Capabilities() {
   const setSection = useUiStore((state) => state.setSection)
   const proposeQuestion = useFocusStore((state) => state.proposeQuestion)
   const shown = byId(active)
+  const section = useRef<HTMLElement>(null)
+  const onStep = useCallback(
+    (index: number) => {
+      const target = CAPABILITIES[index]
+      if (target) setCapability(target.id)
+    },
+    [setCapability],
+  )
+  const { pinned, scrollToStep } = usePinnedSteps(section, CAPABILITIES.length, onStep)
+  const activeIndex = CAPABILITIES.findIndex((cap) => cap.id === active)
+
+  function choose(index: number) {
+    const target = CAPABILITIES[index]
+    if (!target) return
+    setCapability(target.id)
+    scrollToStep(index)
+  }
 
   // The outgoing panel stays mounted for the length of its exit.
   const [leaving, setLeaving] = useState<CapabilityId | null>(null)
@@ -95,24 +119,44 @@ export function Capabilities() {
     else return
     event.preventDefault()
     const target = CAPABILITIES[next]!
-    setCapability(target.id)
-    document.getElementById(`cap-tab-${target.id}`)?.focus()
+    choose(next)
+    document.getElementById(`cap-tab-${target.id}`)?.focus({ preventScroll: true })
   }
 
   return (
-    <section id="capabilities" aria-labelledby="cap-title" className="relative mx-auto max-w-[1280px] px-4 py-28 wide:px-6 desk:py-36">
-      <div data-reveal>
+    <section
+      ref={section}
+      id="capabilities"
+      aria-labelledby="cap-title"
+      className="relative desk:h-[310svh]"
+      data-pinned={pinned ? 'true' : undefined}
+    >
+      {/* The stage. Pinned for the section's whole scroll length on a laptop;
+          the page scrolls past it in the ordinary way below `desk`. */}
+      <div className="desk:sticky desk:top-0 desk:flex desk:h-[100svh] desk:items-center">
+      <div className="mx-auto w-full max-w-[1280px] px-4 py-28 wide:px-6 desk:py-0 desk:pt-16">
+      <div data-reveal className="flex items-end justify-between gap-6">
         <h2 id="cap-title" className="t-section text-text-hi">
           Three things a chat box cannot do.
         </h2>
+        {pinned ? (
+          <p className="t-coord hidden shrink-0 pb-2 text-text-lo desk:block" aria-hidden>
+            <span className="text-accent-warm-text tabular">{activeIndex + 1}</span> / {CAPABILITIES.length} · scroll
+          </p>
+        ) : null}
       </div>
-      <div className="mt-12 grid grid-cols-1 gap-10 desk:mt-16 desk:grid-cols-12 desk:gap-12">
+      <div className="mt-12 grid grid-cols-1 gap-10 desk:mt-10 desk:grid-cols-12 desk:gap-12">
         <div className="space-y-1 desk:col-span-5" role="tablist" aria-label="Capabilities" aria-orientation="vertical" data-reveal>
           {CAPABILITIES.map((cap, i) => {
             const on = cap.id === active
             return (
+              <div key={cap.id} className="flex items-stretch gap-4">
+                {/* The step's track: a timeline beside the item, not a stripe
+                    on it. It fills as the scroll passes through this step. */}
+                <span aria-hidden className="cap-track hidden desk:block" style={{ '--i': i } as CSSProperties}>
+                  <span className="cap-fill" />
+                </span>
               <button
-                key={cap.id}
                 role="tab"
                 id={`cap-tab-${cap.id}`}
                 aria-selected={on}
@@ -120,7 +164,7 @@ export function Capabilities() {
                 tabIndex={on ? 0 : -1}
                 data-reveal-child
                 data-state={on ? 'on' : 'off'}
-                onClick={() => setCapability(cap.id)}
+                onClick={() => choose(i)}
                 onKeyDown={(event) => onKey(event, i)}
                 className="cap-tab block w-full rounded-xl border px-5 py-4 text-left transition-colors duration-[220ms]"
               >
@@ -133,11 +177,12 @@ export function Capabilities() {
                   </span>
                 </span>
               </button>
+              </div>
             )
           })}
         </div>
         <div id="cap-panel" role="tabpanel" aria-labelledby={`cap-tab-${shown.id}`} className="desk:col-span-7" data-reveal>
-          <div className="grid" data-cap-direction={direction} style={{ contain: 'paint' }}>
+          <div className="cap-stage grid" data-cap-direction={direction} style={{ contain: 'paint' }}>
             {leaving && leaving !== active ? <Preview key={leaving} cap={byId(leaving)} state="out" /> : null}
             <Preview key={active} cap={shown} state="in" />
           </div>
@@ -153,6 +198,8 @@ export function Capabilities() {
             </button>
           </div>
         </div>
+      </div>
+      </div>
       </div>
     </section>
   )
