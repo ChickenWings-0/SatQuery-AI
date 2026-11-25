@@ -4,8 +4,8 @@
  * Called from the answer card's bookmark. Reads the job store's result and
  * artifacts, the pre-flight manifests (for bounds and sensors), the first KPI
  * (as the headline), the boxes (from the artifact, or the prose fallback),
- * and draws a 320px thumbnail of the primary view onto a canvas. The image
- * fetch is same-origin (`/v1/artifacts/...`), so the canvas is not tainted.
+ * and draws a 320px thumbnail of the primary view onto a canvas from the
+ * fetched bytes, so a cross-origin API (the hosted deploy) cannot taint it.
  */
 import { artifactUrl } from '@/api/client'
 import { groupViews, primaryOf } from '@/evidence/views'
@@ -20,14 +20,17 @@ const THUMB_W = 320
 async function thumbnail(url: string | null): Promise<Blob | null> {
   if (!url || typeof document === 'undefined') return null
   try {
-    const img = new Image()
-    img.decoding = 'async'
-    img.src = url
-    await img.decode()
-    const scale = Math.min(1, THUMB_W / img.naturalWidth)
+    // Fetched as bytes, not drawn from an <img>: on a hosted deploy the API is
+    // another origin, and an image drawn from one taints the canvas, so
+    // toBlob throws and every saved card lost its thumbnail. A CORS fetch
+    // (the API allows any origin) yields an untainted bitmap.
+    const response = await fetch(url)
+    if (!response.ok) return null
+    const img = await createImageBitmap(await response.blob())
+    const scale = Math.min(1, THUMB_W / img.width)
     const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+    canvas.width = Math.max(1, Math.round(img.width * scale))
+    canvas.height = Math.max(1, Math.round(img.height * scale))
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height)

@@ -99,7 +99,8 @@ describe('the rail', () => {
     expect(items[1]?.textContent).toContain('3 min ago')
 
     fireEvent.click(screen.getByRole('button', { name: /^Open “How much built-up area changed/ }))
-    expect(useUiStore.getState().section).toBe('history')
+    // Opening a past run reopens it in the workspace (restored from the trace).
+    expect(useUiStore.getState().section).toBe('explore')
     expect(useUiStore.getState().selectedTraceId).toBe('a')
 
     fireEvent.click(screen.getByRole('button', { name: /Remove “Count the ships in the harbour”/ }))

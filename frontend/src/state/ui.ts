@@ -180,9 +180,24 @@ export const useUiStore = create<UiState>((set, get) => ({
       ),
     })),
 
-  // Navigating to History without saying *which* run left the user to re-find
-  // the one they had just clicked.
-  openRun: (selectedTraceId) => set({ section: 'history', selectedTraceId }),
+  // Reopen the run itself — answer, evidence, pipeline — in the workspace,
+  // rebuilt from the server's stored trace, so a saved run survives a reload
+  // or a server restart. History (summary only) is the fallback when the
+  // server cannot produce it.
+  openRun: (selectedTraceId) => {
+    set({ section: 'explore', selectedTraceId })
+    void import('@/thread/restore')
+      .then(({ restoreRun }) => restoreRun(selectedTraceId))
+      .catch(() => {
+        set({ section: 'history', selectedTraceId })
+        void import('@/state/notifications').then(({ toast }) =>
+          toast(
+            'This run could not be reopened — the server no longer holds it, or is unreachable.',
+            'warn',
+          ),
+        )
+      })
+  },
 }))
 
 /** Every manifest field that is `null` carries a reason in `warnings` (§1). */
