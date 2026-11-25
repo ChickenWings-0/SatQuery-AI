@@ -119,11 +119,15 @@ WantedBy=default.target
 
 ```ini
 [Unit]
+# Blocking sleep needs an active login session; at boot there may not be one
+# yet, so keep retrying instead of giving up after five quick failures.
+StartLimitIntervalSec=0
 Description=Keep the PC awake while the SatQuery demo is served
 
 [Service]
 ExecStart=/usr/bin/systemd-inhibit --what=sleep:idle --who=SatQuery --why="Serving the SatQuery demo" sleep infinity
 Restart=always
+RestartSec=30
 
 [Install]
 WantedBy=default.target
@@ -163,7 +167,7 @@ survive a refresh. Every push to `main` redeploys in about a minute.
 | Public check (with the code) | `curl -H "X-SatQuery-Code: <code>" https://<machine>.<tailnet>.ts.net/v1/health` |
 | Stop serving | `systemctl --user stop satquery-tunnel satquery-api satquery-awake` and `sudo tailscale funnel --bg off 8000` |
 
-**After a reboot nothing needs doing.** Tailscale and all three units come back on
+**After a reboot nothing needs doing** (the keep-awake unit starts once you log in; polkit only lets an active session block sleep). Tailscale and all three units come back on
 their own; the quick tunnel gets a new URL and the frontend discovers it. The first
 question after an API restart takes ~30 s while the model loads onto the GPU; later
 ones take a few seconds. Ask one question before presenting.
