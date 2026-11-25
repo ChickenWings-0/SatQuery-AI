@@ -38,7 +38,8 @@ export function ManifestCard({
   const warnings = manifest.warnings ?? []
   // A GeoTIFF is the normal input and no browser can decode one, so its
   // object URL renders as a broken-image icon. Drop the thumbnail instead.
-  const [undecodable, setUndecodable] = useState(false)
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
+  const undecodable = previewUrl !== undefined && failedUrl === previewUrl
 
   return (
     <article className="card-flush">
@@ -66,8 +67,8 @@ export function ManifestCard({
             src={previewUrl}
             alt=""
             aria-hidden
-            onError={() => setUndecodable(true)}
-            className="size-24 shrink-0 rounded-lg border border-line object-cover [image-rendering:pixelated]"
+            onError={() => setFailedUrl(previewUrl)}
+            className="size-24 shrink-0 rounded-lg border border-line object-cover"
           />
         )}
 

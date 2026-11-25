@@ -102,13 +102,19 @@ export function PreflightPanel() {
       {validation && (
         <>
           <section className="space-y-3">
-            {validation.inputs.map((manifest, index) => (
-              <ManifestCard
-                key={manifest.id}
-                manifest={manifest}
-                {...(files[index] ? { previewUrl: files[index].previewUrl } : {})}
-              />
-            ))}
+            {validation.inputs.map((manifest, index) => {
+              // The server's quicklook first: it can render a GeoTIFF (true
+              // colour, or backscatter for SAR) that the browser cannot decode.
+              // The local object URL still covers a PNG/JPEG upload.
+              const preview = validation.previews?.[manifest.id] ?? files[index]?.previewUrl
+              return (
+                <ManifestCard
+                  key={manifest.id}
+                  manifest={manifest}
+                  {...(preview ? { previewUrl: preview } : {})}
+                />
+              )
+            })}
           </section>
 
           <CompatibilityDetails report={validation.compatibility} />

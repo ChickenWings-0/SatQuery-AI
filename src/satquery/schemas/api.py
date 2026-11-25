@@ -166,6 +166,12 @@ class ValidateResponse(BaseModel):
         )
     )
     warnings: list[WarningItem] = Field(default_factory=list)
+    previews: dict[str, str] = Field(
+        default_factory=dict,
+        description="Added 2026-11-25. img_* -> a small JPEG data URL of each input "
+        "(true colour, SAR backscatter or the single band), for showing a GeoTIFF the "
+        "browser cannot decode. Best effort: an input may be missing.",
+    )
 
 
 class ImageryItemRequest(BaseModel):

@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
+from satquery.api.previews import previews_for
 from satquery.api.uploads import parse_options, spooled_uploads_async
 from satquery.core.config import Settings, get_settings
 from satquery.ingest.pipeline import ingest
@@ -42,10 +43,13 @@ async def validate(
             roles=parsed.roles,
             max_images=settings.max_images,
         )
+        # Rendered while the spooled files still exist.
+        previews = await asyncio.to_thread(previews_for, result, sources)
 
     return ValidateResponse(
         inputs=result.inputs,
         compatibility=result.compatibility,
         supported_tasks=result.supported_tasks,
         warnings=result.warnings,
+        previews=previews,
     )
