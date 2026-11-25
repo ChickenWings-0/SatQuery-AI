@@ -7,6 +7,7 @@
  * and draws a 320px thumbnail of the primary view onto a canvas from the
  * fetched bytes, so a cross-origin API (the hosted deploy) cannot taint it.
  */
+import { loadBitmap } from '@/api/bitmap'
 import { artifactUrl } from '@/api/client'
 import { groupViews, primaryOf } from '@/evidence/views'
 import { confidenceCard, formatKpi, selectKpis } from '@/kpi/registry'
@@ -24,9 +25,7 @@ async function thumbnail(url: string | null): Promise<Blob | null> {
     // another origin, and an image drawn from one taints the canvas, so
     // toBlob throws and every saved card lost its thumbnail. A CORS fetch
     // (the API allows any origin) yields an untainted bitmap.
-    const response = await fetch(url)
-    if (!response.ok) return null
-    const img = await createImageBitmap(await response.blob())
+    const img = await loadBitmap(url)
     const scale = Math.min(1, THUMB_W / img.width)
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(img.width * scale))

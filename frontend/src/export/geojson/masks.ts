@@ -11,6 +11,7 @@
  * console entry. The one published marching-squares package is AGPL, which
  * is why this file exists instead.
  */
+import { loadBitmap } from '@/api/bitmap'
 import { BOX_SCALE } from '@/thread/bbox'
 import { type Bounds, type Feature } from '@/export/geojson/build'
 import { rewind, roundRing, signedArea, simplifyRing, type Position, type Ring } from '@/export/geojson/winding'
@@ -48,13 +49,10 @@ const MAX_CLASSES = 16
 
 async function readGrid(source: MaskSource, maxSide: number): Promise<Grid | null> {
   if (typeof document === 'undefined') return null
-  const img = new Image()
-  img.decoding = 'async'
-  img.src = source.url
-  await img.decode()
-  const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight))
-  const width = Math.max(1, Math.round(img.naturalWidth * scale))
-  const height = Math.max(1, Math.round(img.naturalHeight * scale))
+  const img = await loadBitmap(source.url)
+  const scale = Math.min(1, maxSide / Math.max(img.width, img.height))
+  const width = Math.max(1, Math.round(img.width * scale))
+  const height = Math.max(1, Math.round(img.height * scale))
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height

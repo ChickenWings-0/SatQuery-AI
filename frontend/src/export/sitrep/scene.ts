@@ -6,6 +6,7 @@
  * tainted — the invariant `pages/saved/capture.ts` already relies on.
  * No pdf-lib here: this file is small and static.
  */
+import { loadBitmap } from '@/api/bitmap'
 import { formatDms } from '@/evidence/georef'
 import type { SitrepModel } from '@/export/sitrep/compose'
 import { BOX_SCALE } from '@/thread/bbox'
@@ -25,13 +26,9 @@ const PAPER = '#f6f1ea'
 const ACCENT = '#c96a3b'
 const SAND = '#e6c79c'
 
-async function decode(url: string): Promise<HTMLImageElement | null> {
+async function decode(url: string): Promise<ImageBitmap | null> {
   try {
-    const img = new Image()
-    img.decoding = 'async'
-    img.src = url
-    await img.decode()
-    return img
+    return await loadBitmap(url)
   } catch {
     return null
   }
@@ -89,9 +86,9 @@ export async function drawScenePanel(
     if (img) {
       // Cover-fit: the rendered views are square, but a non-square input
       // should not be stretched into one.
-      const s = Math.max(PANE_W / img.naturalWidth, PANE_H / img.naturalHeight)
-      const dw = img.naturalWidth * s
-      const dh = img.naturalHeight * s
+      const s = Math.max(PANE_W / img.width, PANE_H / img.height)
+      const dw = img.width * s
+      const dh = img.height * s
       ctx.drawImage(img, x0 + (PANE_W - dw) / 2, (PANE_H - dh) / 2, dw, dh)
     } else {
       ctx.fillStyle = '#2a2420'
