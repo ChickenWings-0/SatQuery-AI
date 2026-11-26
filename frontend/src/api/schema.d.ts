@@ -267,10 +267,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Confirm the access code this request carries
+         * @description 200 when the request's code is accepted (or none is required).
+         *
+         *     The route itself does nothing: the access middleware answers 401 before it
+         *     is reached when the code is missing or wrong. The frontend's code dialog
+         *     calls it to validate a code before running anything with it.
+         */
+        get: operations["check_access_v1_access_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AccessCheckResponse
+         * @description ``GET /v1/access`` 200 body: the request's access code was accepted.
+         */
+        AccessCheckResponse: {
+            /** Ok */
+            ok: boolean;
+        };
         /**
          * AnalyzeResponse
          * @description ``POST /v1/analyze`` 200 body.
@@ -764,6 +796,12 @@ export interface components {
              * @default 0
              */
             jobs_retained: number;
+            /**
+             * Access Required
+             * @description True when running anything needs an access code (X-SatQuery-Code). Health and the registry stay public so the site can be browsed without one.
+             * @default false
+             */
+            access_required: boolean;
             /**
              * Fast Base Url
              * @description A faster public base URL this API is also reachable at (a Cloudflare quick tunnel), or null. It buffers streamed responses, so read job events there with ?poll=true.
@@ -1775,6 +1813,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_access_v1_access_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessCheckResponse"];
                 };
             };
         };

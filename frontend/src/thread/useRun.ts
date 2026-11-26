@@ -25,6 +25,7 @@
  *      current one — a fast second question must not be overwritten by the
  *      first one's failure arriving late.
  */
+import { requireAccess } from '@/api/access'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { SatQueryError, cancelJob, createJob, streamJob } from '@/api/client'
@@ -156,6 +157,7 @@ export function useRun() {
       const query = raw.trim()
       const files = useUiStore.getState().files.map((entry) => entry.file)
       if (files.length === 0 || query === '') return
+      if (!(await requireAccess())) return
 
       // A previous run still streaming is abandoned on both ends.
       inFlight.current?.abort()

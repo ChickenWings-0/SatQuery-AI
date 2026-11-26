@@ -520,10 +520,13 @@ Clips one or two Planetary Computer scenes to a bbox and writes each as a small 
 ### 4.12 Access code and GPU admission (added 2026-11-25, additive)
 
 **Access code.** With `SATQUERY_ACCESS_CODE` set (one or more comma-separated codes),
-every request under `/v1` must carry a matching code in the `X-SatQuery-Code` header,
-or as `?code=` on URLs the browser loads itself (`<img src>`, downloads). Comparison
-is constant-time. `OPTIONS` preflights and paths outside `/v1` (`/docs`,
-`/openapi.json`) are not gated. A missing code answers `401 ACCESS_CODE_REQUIRED`, a
+every request under `/v1` except the public reads must carry a matching code in the
+`X-SatQuery-Code` header, or as `?code=` on URLs the browser loads itself (`<img src>`,
+downloads). Comparison is constant-time. Public (2026-11-26): `GET /v1/health` (which
+reports `access_required`) and `GET /v1/registry`, so the site can be browsed without
+a code. `GET /v1/access` is a gated no-op that answers 200 when the code is accepted.
+`OPTIONS` preflights and paths outside `/v1` (`/docs`, `/openapi.json`) are not
+gated. A missing code answers `401 ACCESS_CODE_REQUIRED`, a
 wrong one `401 ACCESS_CODE_INVALID`; after `access_max_failures` (default 10) wrong
 codes from one client IP within `access_lockout_s` (default 900 s) that IP gets
 `429 ACCESS_LOCKED` until the window passes. The 401/429 responses carry the CORS

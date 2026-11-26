@@ -7,6 +7,7 @@
  * flow, not a special path. The question lands in the composer, pre-flight
  * is already running when the stage appears.
  */
+import { requireAccess } from '@/api/access'
 import { useCallback, useState } from 'react'
 
 import { sampleUrl, type UseCase } from '@/pages/usecases/catalogue'
@@ -53,6 +54,8 @@ export function useLoadSample() {
   const load = useCallback(
     async (useCase: UseCase) => {
       if (useUiStore.getState().loadingSample) return
+      // Ask before downloading the sample, not after: it is going to run.
+      if (!(await requireAccess())) return
       setError(null)
       setLoadingSample(useCase.slug)
       const totalBytes = Math.round(useCase.sizeMb * 1024 * 1024)

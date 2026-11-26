@@ -89,8 +89,9 @@ laptop that day.
 and GPU on the home box (`DOCS/PUBLIC_DEMO_HOSTING.md`). Two things differ from a local
 run:
 
-- **An access code screen comes first.** Enter the code you were given; the browser
-  remembers it. A wrong code says so; too many wrong codes lock that network out for
+- **Look around freely; running needs the access code.** The first time you load a
+  scene, fetch imagery or ask a question, a dialog asks for the code you were given;
+  the action then continues, and the browser remembers the code. A wrong code says so; too many wrong codes lock that network out for
   15 minutes.
 - **Imagery search is already on** — the hosted build defaults it on, so the Maps page
   works without visiting Settings.

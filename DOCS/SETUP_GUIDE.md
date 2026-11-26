@@ -263,6 +263,6 @@ DIOR-RSVG is gated: accept its terms on Hugging Face and `export HF_TOKEN=…` t
 | `npm run lint` crashes loading oxlint | Node < 22.12 on `PATH` |
 | fonts look like Arial | `npm run fonts:sync` |
 | `make eval` can't find views | `data/processed/` is missing — rebuild it (above) |
-| UI shows a code screen | `SATQUERY_ACCESS_CODE` is set in `.env`; enter it, or unset it for local work |
+| A dialog asks for an access code when you run something | `SATQUERY_ACCESS_CODE` is set in `.env`; enter it, or unset it for local work |
 | `429 GPU_BUSY` | four analyses already running or waiting; wait, or raise `SATQUERY_MAX_ACTIVE_JOBS` |
 | hosted site blocked with *Permission was denied … address space* | this device is in the tailnet; `sudo tailscale set --accept-dns=false` (`PUBLIC_DEMO_HOSTING.md`) |

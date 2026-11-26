@@ -26,14 +26,19 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Final
 
-from fastapi import FastAPI, Request, Response
+from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from satquery.core.config import Settings
 from satquery.core.logging import get_logger
-from satquery.schemas.api import ApiError, ApiErrorResponse
+from satquery.schemas.api import AccessCheckResponse, ApiError, ApiErrorResponse
 
 ACCESS_HEADER: Final[str] = "X-SatQuery-Code"
+
+PUBLIC_READS: Final[frozenset[str]] = frozenset({"health", "registry"})
+"""``GET`` routes anyone may call without a code: what the site needs to be
+browsed (the status strip, the tools catalogue). Everything that reads an
+upload, fetches imagery, runs a tool or returns a run's results is gated."""
 ACCESS_QUERY_PARAM: Final[str] = "code"
 
 log = get_logger(__name__)
@@ -99,6 +104,24 @@ def _error(status: int, code: str, message: str, hint: str) -> JSONResponse:
     return JSONResponse(status_code=status, content=body.model_dump(mode="json"))
 
 
+router = APIRouter(tags=["access"])
+
+
+@router.get(
+    "/access",
+    response_model=AccessCheckResponse,
+    summary="Confirm the access code this request carries",
+)
+async def check_access() -> AccessCheckResponse:
+    """200 when the request's code is accepted (or none is required).
+
+    The route itself does nothing: the access middleware answers 401 before it
+    is reached when the code is missing or wrong. The frontend's code dialog
+    calls it to validate a code before running anything with it.
+    """
+    return AccessCheckResponse(ok=True)
+
+
 def gpu_busy_response(active: int) -> JSONResponse:
     """The 429 an analysis gets when the line for the GPU is already full."""
     return _error(
@@ -125,6 +148,8 @@ def install_access_guard(app: FastAPI, settings: Settings) -> AccessGuard:
         lockout_s=settings.access_lockout_s,
     )
     prefix = settings.api_prefix.rstrip("/") + "/"
+    public = {prefix + route for route in PUBLIC_READS}
+    app.state.access_guard = guard
 
     @app.middleware("http")
     async def require_access_code(
@@ -134,6 +159,7 @@ def install_access_guard(app: FastAPI, settings: Settings) -> AccessGuard:
             not guard.enabled
             or request.method == "OPTIONS"
             or not request.url.path.startswith(prefix)
+            or (request.method == "GET" and request.url.path.rstrip("/") in public)
         ):
             return await call_next(request)
 
@@ -176,8 +202,10 @@ def install_access_guard(app: FastAPI, settings: Settings) -> AccessGuard:
 __all__ = [
     "ACCESS_HEADER",
     "ACCESS_QUERY_PARAM",
+    "PUBLIC_READS",
     "AccessGuard",
     "gpu_busy_response",
     "install_access_guard",
     "parse_codes",
+    "router",
 ]

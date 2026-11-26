@@ -5,6 +5,7 @@
  * dropzone uses. A fetched scene is exactly the demo flow, not a special
  * path: pre-flight is already running when the console appears.
  */
+import { requireAccess } from '@/api/access'
 import { useCallback, useState } from 'react'
 
 import { fetchImagery, imageryUrl, SatQueryError } from '@/api/client'
@@ -63,6 +64,7 @@ export function useImageryFetch() {
     const state = useStacStore.getState()
     const { t1, t2, issue } = selectedItems(state)
     if (!t1 || issue || !state.query.bbox) return
+    if (!(await requireAccess())) return
     const items = [t1, ...(t2 ? [t2] : [])]
     const controller = new AbortController()
     setProgress({ ...IDLE, phase: 'clipping', total: items.length })

@@ -44,10 +44,13 @@ progress still arrives live. On the Funnel URL the ordinary SSE stream is used.
 The API is reachable by anyone who has its URL, so two server-side guards apply
 (`API_CONTRACT.md` §4.12):
 
-- **Access code.** With `SATQUERY_ACCESS_CODE` set, every `/v1` request must carry
-  a matching code in the `X-SatQuery-Code` header (or `?code=` for URLs an `<img>`
-  loads). The frontend shows a code screen first and remembers the code in the
-  browser. Ten wrong codes from one IP lock it out for 15 minutes. Several codes can
+- **Access code.** With `SATQUERY_ACCESS_CODE` set, anything that runs — uploads,
+  imagery fetches, questions, and reading a run's results — must carry a matching code
+  in the `X-SatQuery-Code` header (or `?code=` for URLs an `<img>` loads). Browsing
+  needs none: `GET /v1/health` and `GET /v1/registry` stay public, so the whole site
+  can be looked through. The frontend asks for the code in a dialog the first time
+  someone tries to run something, checks it against `GET /v1/access`, then continues
+  that action and remembers the code in the browser. Ten wrong codes from one IP lock it out for 15 minutes. Several codes can
   be issued, comma-separated, and revoked one at a time.
 - **GPU queue.** One analysis runs on the GPU at a time
   (`SATQUERY_MAX_CONCURRENT_JOBS=1`); the rest wait in arrival order. Past four
@@ -185,7 +188,7 @@ ones take a few seconds. Ask one question before presenting.
 | Symptom | Cause / fix |
 |---|---|
 | Browser console: *blocked by CORS policy: Permission was denied for this request to access the … address space* | That device is logged into the tailnet, so MagicDNS resolves the Funnel name to a private `100.x` address and Chrome's local-network protection blocks the public site from calling it. Run `sudo tailscale set --accept-dns=false` on that device, or disconnect Tailscale there. |
-| Code screen never appears; the app shows "Could not reach the SatQuery API" | The API or Funnel is down: check `systemctl --user status satquery-api` and `tailscale funnel status`. |
+| The status strip says Offline; the app shows "Could not reach the SatQuery API" | The API or Funnel is down: check `systemctl --user status satquery-api` and `tailscale funnel status`. |
 | Everything works but feels slow (~1 s per click) | Traffic is on the Funnel URL: the quick tunnel is down or was not reported. Check `satquery-tunnel` and `SATQUERY_FAST_PATH_METRICS_URL`; reload the page once it is back. |
 | `429 GPU_BUSY` | Four analyses are already running or waiting. Wait for them, or raise `SATQUERY_MAX_ACTIVE_JOBS`. |
 | `429 ACCESS_LOCKED` | Ten wrong codes from that network in 15 minutes; wait it out or restart the API. |

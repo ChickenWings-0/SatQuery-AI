@@ -8,8 +8,12 @@ import {
   ACCESS_HEADER,
   clearAccessCode,
   getAccessCode,
+  onAccessPrompt,
   onAccessRequired,
+  requireAccess,
   setAccessCode,
+  setAccessRequired,
+  settleAccess,
   withAccessCode,
   withAccessHeader,
 } from '@/api/access'
@@ -80,5 +84,33 @@ describe('client', () => {
     unsubscribe()
     expect(listener).toHaveBeenCalledOnce()
     expect(getAccessCode()).toBeNull()
+  })
+})
+
+describe('requireAccess', () => {
+  it('lets an action run when the API needs no code', async () => {
+    setAccessRequired(false)
+    await expect(requireAccess()).resolves.toBe(true)
+  })
+
+  it('lets an action run when a code is already held', async () => {
+    setAccessRequired(true)
+    setAccessCode('k')
+    await expect(requireAccess()).resolves.toBe(true)
+  })
+
+  it('asks for a code and waits for the dialog to settle', async () => {
+    setAccessRequired(true)
+    const prompted = vi.fn()
+    const off = onAccessPrompt(prompted)
+    const waiting = requireAccess()
+    expect(prompted).toHaveBeenCalledOnce()
+    settleAccess(true)
+    await expect(waiting).resolves.toBe(true)
+    const dismissed = requireAccess()
+    settleAccess(false)
+    await expect(dismissed).resolves.toBe(false)
+    off()
+    setAccessRequired(false)
   })
 })

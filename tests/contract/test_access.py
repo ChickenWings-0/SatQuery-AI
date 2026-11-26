@@ -39,36 +39,65 @@ def guarded() -> Iterator[TestClient]:
 
 def test_no_code_configured_leaves_the_api_open() -> None:
     with _client(access_code=None) as client:
-        assert client.get("/v1/health").status_code == 200
+        assert client.get("/v1/access").status_code == 200
+        assert client.get("/v1/health").json()["access_required"] is False
 
 
 def test_missing_code_is_refused_with_the_error_envelope(guarded: TestClient) -> None:
-    response = guarded.get("/v1/health")
+    response = guarded.get("/v1/access")
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "ACCESS_CODE_REQUIRED"
 
 
 def test_any_configured_code_is_accepted_in_the_header(guarded: TestClient) -> None:
     for code in ("alpha", "bravo", "  bravo  "):
-        assert guarded.get("/v1/health", headers={ACCESS_HEADER: code}).status_code == 200
+        assert guarded.get("/v1/access", headers={ACCESS_HEADER: code}).status_code == 200
 
 
 def test_code_is_accepted_as_a_query_parameter_for_img_urls(guarded: TestClient) -> None:
-    assert guarded.get("/v1/health?code=alpha").status_code == 200
+    assert guarded.get("/v1/access?code=alpha").status_code == 200
 
 
 def test_wrong_code_is_invalid_not_missing(guarded: TestClient) -> None:
-    response = guarded.get("/v1/health", headers={ACCESS_HEADER: "charlie"})
+    response = guarded.get("/v1/access", headers={ACCESS_HEADER: "charlie"})
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "ACCESS_CODE_INVALID"
 
 
 def test_repeated_wrong_codes_lock_the_client_out(guarded: TestClient) -> None:
     for _ in range(3):
-        assert guarded.get("/v1/health", headers={ACCESS_HEADER: "nope"}).status_code == 401
-    locked = guarded.get("/v1/health", headers={ACCESS_HEADER: "alpha"})
+        assert guarded.get("/v1/access", headers={ACCESS_HEADER: "nope"}).status_code == 401
+    locked = guarded.get("/v1/access", headers={ACCESS_HEADER: "alpha"})
     assert locked.status_code == 429
     assert locked.json()["error"]["code"] == "ACCESS_LOCKED"
+
+
+def test_browsing_stays_public_without_a_code(guarded: TestClient) -> None:
+    """The site can be looked through freely: status and the tools catalogue."""
+    health = guarded.get("/v1/health")
+    assert health.status_code == 200
+    assert health.json()["access_required"] is True
+    assert guarded.get("/v1/registry").status_code == 200
+
+
+def test_running_anything_needs_the_code(guarded: TestClient) -> None:
+    upload = {"images": ("a.png", b"not a png", "image/png")}
+    for method, path, kwargs in [
+        ("post", "/v1/validate", {"files": upload}),
+        ("post", "/v1/jobs", {"files": upload, "data": {"query": "x"}}),
+        ("post", "/v1/analyze", {"files": upload, "data": {"query": "x"}}),
+        ("post", "/v1/imagery/fetch", {"json": {"items": [], "bbox": [0, 0, 1, 1]}}),
+        ("get", "/v1/traces/" + "0" * 32, {}),
+        ("get", "/v1/jobs/" + "0" * 32, {}),
+    ]:
+        response = getattr(guarded, method)(path, **kwargs)
+        assert response.status_code == 401, (path, response.status_code)
+
+
+def test_a_wrong_code_on_a_public_read_is_not_counted(guarded: TestClient) -> None:
+    for _ in range(5):
+        assert guarded.get("/v1/health", headers={ACCESS_HEADER: "stale"}).status_code == 200
+    assert guarded.get("/v1/access", headers={ACCESS_HEADER: "alpha"}).status_code == 200
 
 
 def test_paths_outside_the_api_prefix_are_not_gated(guarded: TestClient) -> None:
@@ -90,7 +119,7 @@ def test_cors_preflight_passes_without_a_code(guarded: TestClient) -> None:
 
 def test_a_401_still_carries_cors_headers(guarded: TestClient) -> None:
     """Without them the browser hides the status and the gate never shows."""
-    response = guarded.get("/v1/health", headers={"Origin": ORIGIN})
+    response = guarded.get("/v1/access", headers={"Origin": ORIGIN})
     assert response.status_code == 401
     assert "access-control-allow-origin" in response.headers
 

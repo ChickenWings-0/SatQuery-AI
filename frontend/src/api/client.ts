@@ -274,6 +274,9 @@ export const health = (signal?: AbortSignal) => getJson<HealthResponse>('/v1/hea
 
 export const registry = (signal?: AbortSignal) => getJson<RegistryResponse>('/v1/registry', signal)
 
+/** Gated no-op: 200 when the held access code is accepted, 401 otherwise. */
+export const checkAccess = (signal?: AbortSignal) => getJson<{ ok: boolean }>('/v1/access', signal)
+
 export const trace = (traceId: string, signal?: AbortSignal) =>
   getJson<AuditTrace>(`/v1/traces/${traceId}`, signal)
 

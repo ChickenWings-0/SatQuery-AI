@@ -567,10 +567,47 @@
           }
         }
       }
+    },
+    "/v1/access": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Confirm the access code this request carries",
+        "description": "200 when the request's code is accepted (or none is required).\n\nThe route itself does nothing: the access middleware answers 401 before it\nis reached when the code is missing or wrong. The frontend's code dialog\ncalls it to validate a code before running anything with it.",
+        "operationId": "check_access_v1_access_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AccessCheckResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "AccessCheckResponse",
+        "description": "``GET /v1/access`` 200 body: the request's access code was accepted."
+      },
       "AnalyzeResponse": {
         "properties": {
           "trace_id": {
@@ -1657,6 +1694,12 @@
             "title": "Jobs Retained",
             "description": "Jobs the in-memory store still holds, running or finished.",
             "default": 0
+          },
+          "access_required": {
+            "type": "boolean",
+            "title": "Access Required",
+            "description": "True when running anything needs an access code (X-SatQuery-Code). Health and the registry stay public so the site can be browsed without one.",
+            "default": false
           },
           "fast_base_url": {
             "anyOf": [

@@ -1,34 +1,37 @@
 /**
- * Asks for the access code before the app renders, when the API requires one.
+ * The access code, asked for when it is needed — never at the door.
  *
- * Self-configuring: it probes `/v1/health` once. A 200 means the API is open
- * (local dev, the MSW mock, a server without `SATQUERY_ACCESS_CODE`) or the
- * stored code still works, and the app renders straight away. A 401 shows the
- * form. Any other failure — API down, network gone — also renders the app,
- * which has its own offline states; the gate only answers "who are you".
- *
- * A 401 later in the session (code rotated on the server) brings the form
- * back through `onAccessRequired`.
+ * Anyone can look through the whole site: the API keeps health and the tools
+ * catalogue public. Running anything (reading an upload, fetching imagery,
+ * asking a question, opening a run's results) needs the code. The site renders
+ * at once; this component probes `/v1/health` to learn whether the API wants a
+ * code (`access_required`) and whether a faster mirror is up, and owns the
+ * dialog that `requireAccess()` (an action about to run) or a 401 (a held code
+ * that went stale) opens. A code is checked against the gated `GET /v1/access`
+ * before it is kept; the waiting action then continues on its own.
  */
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
-import { onAccessRequired, setAccessCode, clearAccessCode, withAccessHeader } from '@/api/access'
-import { health, SatQueryError, switchToFastBase } from '@/api/client'
+import {
+  clearAccessCode,
+  onAccessPrompt,
+  onAccessRequired,
+  setAccessCode,
+  setAccessRequired,
+  settleAccess,
+  withAccessHeader,
+} from '@/api/access'
+import { checkAccess, health, SatQueryError, switchToFastBase } from '@/api/client'
 import type { HealthResponse } from '@/api/types'
-import { Graticule } from '@/components/ui/Graticule'
-
-type GateState = 'checking' | 'open' | 'locked'
-
-function isAccessDenied(error: unknown): boolean {
-  return error instanceof SatQueryError && error.status === 401
-}
+import { DialogOverlay } from '@/components/ui/dialog'
 
 const FAST_PROBE_MS = 4_000
 
 /**
- * Move traffic to the faster mirror `/v1/health` reported, but only once it
- * has answered a health check itself, with the code, in time. A mirror that
- * is down or still starting leaves everything on the stable origin.
+ * Move traffic to the faster mirror `/v1/health` reported, but only once it has
+ * answered a health check itself, in time. A mirror that is down or still
+ * starting leaves everything on the stable origin.
  */
 async function preferFastBase(report: HealthResponse): Promise<void> {
   const fast = report.fast_base_url?.replace(/\/+$/, '')
@@ -49,42 +52,58 @@ async function preferFastBase(report: HealthResponse): Promise<void> {
 }
 
 export function AccessGate({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<GateState>('checking')
+  const [open, setOpen] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
     health(controller.signal)
       .then(async (report) => {
+        setAccessRequired(report.access_required ?? false)
         await preferFastBase(report)
-        if (!controller.signal.aborted) setState('open')
       })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return
-        setState(isAccessDenied(error) ? 'locked' : 'open')
+      .catch(() => {
+        // The app has its own offline states; there is nothing to gate here.
       })
-    const unsubscribe = onAccessRequired(() => setState('locked'))
+    const offPrompt = onAccessPrompt(() => setOpen(true))
+    const offRequired = onAccessRequired(() => {
+      setAccessRequired(true)
+      setOpen(true)
+    })
     return () => {
       controller.abort()
-      unsubscribe()
+      offPrompt()
+      offRequired()
     }
   }, [])
 
-  if (state === 'open') return <>{children}</>
-  if (state === 'checking') {
-    return <div className="min-h-full bg-bg-main" aria-busy="true" aria-label="Loading" />
+  function close(granted: boolean) {
+    setOpen(false)
+    settleAccess(granted)
   }
-  return <AccessForm onUnlocked={() => setState('open')} />
+
+  return (
+    <>
+      {children}
+      <DialogPrimitive.Root open={open} onOpenChange={(next) => (next ? setOpen(true) : close(false))}>
+        <DialogPrimitive.Portal>
+          <DialogOverlay />
+          <DialogPrimitive.Content
+            data-sq-dialog
+            className="fixed top-1/2 left-1/2 z-50 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line bg-surface-elevated p-6 shadow-[0_24px_64px_-16px_rgb(0_0_0/0.6)] outline-none"
+          >
+            {open ? <AccessForm onDone={close} /> : null}
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+    </>
+  )
 }
 
-function AccessForm({ onUnlocked }: { onUnlocked: () => void }) {
+function AccessForm({ onDone }: { onDone: (granted: boolean) => void }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -94,9 +113,8 @@ function AccessForm({ onUnlocked }: { onUnlocked: () => void }) {
     setMessage(null)
     setAccessCode(trimmed)
     try {
-      const report = await health()
-      await preferFastBase(report)
-      onUnlocked()
+      await checkAccess()
+      onDone(true)
     } catch (error) {
       clearAccessCode()
       setMessage(
@@ -108,48 +126,46 @@ function AccessForm({ onUnlocked }: { onUnlocked: () => void }) {
   }
 
   return (
-    <main className="relative flex min-h-full items-center justify-center overflow-hidden bg-bg-main">
-      <Graticule major />
-      <form
-        onSubmit={(event) => void submit(event)}
-        className="glass relative mx-4 w-full max-w-sm rounded-xl px-6 py-7"
-        aria-labelledby="access-title"
-      >
-        <h1 id="access-title" className="t-page">
-          SatQuery AI
-        </h1>
-        <p className="t-meta mt-2">
-          This demo runs on a private GPU. Enter the access code you were given to continue.
+    <form onSubmit={(event) => void submit(event)} aria-describedby="access-why">
+      <DialogPrimitive.Title className="t-panel text-[17px] text-text-hi">
+        Enter the access code to run this
+      </DialogPrimitive.Title>
+      <DialogPrimitive.Description id="access-why" className="t-meta mt-2 leading-relaxed">
+        Anyone can look around. Running an analysis uses a private GPU, so it needs the code you
+        were given.
+      </DialogPrimitive.Description>
+      <label htmlFor="access-code" className="t-meta mt-5 block text-text-hi">
+        Access code
+      </label>
+      <input
+        ref={inputRef}
+        id="access-code"
+        type="password"
+        autoComplete="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        // Radix focuses the first focusable element; this is it.
+        value={code}
+        onChange={(event) => setCode(event.target.value)}
+        aria-invalid={message ? true : undefined}
+        aria-describedby={message ? 'access-error' : undefined}
+        className="mt-1.5 w-full rounded-md border border-line bg-bg-main px-3 py-2 text-[14px] text-text-hi"
+      />
+      {message ? (
+        <p id="access-error" role="alert" className="t-meta mt-2 text-accent-warm-text">
+          {message}
         </p>
-        <label htmlFor="access-code" className="t-meta mt-5 block text-text-hi">
-          Access code
-        </label>
-        <input
-          ref={inputRef}
-          id="access-code"
-          type="password"
-          autoComplete="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          aria-invalid={message ? true : undefined}
-          aria-describedby={message ? 'access-error' : undefined}
-          className="mt-1.5 w-full rounded-md border border-line bg-bg-main px-3 py-2 text-[14px] text-text-hi"
-        />
-        {message ? (
-          <p id="access-error" role="alert" className="t-meta mt-2 text-accent-warm-text">
-            {message}
-          </p>
-        ) : null}
-        <button
-          type="submit"
-          disabled={busy || !code.trim()}
-          className="btn-primary mt-5 w-full justify-center"
-        >
+      ) : null}
+      <div className="mt-5 flex items-center justify-end gap-2">
+        <DialogPrimitive.Close asChild>
+          <button type="button" className="btn-ghost">
+            Not now
+          </button>
+        </DialogPrimitive.Close>
+        <button type="submit" disabled={busy || !code.trim()} className="btn-primary">
           {busy ? 'Checking…' : 'Continue'}
         </button>
-      </form>
-    </main>
+      </div>
+    </form>
   )
 }

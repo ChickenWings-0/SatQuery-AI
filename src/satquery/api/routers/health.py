@@ -6,7 +6,7 @@ import asyncio
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from satquery.agent.concurrency import DeviceGates
 from satquery.api.dependencies import get_device_gates
@@ -87,6 +87,7 @@ def _models(settings: Settings) -> list[ModelInfo]:
 
 @router.get("/health", response_model=HealthResponse, summary="Service, device and model health")
 async def health(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     jobs: Annotated[JobStore, Depends(get_job_store)],
     gates: Annotated[DeviceGates, Depends(get_device_gates)],
@@ -106,6 +107,7 @@ async def health(
     device = await asyncio.to_thread(_device_info, settings)
     models = await asyncio.to_thread(_models, settings)
     fast_base = await asyncio.to_thread(fast_base_url, settings.fast_path_metrics_url)
+    guard = getattr(request.app.state, "access_guard", None)
     return HealthResponse(
         status=HealthStatus.DEGRADED if gates.degraded else HealthStatus.OK,
         version=settings.version,
@@ -118,4 +120,5 @@ async def health(
         jobs_retained=len(jobs),
         leaked_gpu_permits=gates.leaked_gpu_permits,
         fast_base_url=fast_base,
+        access_required=bool(getattr(guard, "enabled", False)),
     )

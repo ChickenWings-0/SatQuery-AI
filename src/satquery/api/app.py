@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from satquery.agent.concurrency import DeviceGates
 from satquery.api.access import install_access_guard
+from satquery.api.access import router as access_router
 from satquery.api.jobs import get_job_store
 from satquery.api.routers import (
     analyze,
@@ -130,6 +131,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     for module in (health, registry, validate, analyze, jobs, artifacts, traces, imagery):
         app.include_router(module.router, prefix=settings.api_prefix)
+    app.include_router(access_router, prefix=settings.api_prefix)
 
     return app
 

@@ -3,6 +3,7 @@
  * found. Kept apart from `@/state/job`, which is strictly a projection of the
  * server's event stream — mixing the two would make the reducer untestable.
  */
+import { requireAccess } from '@/api/access'
 import { create } from 'zustand'
 
 import { SatQueryError, validate } from '@/api/client'
@@ -142,6 +143,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
 
   selectFiles: async (files) => {
+    // Reading an upload is running something: it needs the access code.
+    if (!(await requireAccess())) return
     // One pre-flight at a time. Dropping a second pair while the first is
     // still validating used to race: whichever response landed last won, so a
     // slow answer about the *old* files could describe the new selection.

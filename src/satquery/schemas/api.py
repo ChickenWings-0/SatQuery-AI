@@ -271,6 +271,14 @@ class ModelInfo(BaseModel):
     adapter: str | None = None
 
 
+class AccessCheckResponse(BaseModel):
+    """``GET /v1/access`` 200 body: the request's access code was accepted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+
+
 class HealthResponse(BaseModel):
     """``GET /v1/health`` 200 body (API_CONTRACT §4.9)."""
 
@@ -288,6 +296,11 @@ class HealthResponse(BaseModel):
     )
     jobs_retained: int = Field(
         default=0, ge=0, description="Jobs the in-memory store still holds, running or finished."
+    )
+    access_required: bool = Field(
+        default=False,
+        description="True when running anything needs an access code (X-SatQuery-Code). "
+        "Health and the registry stay public so the site can be browsed without one.",
     )
     fast_base_url: str | None = Field(
         default=None,
